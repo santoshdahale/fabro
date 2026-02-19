@@ -4,8 +4,8 @@ use crate::provider::StreamEventStream;
 use crate::retry::retry;
 use crate::tools::{execute_all_tools, Tool};
 use crate::types::{
-    FinishReason, GenerateResult, Message, Request, Response, ResponseFormat, RetryPolicy,
-    StepResult, StreamEvent, ToolCall, ToolChoice, ToolDefinition, Usage,
+    FinishReason, GenerateResult, Message, Request, Response, ResponseFormat, ResponseFormatType,
+    RetryPolicy, StepResult, StreamEvent, ToolCall, ToolChoice, ToolDefinition, Usage,
 };
 use std::sync::Arc;
 use tokio::sync::OnceCell;
@@ -47,13 +47,13 @@ fn build_initial_messages(params: &GenerateParams) -> Result<Vec<Message>, SdkEr
 fn build_request(
     params: &GenerateParams,
     messages: &[Message],
-    tool_definitions: Option<&Vec<ToolDefinition>>,
+    tool_definitions: Option<&[ToolDefinition]>,
 ) -> Request {
     Request {
         model: params.model.clone(),
         messages: messages.to_vec(),
         provider: params.provider.clone(),
-        tools: tool_definitions.cloned(),
+        tools: tool_definitions.map(<[ToolDefinition]>::to_vec),
         tool_choice: params.tool_choice.clone(),
         response_format: params.response_format.clone(),
         temperature: params.temperature,
@@ -67,25 +67,14 @@ fn build_request(
 }
 
 fn build_generate_result(steps: Vec<StepResult>, total_usage: Usage) -> GenerateResult {
-    let last_idx = steps.len() - 1;
-    let text = steps[last_idx].text.clone();
-    let reasoning = steps[last_idx].reasoning.clone();
-    let tool_calls = steps[last_idx].tool_calls.clone();
-    let tool_results = steps[last_idx].tool_results.clone();
-    let finish_reason = steps[last_idx].finish_reason.clone();
-    let usage = steps[last_idx].usage.clone();
-    let response = steps[last_idx].response.clone();
-
+    let last = steps.last().expect("steps should not be empty");
+    let response = last.response.clone();
+    let tool_results = last.tool_results.clone();
     GenerateResult {
-        text,
-        reasoning,
-        tool_calls,
+        response,
         tool_results,
-        finish_reason,
-        usage,
         total_usage,
         steps,
-        response,
         output: None,
     }
 }
@@ -124,7 +113,7 @@ pub async fn generate(params: GenerateParams) -> Result<GenerateResult, SdkError
 
     let mut round = 0u32;
     loop {
-        let request = build_request(&params, &messages, tool_definitions.as_ref());
+        let request = build_request(&params, &messages, tool_definitions.as_deref());
 
         let client_ref = client.clone();
         let response = retry(&retry_policy, || {
@@ -149,34 +138,31 @@ pub async fn generate(params: GenerateParams) -> Result<GenerateResult, SdkError
             }
         }
 
-        let step = StepResult {
-            text: response.text(),
-            reasoning: response.reasoning(),
-            tool_calls: tool_calls.clone(),
-            tool_results: tool_results.clone(),
-            finish_reason: response.finish_reason.clone(),
-            usage: response.usage.clone(),
-            response: response.clone(),
-            warnings: response.warnings.clone(),
-        };
-
         total_usage = total_usage + response.usage.clone();
-        steps.push(step);
 
-        if tool_calls.is_empty() || response.finish_reason != FinishReason::ToolCalls {
-            break;
-        }
-        if round >= max_tool_rounds || tool_results.is_empty() {
-            break;
+        let should_continue = !tool_calls.is_empty()
+            && response.finish_reason == FinishReason::ToolCalls
+            && round < max_tool_rounds
+            && !tool_results.is_empty();
+
+        if should_continue {
+            messages.push(response.message.clone());
+            for result in &tool_results {
+                messages.push(Message::tool_result(
+                    &result.tool_call_id,
+                    result.content.to_string(),
+                    result.is_error,
+                ));
+            }
         }
 
-        messages.push(response.message.clone());
-        for result in &tool_results {
-            messages.push(Message::tool_result(
-                &result.tool_call_id,
-                result.content.to_string(),
-                result.is_error,
-            ));
+        steps.push(StepResult {
+            response,
+            tool_results,
+        });
+
+        if !should_continue {
+            break;
         }
 
         round += 1;
@@ -361,7 +347,7 @@ pub async fn stream_generate(params: GenerateParams) -> Result<StreamEventStream
         .as_ref()
         .map(|tools| tools.iter().map(|t| t.definition.clone()).collect());
 
-    let request = build_request(&params, &messages, tool_definitions.as_ref());
+    let request = build_request(&params, &messages, tool_definitions.as_deref());
     client.stream(&request).await
 }
 
@@ -377,7 +363,7 @@ pub async fn generate_object(
 ) -> Result<GenerateResult, SdkError> {
     let params = GenerateParams {
         response_format: Some(ResponseFormat {
-            r#type: "json_schema".to_string(),
+            kind: ResponseFormatType::JsonSchema,
             json_schema: Some(schema),
             strict: true,
         }),
@@ -387,7 +373,7 @@ pub async fn generate_object(
     let mut result = generate(params).await?;
 
     // Try to parse the text as JSON
-    match serde_json::from_str::<serde_json::Value>(&result.text) {
+    match serde_json::from_str::<serde_json::Value>(&result.text()) {
         Ok(parsed) => {
             result.output = Some(parsed);
             Ok(result)
@@ -422,7 +408,6 @@ mod tests {
         }
     }
 
-    #[allow(clippy::unnecessary_literal_bound)]
     #[async_trait::async_trait]
     impl ProviderAdapter for MockProvider {
         fn name(&self) -> &str {
@@ -505,9 +490,9 @@ mod tests {
         .await
         .unwrap();
 
-        assert_eq!(result.text, "Hi there!");
-        assert_eq!(result.finish_reason, FinishReason::Stop);
-        assert_eq!(result.usage.input_tokens, 10);
+        assert_eq!(result.text(), "Hi there!");
+        assert_eq!(*result.finish_reason(), FinishReason::Stop);
+        assert_eq!(result.usage().input_tokens, 10);
         assert_eq!(result.steps.len(), 1);
     }
 
@@ -522,7 +507,7 @@ mod tests {
         .await
         .unwrap();
 
-        assert_eq!(result.text, "Greetings!");
+        assert_eq!(result.text(), "Greetings!");
     }
 
     #[tokio::test]
@@ -539,7 +524,7 @@ mod tests {
         .await
         .unwrap();
 
-        assert_eq!(result.text, "I'm doing well!");
+        assert_eq!(result.text(), "I'm doing well!");
     }
 
     #[tokio::test]
@@ -565,7 +550,6 @@ mod tests {
         call_count: Arc<AtomicU32>,
     }
 
-    #[allow(clippy::unnecessary_literal_bound)]
     #[async_trait::async_trait]
     impl ProviderAdapter for ToolCallMockProvider {
         fn name(&self) -> &str {
@@ -664,7 +648,7 @@ mod tests {
         .await
         .unwrap();
 
-        assert_eq!(result.text, "The weather in SF is 72F");
+        assert_eq!(result.text(), "The weather in SF is 72F");
         assert_eq!(result.steps.len(), 2);
         assert_eq!(result.total_usage.input_tokens, 30);
         assert_eq!(result.total_usage.output_tokens, 15);

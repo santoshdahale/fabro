@@ -14,12 +14,12 @@ pub enum ProviderErrorKind {
 impl std::fmt::Display for ProviderErrorKind {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Authentication => write!(f, "Authentication error"),
-            Self::AccessDenied => write!(f, "Access denied"),
-            Self::NotFound => write!(f, "Not found"),
+            Self::Authentication => write!(f, "Authentication error for"),
+            Self::AccessDenied => write!(f, "Access denied by"),
+            Self::NotFound => write!(f, "Not found on"),
             Self::InvalidRequest => write!(f, "Invalid request to"),
             Self::RateLimit => write!(f, "Rate limited by"),
-            Self::Server => write!(f, "Server error"),
+            Self::Server => write!(f, "Server error from"),
             Self::ContentFilter => write!(f, "Content filtered by"),
             Self::ContextLength => write!(f, "Context length exceeded for"),
             Self::QuotaExceeded => write!(f, "Quota exceeded for"),
@@ -402,7 +402,7 @@ mod tests {
         };
         assert_eq!(
             err.to_string(),
-            "Authentication error openai: invalid api key"
+            "Authentication error for openai: invalid api key"
         );
 
         let err = SdkError::Configuration {

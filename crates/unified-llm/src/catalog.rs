@@ -1,8 +1,9 @@
 use crate::types::ModelInfo;
+use std::sync::LazyLock;
 
 /// Built-in model catalog (Section 2.9).
 /// The catalog is advisory, not restrictive -- unknown model strings pass through.
-fn built_in_models() -> Vec<ModelInfo> {
+static BUILT_IN_MODELS: LazyLock<Vec<ModelInfo>> = LazyLock::new(|| {
     vec![
         // === Anthropic ===
         ModelInfo {
@@ -99,36 +100,36 @@ fn built_in_models() -> Vec<ModelInfo> {
             aliases: vec!["gemini-flash".into()],
         },
     ]
-}
+});
 
 /// Get model info by model ID (Section 2.9).
-#[must_use] 
+#[must_use]
 pub fn get_model_info(model_id: &str) -> Option<ModelInfo> {
-    built_in_models()
-        .into_iter()
-        .find(|m| m.id == model_id || m.aliases.contains(&model_id.to_string()))
+    BUILT_IN_MODELS
+        .iter()
+        .find(|m| m.id == model_id || m.aliases.iter().any(|a| a == model_id))
+        .cloned()
 }
 
 /// List all known models, optionally filtered by provider (Section 2.9).
-#[must_use] 
+#[must_use]
 pub fn list_models(provider: Option<&str>) -> Vec<ModelInfo> {
-    let models = built_in_models();
-    match provider {
-        Some(p) => models.into_iter().filter(|m| m.provider == p).collect(),
-        None => models,
-    }
+    provider.map_or_else(
+        || BUILT_IN_MODELS.clone(),
+        |p| BUILT_IN_MODELS.iter().filter(|m| m.provider == p).cloned().collect(),
+    )
 }
 
 /// Get the latest/best model for a provider, optionally filtered by capability (Section 2.9).
-#[must_use] 
+#[must_use]
 pub fn get_latest_model(provider: &str, capability: Option<&str>) -> Option<ModelInfo> {
-    let models = list_models(Some(provider));
+    let mut models = BUILT_IN_MODELS.iter().filter(|m| m.provider == provider);
 
     match capability {
-        Some("reasoning") => models.into_iter().find(|m| m.supports_reasoning),
-        Some("vision") => models.into_iter().find(|m| m.supports_vision),
-        Some("tools") => models.into_iter().find(|m| m.supports_tools),
-        _ => models.into_iter().next(),
+        Some("reasoning") => models.find(|m| m.supports_reasoning).cloned(),
+        Some("vision") => models.find(|m| m.supports_vision).cloned(),
+        Some("tools") => models.find(|m| m.supports_tools).cloned(),
+        _ => models.next().cloned(),
     }
 }
 

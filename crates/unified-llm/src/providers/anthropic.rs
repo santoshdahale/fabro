@@ -1,17 +1,17 @@
-use crate::error::{error_from_status_code, SdkError};
+use crate::error::SdkError;
 use crate::provider::{ProviderAdapter, StreamEventStream};
+use crate::providers::common::{extract_system_prompt, send_and_read_body, ApiMessage};
 use crate::types::{
     ContentPart, FinishReason, Message, Request, Response, Role, ToolCall, Usage,
 };
 
 /// Provider adapter for the Anthropic Messages API.
-#[allow(clippy::module_name_repetitions)]
-pub struct AnthropicAdapter {
+pub struct Adapter {
     api_key: String,
     client: reqwest::Client,
 }
 
-impl AnthropicAdapter {
+impl Adapter {
     #[must_use]
     pub fn new(api_key: impl Into<String>) -> Self {
         Self {
@@ -22,12 +22,6 @@ impl AnthropicAdapter {
 }
 
 // --- Request types ---
-
-#[derive(serde::Serialize)]
-struct ApiMessage {
-    role: String,
-    content: String,
-}
 
 #[derive(serde::Serialize)]
 struct ApiRequest {
@@ -73,7 +67,7 @@ fn map_finish_reason(stop_reason: Option<&str>) -> FinishReason {
 fn parse_content_block(block: &serde_json::Value) -> Option<ContentPart> {
     match block.get("type")?.as_str()? {
         "text" => Some(ContentPart::text(block.get("text")?.as_str()?)),
-        "tool_use" => Some(ContentPart::tool_call(ToolCall::new(
+        "tool_use" => Some(ContentPart::ToolCall(ToolCall::new(
             block.get("id")?.as_str()?,
             block.get("name")?.as_str()?,
             block.get("input")?.clone(),
@@ -82,58 +76,29 @@ fn parse_content_block(block: &serde_json::Value) -> Option<ContentPart> {
     }
 }
 
-fn parse_error_body(body: &str) -> (String, Option<String>, Option<serde_json::Value>) {
-    serde_json::from_str::<serde_json::Value>(body).map_or_else(
-        |_| (body.to_string(), None, None),
-        |v| {
-            let message = v
-                .get("error")
-                .and_then(|e| e.get("message"))
-                .and_then(serde_json::Value::as_str)
-                .unwrap_or("Unknown error")
-                .to_string();
-            let error_code = v
-                .get("error")
-                .and_then(|e| e.get("type"))
-                .and_then(serde_json::Value::as_str)
-                .map(String::from);
-            (message, error_code, Some(v))
-        },
-    )
-}
-
 #[allow(clippy::unnecessary_literal_bound)]
 #[async_trait::async_trait]
-impl ProviderAdapter for AnthropicAdapter {
+impl ProviderAdapter for Adapter {
     fn name(&self) -> &str {
         "anthropic"
     }
 
     async fn complete(&self, request: &Request) -> Result<Response, SdkError> {
-        let mut system_parts = Vec::new();
-        let mut api_messages = Vec::new();
+        let (system, other_messages) = extract_system_prompt(&request.messages);
 
-        for msg in &request.messages {
-            if msg.role == Role::System {
-                system_parts.push(msg.text());
-            } else {
-                let role = if msg.role == Role::Assistant {
-                    "assistant"
-                } else {
-                    "user"
+        let api_messages: Vec<ApiMessage> = other_messages
+            .iter()
+            .map(|msg| {
+                let role = match msg.role {
+                    Role::Assistant => "assistant",
+                    Role::System | Role::User | Role::Tool | Role::Developer => "user",
                 };
-                api_messages.push(ApiMessage {
+                ApiMessage {
                     role: role.to_string(),
                     content: msg.text(),
-                });
-            }
-        }
-
-        let system = if system_parts.is_empty() {
-            None
-        } else {
-            Some(system_parts.join("\n"))
-        };
+                }
+            })
+            .collect();
 
         let api_request = ApiRequest {
             model: request.model.clone(),
@@ -145,37 +110,16 @@ impl ProviderAdapter for AnthropicAdapter {
             stop_sequences: request.stop_sequences.clone(),
         };
 
-        let http_resp = self
-            .client
-            .post("https://api.anthropic.com/v1/messages")
-            .header("x-api-key", &self.api_key)
-            .header("anthropic-version", "2023-06-01")
-            .json(&api_request)
-            .send()
-            .await
-            .map_err(|e| SdkError::Network {
-                message: e.to_string(),
-            })?;
-
-        let status = http_resp.status();
-        let body = http_resp
-            .text()
-            .await
-            .map_err(|e| SdkError::Network {
-                message: e.to_string(),
-            })?;
-
-        if !status.is_success() {
-            let (msg, code, raw) = parse_error_body(&body);
-            return Err(error_from_status_code(
-                status.as_u16(),
-                msg,
-                "anthropic".to_string(),
-                code,
-                raw,
-                None,
-            ));
-        }
+        let body = send_and_read_body(
+            self.client
+                .post("https://api.anthropic.com/v1/messages")
+                .header("x-api-key", &self.api_key)
+                .header("anthropic-version", "2023-06-01")
+                .json(&api_request),
+            "anthropic",
+            "type",
+        )
+        .await?;
 
         let api_resp: ApiResponse =
             serde_json::from_str(&body).map_err(|e| SdkError::Network {

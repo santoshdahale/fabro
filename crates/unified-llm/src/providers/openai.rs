@@ -1,18 +1,18 @@
-use crate::error::{error_from_status_code, SdkError};
+use crate::error::SdkError;
 use crate::provider::{ProviderAdapter, StreamEventStream};
 use crate::error::{ProviderErrorDetail, ProviderErrorKind};
+use crate::providers::common::{send_and_read_body, ApiMessage};
 use crate::types::{
     ContentPart, FinishReason, Message, Request, Response, Role, ToolCall, Usage,
 };
 
 /// Provider adapter for the `OpenAI` Chat Completions API.
-#[allow(clippy::module_name_repetitions)]
-pub struct OpenAiAdapter {
+pub struct Adapter {
     api_key: String,
     client: reqwest::Client,
 }
 
-impl OpenAiAdapter {
+impl Adapter {
     #[must_use]
     pub fn new(api_key: impl Into<String>) -> Self {
         Self {
@@ -23,12 +23,6 @@ impl OpenAiAdapter {
 }
 
 // --- Request types ---
-
-#[derive(serde::Serialize)]
-struct ApiMessage {
-    role: String,
-    content: String,
-}
 
 #[derive(serde::Serialize)]
 struct ApiRequest {
@@ -96,29 +90,9 @@ fn map_finish_reason(reason: Option<&str>) -> FinishReason {
     }
 }
 
-fn parse_error_body(body: &str) -> (String, Option<String>, Option<serde_json::Value>) {
-    serde_json::from_str::<serde_json::Value>(body).map_or_else(
-        |_| (body.to_string(), None, None),
-        |v| {
-            let message = v
-                .get("error")
-                .and_then(|e| e.get("message"))
-                .and_then(serde_json::Value::as_str)
-                .unwrap_or("Unknown error")
-                .to_string();
-            let error_code = v
-                .get("error")
-                .and_then(|e| e.get("type"))
-                .and_then(serde_json::Value::as_str)
-                .map(String::from);
-            (message, error_code, Some(v))
-        },
-    )
-}
-
-#[allow(clippy::too_many_lines, clippy::unnecessary_literal_bound)]
+#[allow(clippy::unnecessary_literal_bound)]
 #[async_trait::async_trait]
-impl ProviderAdapter for OpenAiAdapter {
+impl ProviderAdapter for Adapter {
     fn name(&self) -> &str {
         "openai"
     }
@@ -149,36 +123,15 @@ impl ProviderAdapter for OpenAiAdapter {
             stop: request.stop_sequences.clone(),
         };
 
-        let http_resp = self
-            .client
-            .post("https://api.openai.com/v1/chat/completions")
-            .bearer_auth(&self.api_key)
-            .json(&api_request)
-            .send()
-            .await
-            .map_err(|e| SdkError::Network {
-                message: e.to_string(),
-            })?;
-
-        let status = http_resp.status();
-        let body = http_resp
-            .text()
-            .await
-            .map_err(|e| SdkError::Network {
-                message: e.to_string(),
-            })?;
-
-        if !status.is_success() {
-            let (msg, code, raw) = parse_error_body(&body);
-            return Err(error_from_status_code(
-                status.as_u16(),
-                msg,
-                "openai".to_string(),
-                code,
-                raw,
-                None,
-            ));
-        }
+        let body = send_and_read_body(
+            self.client
+                .post("https://api.openai.com/v1/chat/completions")
+                .bearer_auth(&self.api_key)
+                .json(&api_request),
+            "openai",
+            "type",
+        )
+        .await?;
 
         let api_resp: ApiResponse =
             serde_json::from_str(&body).map_err(|e| SdkError::Network {
@@ -200,7 +153,7 @@ impl ProviderAdapter for OpenAiAdapter {
             for tc in tool_calls {
                 let arguments = serde_json::from_str(&tc.function.arguments)
                     .unwrap_or_else(|_| serde_json::json!({}));
-                content_parts.push(ContentPart::tool_call(ToolCall::new(
+                content_parts.push(ContentPart::ToolCall(ToolCall::new(
                     &tc.id,
                     &tc.function.name,
                     arguments,

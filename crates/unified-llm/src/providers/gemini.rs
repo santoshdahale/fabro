@@ -1,18 +1,18 @@
-use crate::error::{error_from_status_code, SdkError};
+use crate::error::SdkError;
 use crate::provider::{ProviderAdapter, StreamEventStream};
 use crate::error::{ProviderErrorDetail, ProviderErrorKind};
+use crate::providers::common::{extract_system_prompt, send_and_read_body};
 use crate::types::{
     ContentPart, FinishReason, Message, Request, Response, Role, ToolCall, Usage,
 };
 
 /// Provider adapter for the Google Gemini `generateContent` API.
-#[allow(clippy::module_name_repetitions)]
-pub struct GeminiAdapter {
+pub struct Adapter {
     api_key: String,
     client: reqwest::Client,
 }
 
-impl GeminiAdapter {
+impl Adapter {
     #[must_use]
     pub fn new(api_key: impl Into<String>) -> Self {
         Self {
@@ -112,7 +112,7 @@ fn parse_part(part: &serde_json::Value) -> Option<ContentPart> {
             .get("args")
             .cloned()
             .unwrap_or_else(|| serde_json::Value::Object(serde_json::Map::new()));
-        return Some(ContentPart::tool_call(ToolCall::new(
+        return Some(ContentPart::ToolCall(ToolCall::new(
             uuid::Uuid::new_v4().to_string(),
             name,
             args,
@@ -121,64 +121,35 @@ fn parse_part(part: &serde_json::Value) -> Option<ContentPart> {
     None
 }
 
-fn parse_error_body(body: &str) -> (String, Option<String>, Option<serde_json::Value>) {
-    serde_json::from_str::<serde_json::Value>(body).map_or_else(
-        |_| (body.to_string(), None, None),
-        |v| {
-            let message = v
-                .get("error")
-                .and_then(|e| e.get("message"))
-                .and_then(serde_json::Value::as_str)
-                .unwrap_or("Unknown error")
-                .to_string();
-            let error_code = v
-                .get("error")
-                .and_then(|e| e.get("status"))
-                .and_then(serde_json::Value::as_str)
-                .map(String::from);
-            (message, error_code, Some(v))
-        },
-    )
-}
-
-#[allow(clippy::too_many_lines, clippy::unnecessary_literal_bound)]
+#[allow(clippy::unnecessary_literal_bound)]
 #[async_trait::async_trait]
-impl ProviderAdapter for GeminiAdapter {
+impl ProviderAdapter for Adapter {
     fn name(&self) -> &str {
         "gemini"
     }
 
     async fn complete(&self, request: &Request) -> Result<Response, SdkError> {
-        let mut system_parts = Vec::new();
-        let mut contents = Vec::new();
+        let (system_text, other_messages) = extract_system_prompt(&request.messages);
 
-        for msg in &request.messages {
-            if msg.role == Role::System {
-                system_parts.push(Part {
-                    text: msg.text(),
-                });
-            } else {
-                let role = if msg.role == Role::Assistant {
-                    "model"
-                } else {
-                    "user"
+        let system_instruction = system_text.map(|text| SystemInstruction {
+            parts: vec![Part { text }],
+        });
+
+        let contents: Vec<Content> = other_messages
+            .iter()
+            .map(|msg| {
+                let role = match msg.role {
+                    Role::Assistant => "model",
+                    Role::System | Role::User | Role::Tool | Role::Developer => "user",
                 };
-                contents.push(Content {
+                Content {
                     role: role.to_string(),
                     parts: vec![Part {
                         text: msg.text(),
                     }],
-                });
-            }
-        }
-
-        let system_instruction = if system_parts.is_empty() {
-            None
-        } else {
-            Some(SystemInstruction {
-                parts: system_parts,
+                }
             })
-        };
+            .collect();
 
         let generation_config = GenerationConfig {
             temperature: request.temperature,
@@ -198,35 +169,12 @@ impl ProviderAdapter for GeminiAdapter {
             request.model, self.api_key
         );
 
-        let http_resp = self
-            .client
-            .post(&url)
-            .json(&api_request)
-            .send()
-            .await
-            .map_err(|e| SdkError::Network {
-                message: e.to_string(),
-            })?;
-
-        let status = http_resp.status();
-        let body = http_resp
-            .text()
-            .await
-            .map_err(|e| SdkError::Network {
-                message: e.to_string(),
-            })?;
-
-        if !status.is_success() {
-            let (msg, code, raw) = parse_error_body(&body);
-            return Err(error_from_status_code(
-                status.as_u16(),
-                msg,
-                "gemini".to_string(),
-                code,
-                raw,
-                None,
-            ));
-        }
+        let body = send_and_read_body(
+            self.client.post(&url).json(&api_request),
+            "gemini",
+            "status",
+        )
+        .await?;
 
         let api_resp: ApiResponse =
             serde_json::from_str(&body).map_err(|e| SdkError::Network {

@@ -47,17 +47,11 @@ pub struct ThinkingData {
 
 // --- 5.4 ToolCall / ToolResult ---
 
-fn default_tool_type() -> String {
-    "function".to_string()
-}
-
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ToolCall {
     pub id: String,
     pub name: String,
     pub arguments: serde_json::Value,
-    #[serde(default = "default_tool_type")]
-    pub r#type: String,
     pub raw_arguments: Option<String>,
 }
 
@@ -71,7 +65,6 @@ impl ToolCall {
             id: id.into(),
             name: name.into(),
             arguments,
-            r#type: "function".to_string(),
             raw_arguments: None,
         }
     }
@@ -104,25 +97,6 @@ impl ContentPart {
         Self::Text(text.into())
     }
 
-    #[must_use]
-    pub const fn image(image: ImageData) -> Self {
-        Self::Image(image)
-    }
-
-    #[must_use]
-    pub const fn tool_call(tool_call: ToolCall) -> Self {
-        Self::ToolCall(tool_call)
-    }
-
-    #[must_use]
-    pub const fn tool_result(tool_result: ToolResult) -> Self {
-        Self::ToolResult(tool_result)
-    }
-
-    #[must_use]
-    pub const fn thinking(thinking: ThinkingData) -> Self {
-        Self::Thinking(thinking)
-    }
 }
 
 // --- 3.1 Message ---
@@ -190,8 +164,7 @@ impl Message {
                 ContentPart::Text(text) => Some(text.as_str()),
                 _ => None,
             })
-            .collect::<Vec<_>>()
-            .join("")
+            .collect()
     }
 }
 
@@ -282,8 +255,17 @@ impl std::ops::Add for Usage {
 // --- 3.10 ResponseFormat ---
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ResponseFormatType {
+    Text,
+    JsonObject,
+    JsonSchema,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ResponseFormat {
-    pub r#type: String,
+    #[serde(rename = "type")]
+    pub kind: ResponseFormatType,
     pub json_schema: Option<serde_json::Value>,
     #[serde(default)]
     pub strict: bool,
@@ -390,7 +372,7 @@ impl Response {
 
     #[must_use]
     pub fn reasoning(&self) -> Option<String> {
-        let texts: Vec<&str> = self
+        let reasoning: String = self
             .message
             .content
             .iter()
@@ -400,10 +382,10 @@ impl Response {
             })
             .collect();
 
-        if texts.is_empty() {
+        if reasoning.is_empty() {
             None
         } else {
-            Some(texts.join(""))
+            Some(reasoning)
         }
     }
 }
@@ -562,28 +544,76 @@ impl RetryPolicy {
 
 #[derive(Debug, Clone)]
 pub struct GenerateResult {
-    pub text: String,
-    pub reasoning: Option<String>,
-    pub tool_calls: Vec<ToolCall>,
+    pub response: Response,
     pub tool_results: Vec<ToolResult>,
-    pub finish_reason: FinishReason,
-    pub usage: Usage,
     pub total_usage: Usage,
     pub steps: Vec<StepResult>,
-    pub response: Response,
     pub output: Option<serde_json::Value>,
+}
+
+impl GenerateResult {
+    #[must_use]
+    pub fn text(&self) -> String {
+        self.response.text()
+    }
+
+    #[must_use]
+    pub fn reasoning(&self) -> Option<String> {
+        self.response.reasoning()
+    }
+
+    #[must_use]
+    pub fn tool_calls(&self) -> Vec<ToolCall> {
+        self.response.tool_calls()
+    }
+
+    #[must_use]
+    pub const fn finish_reason(&self) -> &FinishReason {
+        &self.response.finish_reason
+    }
+
+    #[must_use]
+    pub const fn usage(&self) -> &Usage {
+        &self.response.usage
+    }
 }
 
 #[derive(Debug, Clone)]
 pub struct StepResult {
-    pub text: String,
-    pub reasoning: Option<String>,
-    pub tool_calls: Vec<ToolCall>,
-    pub tool_results: Vec<ToolResult>,
-    pub finish_reason: FinishReason,
-    pub usage: Usage,
     pub response: Response,
-    pub warnings: Vec<Warning>,
+    pub tool_results: Vec<ToolResult>,
+}
+
+impl StepResult {
+    #[must_use]
+    pub fn text(&self) -> String {
+        self.response.text()
+    }
+
+    #[must_use]
+    pub fn reasoning(&self) -> Option<String> {
+        self.response.reasoning()
+    }
+
+    #[must_use]
+    pub fn tool_calls(&self) -> Vec<ToolCall> {
+        self.response.tool_calls()
+    }
+
+    #[must_use]
+    pub const fn finish_reason(&self) -> &FinishReason {
+        &self.response.finish_reason
+    }
+
+    #[must_use]
+    pub const fn usage(&self) -> &Usage {
+        &self.response.usage
+    }
+
+    #[must_use]
+    pub fn warnings(&self) -> &[Warning] {
+        &self.response.warnings
+    }
 }
 
 #[cfg(test)]
@@ -925,7 +955,7 @@ mod tests {
 
     #[test]
     fn content_part_image_constructor() {
-        let part = ContentPart::image(ImageData {
+        let part = ContentPart::Image(ImageData {
             url: Some("https://example.com/img.png".into()),
             data: None,
             media_type: None,
@@ -935,10 +965,11 @@ mod tests {
     }
 
     #[test]
-    fn tool_call_default_type() {
-        let tc: ToolCall =
-            serde_json::from_str(r#"{"id":"c1","name":"test","arguments":{}}"#).unwrap();
-        assert_eq!(tc.r#type, "function");
+    fn tool_call_serde_roundtrip() {
+        let tc = ToolCall::new("c1", "test", serde_json::json!({}));
+        let json = serde_json::to_string(&tc).unwrap();
+        let deserialized: ToolCall = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized, tc);
     }
 
     #[test]
@@ -946,7 +977,6 @@ mod tests {
         let tc = ToolCall::new("c1", "test", serde_json::json!({}));
         assert_eq!(tc.id, "c1");
         assert_eq!(tc.name, "test");
-        assert_eq!(tc.r#type, "function");
         assert_eq!(tc.raw_arguments, None);
     }
 }

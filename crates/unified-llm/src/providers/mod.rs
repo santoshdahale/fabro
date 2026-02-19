@@ -1,7 +1,8 @@
 pub mod anthropic;
+pub mod common;
 pub mod gemini;
 pub mod openai;
 
-pub use anthropic::AnthropicAdapter;
-pub use gemini::GeminiAdapter;
-pub use openai::OpenAiAdapter;
+pub use anthropic::Adapter as AnthropicAdapter;
+pub use gemini::Adapter as GeminiAdapter;
+pub use openai::Adapter as OpenAiAdapter;
