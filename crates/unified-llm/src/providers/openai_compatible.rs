@@ -1,0 +1,1114 @@
+use futures::StreamExt;
+
+use crate::error::{error_from_status_code, ProviderErrorDetail, ProviderErrorKind, SdkError};
+use crate::provider::{ProviderAdapter, StreamEventStream};
+use crate::providers::common::{
+    parse_error_body, parse_rate_limit_headers, parse_retry_after, send_and_read_response,
+};
+use crate::types::{
+    ContentPart, FinishReason, Message, Request, Response, ResponseFormat, ResponseFormatType,
+    Role, StreamEvent, ToolCall, ToolChoice, ToolDefinition, Usage,
+};
+
+/// `OpenAI`-compatible Chat Completions adapter (Section 7.10).
+///
+/// Use this for third-party services (vLLM, Ollama, Together AI, Groq, etc.)
+/// that implement the `OpenAI` Chat Completions API (`/v1/chat/completions`).
+///
+/// Does NOT support reasoning tokens, built-in tools, or other Responses API
+/// features. Use the primary `OpenAiAdapter` for `OpenAI`'s own API.
+pub struct Adapter {
+    api_key: String,
+    base_url: String,
+    provider_name: String,
+    client: reqwest::Client,
+    request_timeout: std::time::Duration,
+}
+
+impl Adapter {
+    #[must_use]
+    pub fn new(api_key: impl Into<String>, base_url: impl Into<String>) -> Self {
+        let timeout = crate::types::AdapterTimeout::default();
+        let client = reqwest::Client::builder()
+            .connect_timeout(std::time::Duration::from_secs_f64(timeout.connect))
+            .build()
+            .unwrap_or_default();
+        Self {
+            api_key: api_key.into(),
+            base_url: base_url.into(),
+            provider_name: "openai-compatible".to_string(),
+            client,
+            request_timeout: std::time::Duration::from_secs_f64(timeout.request),
+        }
+    }
+
+    #[must_use]
+    pub fn with_name(mut self, name: impl Into<String>) -> Self {
+        self.provider_name = name.into();
+        self
+    }
+}
+
+// --- Request types (Chat Completions format) ---
+
+#[derive(serde::Serialize)]
+struct ApiRequest {
+    model: String,
+    messages: Vec<ChatMessage>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    temperature: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    max_tokens: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    top_p: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    stop: Option<Vec<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    tools: Option<Vec<serde_json::Value>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    tool_choice: Option<serde_json::Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    response_format: Option<serde_json::Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    stream: Option<bool>,
+}
+
+#[derive(serde::Serialize)]
+struct ChatMessage {
+    role: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    content: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    tool_call_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    tool_calls: Option<Vec<ChatToolCall>>,
+}
+
+#[derive(serde::Serialize)]
+struct ChatToolCall {
+    id: String,
+    #[serde(rename = "type")]
+    kind: String,
+    function: ChatFunction,
+}
+
+#[derive(serde::Serialize)]
+struct ChatFunction {
+    name: String,
+    arguments: String,
+}
+
+// --- Response types (non-streaming) ---
+
+#[derive(serde::Deserialize)]
+struct ApiResponse {
+    id: String,
+    model: String,
+    choices: Vec<ApiChoice>,
+    usage: Option<ApiUsage>,
+}
+
+#[derive(serde::Deserialize)]
+struct ApiChoice {
+    message: ApiChoiceMessage,
+    finish_reason: Option<String>,
+}
+
+#[derive(serde::Deserialize)]
+struct ApiChoiceMessage {
+    content: Option<String>,
+    tool_calls: Option<Vec<ApiToolCall>>,
+}
+
+#[derive(serde::Deserialize)]
+struct ApiToolCall {
+    id: String,
+    function: ApiFunction,
+}
+
+#[derive(serde::Deserialize)]
+struct ApiFunction {
+    name: String,
+    arguments: String,
+}
+
+#[derive(serde::Deserialize)]
+#[allow(clippy::struct_field_names)]
+struct ApiUsage {
+    prompt_tokens: i64,
+    completion_tokens: i64,
+    total_tokens: i64,
+}
+
+// --- Streaming response types ---
+
+#[derive(serde::Deserialize)]
+struct StreamChunk {
+    id: Option<String>,
+    model: Option<String>,
+    choices: Option<Vec<StreamChoice>>,
+    usage: Option<ApiUsage>,
+}
+
+#[derive(serde::Deserialize)]
+struct StreamChoice {
+    delta: Option<StreamDelta>,
+    finish_reason: Option<String>,
+}
+
+#[derive(serde::Deserialize)]
+struct StreamDelta {
+    content: Option<String>,
+    tool_calls: Option<Vec<StreamToolCall>>,
+}
+
+#[derive(serde::Deserialize)]
+struct StreamToolCall {
+    index: usize,
+    id: Option<String>,
+    function: Option<StreamFunction>,
+}
+
+#[derive(serde::Deserialize)]
+struct StreamFunction {
+    name: Option<String>,
+    arguments: Option<String>,
+}
+
+// --- Accumulated tool call state for streaming ---
+
+struct AccumulatedToolCall {
+    id: String,
+    name: String,
+    arguments: String,
+    started: bool,
+}
+
+fn map_finish_reason(reason: Option<&str>) -> FinishReason {
+    match reason {
+        Some("stop") | None => FinishReason::Stop,
+        Some("length") => FinishReason::Length,
+        Some("tool_calls") => FinishReason::ToolCalls,
+        Some("content_filter") => FinishReason::ContentFilter,
+        Some(other) => FinishReason::Other(other.to_string()),
+    }
+}
+
+fn translate_messages(messages: &[Message]) -> Vec<ChatMessage> {
+    messages
+        .iter()
+        .map(|msg| {
+            let role = match msg.role {
+                Role::System | Role::Developer => "system",
+                Role::User => "user",
+                Role::Assistant => "assistant",
+                Role::Tool => "tool",
+            };
+
+            let mut tool_calls: Vec<ChatToolCall> = Vec::new();
+            if msg.role == Role::Assistant {
+                for part in &msg.content {
+                    if let ContentPart::ToolCall(tc) = part {
+                        let arguments = tc
+                            .raw_arguments
+                            .clone()
+                            .unwrap_or_else(|| tc.arguments.to_string());
+                        tool_calls.push(ChatToolCall {
+                            id: tc.id.clone(),
+                            kind: "function".to_string(),
+                            function: ChatFunction {
+                                name: tc.name.clone(),
+                                arguments,
+                            },
+                        });
+                    }
+                }
+            }
+
+            let text = msg.text();
+            let content = if text.is_empty() { None } else { Some(text) };
+            let tool_calls = if tool_calls.is_empty() {
+                None
+            } else {
+                Some(tool_calls)
+            };
+
+            ChatMessage {
+                role: role.to_string(),
+                content,
+                tool_call_id: msg.tool_call_id.clone(),
+                tool_calls,
+            }
+        })
+        .collect()
+}
+
+fn translate_tools(tools: &[ToolDefinition]) -> Vec<serde_json::Value> {
+    tools
+        .iter()
+        .map(|t| {
+            serde_json::json!({
+                "type": "function",
+                "function": {
+                    "name": t.name,
+                    "description": t.description,
+                    "parameters": t.parameters,
+                }
+            })
+        })
+        .collect()
+}
+
+fn translate_tool_choice(choice: &ToolChoice) -> serde_json::Value {
+    match choice {
+        ToolChoice::Auto => serde_json::json!("auto"),
+        ToolChoice::None => serde_json::json!("none"),
+        ToolChoice::Required => serde_json::json!("required"),
+        ToolChoice::Named { tool_name } => {
+            serde_json::json!({"type": "function", "function": {"name": tool_name}})
+        }
+    }
+}
+
+/// Translate unified `ResponseFormat` to Chat Completions `response_format`.
+fn translate_response_format(format: &ResponseFormat) -> serde_json::Value {
+    match format.kind {
+        ResponseFormatType::Text => serde_json::json!({"type": "text"}),
+        ResponseFormatType::JsonObject => serde_json::json!({"type": "json_object"}),
+        ResponseFormatType::JsonSchema => {
+            let mut json_schema = serde_json::json!({
+                "name": "response",
+                "strict": format.strict,
+            });
+            if let Some(schema) = &format.json_schema {
+                json_schema["schema"] = schema.clone();
+            }
+            serde_json::json!({
+                "type": "json_schema",
+                "json_schema": json_schema,
+            })
+        }
+    }
+}
+
+/// Build an `ApiRequest` from a unified `Request`.
+fn build_api_request(request: &Request, stream: Option<bool>) -> ApiRequest {
+    let chat_messages = translate_messages(&request.messages);
+    let tools = request.tools.as_ref().map(|t| translate_tools(t));
+    let tool_choice = request.tool_choice.as_ref().map(translate_tool_choice);
+    let response_format = request
+        .response_format
+        .as_ref()
+        .map(translate_response_format);
+
+    ApiRequest {
+        model: request.model.clone(),
+        messages: chat_messages,
+        temperature: request.temperature,
+        max_tokens: request.max_tokens,
+        top_p: request.top_p,
+        stop: request.stop_sequences.clone(),
+        tools,
+        tool_choice,
+        response_format,
+        stream,
+    }
+}
+
+#[allow(clippy::unnecessary_literal_bound)]
+#[async_trait::async_trait]
+impl ProviderAdapter for Adapter {
+    fn name(&self) -> &str {
+        &self.provider_name
+    }
+
+    async fn complete(&self, request: &Request) -> Result<Response, SdkError> {
+        let api_request = build_api_request(request, None);
+        let url = format!("{}/chat/completions", self.base_url);
+
+        let (body, headers) = send_and_read_response(
+            self.client
+                .post(&url)
+                .bearer_auth(&self.api_key)
+                .json(&api_request)
+                .timeout(self.request_timeout),
+            &self.provider_name,
+            "type",
+        )
+        .await?;
+
+        let api_resp: ApiResponse =
+            serde_json::from_str(&body).map_err(|e| SdkError::Network {
+                message: format!("failed to parse response: {e}"),
+            })?;
+
+        let choice = api_resp.choices.first().ok_or_else(|| SdkError::Provider {
+            kind: ProviderErrorKind::Server,
+            detail: Box::new(ProviderErrorDetail::new(
+                "no choices in response",
+                &self.provider_name,
+            )),
+        })?;
+
+        let mut content_parts = Vec::new();
+        if let Some(text) = &choice.message.content {
+            if !text.is_empty() {
+                content_parts.push(ContentPart::text(text));
+            }
+        }
+        if let Some(tool_calls) = &choice.message.tool_calls {
+            for tc in tool_calls {
+                let arguments = serde_json::from_str(&tc.function.arguments)
+                    .unwrap_or_else(|_| serde_json::json!({}));
+                let mut tool_call = ToolCall::new(&tc.id, &tc.function.name, arguments);
+                tool_call.raw_arguments = Some(tc.function.arguments.clone());
+                content_parts.push(ContentPart::ToolCall(tool_call));
+            }
+        }
+
+        let finish_reason = map_finish_reason(choice.finish_reason.as_deref());
+
+        let usage = api_resp
+            .usage
+            .as_ref()
+            .map_or_else(Usage::default, |u| Usage {
+                input_tokens: u.prompt_tokens,
+                output_tokens: u.completion_tokens,
+                total_tokens: u.total_tokens,
+                ..Usage::default()
+            });
+
+        Ok(Response {
+            id: api_resp.id,
+            model: api_resp.model,
+            provider: self.provider_name.clone(),
+            message: Message {
+                role: Role::Assistant,
+                content: content_parts,
+                name: None,
+                tool_call_id: None,
+            },
+            finish_reason,
+            usage,
+            raw: serde_json::from_str(&body).ok(),
+            warnings: vec![],
+            rate_limit: parse_rate_limit_headers(&headers),
+        })
+    }
+
+    async fn stream(&self, request: &Request) -> Result<StreamEventStream, SdkError> {
+        let api_request = build_api_request(request, Some(true));
+        let url = format!("{}/chat/completions", self.base_url);
+
+        let http_resp = self
+            .client
+            .post(&url)
+            .bearer_auth(&self.api_key)
+            .json(&api_request)
+            .send()
+            .await
+            .map_err(|e| SdkError::Network {
+                message: e.to_string(),
+            })?;
+
+        let status = http_resp.status();
+        if !status.is_success() {
+            let retry_after = parse_retry_after(http_resp.headers());
+            let body = http_resp
+                .text()
+                .await
+                .map_err(|e| SdkError::Network {
+                    message: e.to_string(),
+                })?;
+            let (msg, code, raw) = parse_error_body(&body, "type");
+            return Err(error_from_status_code(
+                status.as_u16(),
+                msg,
+                self.provider_name.clone(),
+                code,
+                raw,
+                retry_after,
+            ));
+        }
+
+        let provider_name = self.provider_name.clone();
+        let model = request.model.clone();
+        let rate_limit = parse_rate_limit_headers(http_resp.headers());
+
+        let stream = futures::stream::unfold(
+            StreamState::new(http_resp, provider_name, model, rate_limit),
+            |mut state| async move {
+                loop {
+                    let line = match state.next_line().await {
+                        Ok(Some(line)) => line,
+                        Ok(None) => return None,
+                        Err(e) => return Some((Err(e), state)),
+                    };
+
+                    let line = line.trim();
+                    if line.is_empty() || line.starts_with(':') {
+                        continue;
+                    }
+
+                    let data = match line.strip_prefix("data:") {
+                        Some(d) => d.trim(),
+                        None => continue,
+                    };
+
+                    if data == "[DONE]" {
+                        let events = state.finish_events();
+                        return Some((Ok(events), state));
+                    }
+
+                    let chunk: StreamChunk = match serde_json::from_str(data) {
+                        Ok(c) => c,
+                        Err(e) => {
+                            return Some((
+                                Err(SdkError::Stream {
+                                    message: format!("failed to parse SSE chunk: {e}"),
+                                }),
+                                state,
+                            ));
+                        }
+                    };
+
+                    if let Some(events) = state.process_chunk(&chunk) {
+                        return Some((Ok(events), state));
+                    }
+                }
+            },
+        );
+
+        // Flatten batched events into individual stream events.
+        let flat_stream = futures::stream::unfold(
+            FlattenState {
+                inner: Box::pin(stream),
+                pending: Vec::new(),
+            },
+            |mut flatten_state| async {
+                loop {
+                    if let Some(event) = flatten_state.pending.pop() {
+                        return Some((Ok(event), flatten_state));
+                    }
+
+                    match flatten_state.inner.next().await {
+                        Some(Ok(mut events)) => {
+                            // Reverse so we can pop from the end in order.
+                            events.reverse();
+                            flatten_state.pending = events;
+                        }
+                        Some(Err(e)) => return Some((Err(e), flatten_state)),
+                        None => return None,
+                    }
+                }
+            },
+        );
+
+        Ok(Box::pin(flat_stream))
+    }
+}
+
+/// State for flattening batched events into individual stream events.
+struct FlattenState {
+    inner: std::pin::Pin<
+        Box<dyn futures::Stream<Item = Result<Vec<StreamEvent>, SdkError>> + Send>,
+    >,
+    pending: Vec<StreamEvent>,
+}
+
+/// Accumulated state while processing the SSE stream.
+struct StreamState {
+    response: reqwest::Response,
+    buffer: String,
+    provider_name: String,
+    model: String,
+    response_id: String,
+    response_model: String,
+    accumulated_text: String,
+    tool_calls: Vec<AccumulatedToolCall>,
+    usage: Usage,
+    finish_reason: FinishReason,
+    text_started: bool,
+    done: bool,
+    rate_limit: Option<crate::types::RateLimitInfo>,
+}
+
+impl StreamState {
+    fn new(
+        response: reqwest::Response,
+        provider_name: String,
+        model: String,
+        rate_limit: Option<crate::types::RateLimitInfo>,
+    ) -> Self {
+        Self {
+            response,
+            buffer: String::new(),
+            provider_name,
+            model,
+            response_id: String::new(),
+            response_model: String::new(),
+            accumulated_text: String::new(),
+            tool_calls: Vec::new(),
+            usage: Usage::default(),
+            finish_reason: FinishReason::Stop,
+            text_started: false,
+            done: false,
+            rate_limit,
+        }
+    }
+
+    /// Read the next complete line from the SSE byte stream.
+    async fn next_line(&mut self) -> Result<Option<String>, SdkError> {
+        if self.done {
+            return Ok(None);
+        }
+
+        loop {
+            if let Some(newline_pos) = self.buffer.find('\n') {
+                let line = self.buffer[..newline_pos].to_string();
+                self.buffer = self.buffer[newline_pos + 1..].to_string();
+                return Ok(Some(line));
+            }
+
+            match self.response.chunk().await {
+                Ok(Some(bytes)) => {
+                    let text = String::from_utf8_lossy(&bytes);
+                    self.buffer.push_str(&text);
+                }
+                Ok(None) => {
+                    self.done = true;
+                    if self.buffer.is_empty() {
+                        return Ok(None);
+                    }
+                    let remaining = std::mem::take(&mut self.buffer);
+                    return Ok(Some(remaining));
+                }
+                Err(e) => {
+                    return Err(SdkError::Stream {
+                        message: e.to_string(),
+                    });
+                }
+            }
+        }
+    }
+
+    /// Process a parsed SSE chunk and return events to emit, if any.
+    fn process_chunk(&mut self, chunk: &StreamChunk) -> Option<Vec<StreamEvent>> {
+        // Capture response metadata from the first chunk.
+        if let Some(id) = &chunk.id {
+            if self.response_id.is_empty() {
+                self.response_id.clone_from(id);
+            }
+        }
+        if let Some(model) = &chunk.model {
+            if self.response_model.is_empty() {
+                self.response_model.clone_from(model);
+            }
+        }
+
+        // Capture usage if present (often in a dedicated chunk).
+        if let Some(usage) = &chunk.usage {
+            self.usage = Usage {
+                input_tokens: usage.prompt_tokens,
+                output_tokens: usage.completion_tokens,
+                total_tokens: usage.total_tokens,
+                ..Usage::default()
+            };
+        }
+
+        let choices = chunk.choices.as_ref()?;
+        let choice = choices.first()?;
+
+        let mut events = Vec::new();
+
+        // Check for finish_reason.
+        if let Some(reason) = &choice.finish_reason {
+            self.finish_reason = map_finish_reason(Some(reason.as_str()));
+        }
+
+        let delta = choice.delta.as_ref()?;
+
+        // Handle text content delta.
+        if let Some(content) = &delta.content {
+            if !content.is_empty() {
+                if !self.text_started {
+                    self.text_started = true;
+                    events.push(StreamEvent::TextStart { text_id: None });
+                }
+                self.accumulated_text.push_str(content);
+                events.push(StreamEvent::text_delta(content, None));
+            }
+        }
+
+        // Handle tool call deltas.
+        if let Some(tool_calls) = &delta.tool_calls {
+            for tc in tool_calls {
+                let index = tc.index;
+
+                // Grow the accumulated tool calls vector if needed.
+                while self.tool_calls.len() <= index {
+                    self.tool_calls.push(AccumulatedToolCall {
+                        id: String::new(),
+                        name: String::new(),
+                        arguments: String::new(),
+                        started: false,
+                    });
+                }
+
+                let accumulated = &mut self.tool_calls[index];
+
+                // First chunk for this tool call carries id and name.
+                if let Some(id) = &tc.id {
+                    accumulated.id.clone_from(id);
+                }
+                if let Some(func) = &tc.function {
+                    if let Some(name) = &func.name {
+                        accumulated.name.clone_from(name);
+                    }
+                    if let Some(args) = &func.arguments {
+                        accumulated.arguments.push_str(args);
+                    }
+                }
+
+                let partial_tool_call = ToolCall::new(
+                    &accumulated.id,
+                    &accumulated.name,
+                    serde_json::json!(null),
+                );
+
+                if accumulated.started {
+                    events.push(StreamEvent::ToolCallDelta {
+                        tool_call: partial_tool_call,
+                    });
+                } else {
+                    accumulated.started = true;
+                    events.push(StreamEvent::ToolCallStart {
+                        tool_call: partial_tool_call,
+                    });
+                }
+            }
+        }
+
+        if events.is_empty() {
+            None
+        } else {
+            Some(events)
+        }
+    }
+
+    /// Generate the final events when `[DONE]` is received.
+    fn finish_events(&mut self) -> Vec<StreamEvent> {
+        let mut events = Vec::new();
+
+        // End text segment if it was started.
+        if self.text_started {
+            events.push(StreamEvent::TextEnd { text_id: None });
+        }
+
+        // End all tool calls with complete data.
+        let mut content_parts = Vec::new();
+
+        if !self.accumulated_text.is_empty() {
+            content_parts.push(ContentPart::text(&self.accumulated_text));
+        }
+
+        for accumulated in &self.tool_calls {
+            let arguments = serde_json::from_str(&accumulated.arguments)
+                .unwrap_or_else(|_| serde_json::json!({}));
+            let mut tool_call =
+                ToolCall::new(&accumulated.id, &accumulated.name, arguments);
+            tool_call.raw_arguments = Some(accumulated.arguments.clone());
+
+            events.push(StreamEvent::ToolCallEnd {
+                tool_call: tool_call.clone(),
+            });
+            content_parts.push(ContentPart::ToolCall(tool_call));
+        }
+
+        // Infer finish reason from tool calls if not explicitly set.
+        if !self.tool_calls.is_empty() && self.finish_reason == FinishReason::Stop {
+            self.finish_reason = FinishReason::ToolCalls;
+        }
+
+        let response_model = if self.response_model.is_empty() {
+            self.model.clone()
+        } else {
+            self.response_model.clone()
+        };
+
+        let response = Response {
+            id: self.response_id.clone(),
+            model: response_model,
+            provider: self.provider_name.clone(),
+            message: Message {
+                role: Role::Assistant,
+                content: content_parts,
+                name: None,
+                tool_call_id: None,
+            },
+            finish_reason: self.finish_reason.clone(),
+            usage: self.usage.clone(),
+            raw: None,
+            warnings: vec![],
+            rate_limit: self.rate_limit.clone(),
+        };
+
+        events.push(StreamEvent::finish(
+            self.finish_reason.clone(),
+            self.usage.clone(),
+            response,
+        ));
+
+        events
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn stream_chunk_text_delta_parsing() {
+        let json = r#"{"id":"chatcmpl-1","model":"gpt-4","choices":[{"delta":{"content":"Hello"},"finish_reason":null}]}"#;
+        let chunk: StreamChunk = serde_json::from_str(json).unwrap();
+        assert_eq!(chunk.id.as_deref(), Some("chatcmpl-1"));
+        assert_eq!(chunk.model.as_deref(), Some("gpt-4"));
+        let choices = chunk.choices.unwrap();
+        assert_eq!(choices.len(), 1);
+        let delta = choices[0].delta.as_ref().unwrap();
+        assert_eq!(delta.content.as_deref(), Some("Hello"));
+        assert!(choices[0].finish_reason.is_none());
+    }
+
+    #[test]
+    fn stream_chunk_tool_call_parsing() {
+        let json = r#"{"id":"chatcmpl-1","model":"gpt-4","choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_1","function":{"name":"get_weather","arguments":"{\"ci"}}]},"finish_reason":null}]}"#;
+        let chunk: StreamChunk = serde_json::from_str(json).unwrap();
+        let choices = chunk.choices.unwrap();
+        let delta = choices[0].delta.as_ref().unwrap();
+        let tc = &delta.tool_calls.as_ref().unwrap()[0];
+        assert_eq!(tc.index, 0);
+        assert_eq!(tc.id.as_deref(), Some("call_1"));
+        let func = tc.function.as_ref().unwrap();
+        assert_eq!(func.name.as_deref(), Some("get_weather"));
+        assert_eq!(func.arguments.as_deref(), Some("{\"ci"));
+    }
+
+    #[test]
+    fn stream_chunk_usage_parsing() {
+        let json = r#"{"id":"chatcmpl-1","model":"gpt-4","choices":[],"usage":{"prompt_tokens":10,"completion_tokens":20,"total_tokens":30}}"#;
+        let chunk: StreamChunk = serde_json::from_str(json).unwrap();
+        let usage = chunk.usage.unwrap();
+        assert_eq!(usage.prompt_tokens, 10);
+        assert_eq!(usage.completion_tokens, 20);
+        assert_eq!(usage.total_tokens, 30);
+    }
+
+    #[test]
+    fn stream_chunk_finish_reason_parsing() {
+        let json = r#"{"id":"chatcmpl-1","model":"gpt-4","choices":[{"delta":{},"finish_reason":"stop"}]}"#;
+        let chunk: StreamChunk = serde_json::from_str(json).unwrap();
+        let choices = chunk.choices.unwrap();
+        assert_eq!(choices[0].finish_reason.as_deref(), Some("stop"));
+    }
+
+    #[test]
+    fn stream_state_process_text_chunks() {
+        let http_resp = reqwest::Response::from(
+            http::Response::builder()
+                .status(200)
+                .body("")
+                .unwrap(),
+        );
+        let mut state = StreamState::new(http_resp, "test".into(), "model".into(), None);
+
+        // First text chunk should emit TextStart + TextDelta.
+        let chunk1: StreamChunk = serde_json::from_str(
+            r#"{"id":"c1","model":"m1","choices":[{"delta":{"content":"Hello"},"finish_reason":null}]}"#,
+        ).unwrap();
+        let events1 = state.process_chunk(&chunk1).unwrap();
+        assert_eq!(events1.len(), 2);
+        assert!(matches!(events1[0], StreamEvent::TextStart { .. }));
+        assert!(matches!(events1[1], StreamEvent::TextDelta { .. }));
+
+        // Second text chunk should emit only TextDelta (no second TextStart).
+        let chunk2: StreamChunk = serde_json::from_str(
+            r#"{"id":"c1","model":"m1","choices":[{"delta":{"content":" world"},"finish_reason":null}]}"#,
+        ).unwrap();
+        let events2 = state.process_chunk(&chunk2).unwrap();
+        assert_eq!(events2.len(), 1);
+        assert!(matches!(events2[0], StreamEvent::TextDelta { .. }));
+
+        assert_eq!(state.accumulated_text, "Hello world");
+    }
+
+    #[test]
+    fn stream_state_process_tool_call_chunks() {
+        let http_resp = reqwest::Response::from(
+            http::Response::builder()
+                .status(200)
+                .body("")
+                .unwrap(),
+        );
+        let mut state = StreamState::new(http_resp, "test".into(), "model".into(), None);
+
+        // First tool call chunk (has id and name) -> ToolCallStart.
+        let chunk1: StreamChunk = serde_json::from_str(
+            r#"{"id":"c1","model":"m1","choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_1","function":{"name":"fn1","arguments":"{\"k"}}]},"finish_reason":null}]}"#,
+        ).unwrap();
+        let events1 = state.process_chunk(&chunk1).unwrap();
+        assert_eq!(events1.len(), 1);
+        assert!(matches!(events1[0], StreamEvent::ToolCallStart { .. }));
+
+        // Subsequent chunk (more arguments) -> ToolCallDelta.
+        let chunk2: StreamChunk = serde_json::from_str(
+            r#"{"id":"c1","model":"m1","choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":"ey\"}"}}]},"finish_reason":null}]}"#,
+        ).unwrap();
+        let events2 = state.process_chunk(&chunk2).unwrap();
+        assert_eq!(events2.len(), 1);
+        assert!(matches!(events2[0], StreamEvent::ToolCallDelta { .. }));
+
+        assert_eq!(state.tool_calls[0].arguments, r#"{"key"}"#);
+    }
+
+    #[test]
+    fn stream_state_finish_events_text_only() {
+        let http_resp = reqwest::Response::from(
+            http::Response::builder()
+                .status(200)
+                .body("")
+                .unwrap(),
+        );
+        let mut state = StreamState::new(http_resp, "test-provider".into(), "test-model".into(), None);
+        state.response_id = "resp-1".into();
+        state.response_model = "gpt-4".into();
+        state.accumulated_text = "Hello world".into();
+        state.text_started = true;
+        state.usage = Usage {
+            input_tokens: 5,
+            output_tokens: 10,
+            total_tokens: 15,
+            ..Usage::default()
+        };
+
+        let events = state.finish_events();
+        // TextEnd + Finish
+        assert_eq!(events.len(), 2);
+        assert!(matches!(events[0], StreamEvent::TextEnd { .. }));
+        match &events[1] {
+            StreamEvent::Finish {
+                finish_reason,
+                usage,
+                response,
+            } => {
+                assert_eq!(*finish_reason, FinishReason::Stop);
+                assert_eq!(usage.input_tokens, 5);
+                assert_eq!(usage.output_tokens, 10);
+                assert_eq!(response.text(), "Hello world");
+                assert_eq!(response.id, "resp-1");
+                assert_eq!(response.model, "gpt-4");
+                assert_eq!(response.provider, "test-provider");
+            }
+            other => panic!("Expected Finish, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn stream_state_finish_events_with_tool_calls() {
+        let http_resp = reqwest::Response::from(
+            http::Response::builder()
+                .status(200)
+                .body("")
+                .unwrap(),
+        );
+        let mut state = StreamState::new(http_resp, "test".into(), "model".into(), None);
+        state.response_id = "resp-1".into();
+        state.tool_calls.push(AccumulatedToolCall {
+            id: "call_1".into(),
+            name: "get_weather".into(),
+            arguments: r#"{"city":"SF"}"#.into(),
+            started: true,
+        });
+
+        let events = state.finish_events();
+        // ToolCallEnd + Finish (no TextEnd since text_started is false)
+        assert_eq!(events.len(), 2);
+        match &events[0] {
+            StreamEvent::ToolCallEnd { tool_call } => {
+                assert_eq!(tool_call.id, "call_1");
+                assert_eq!(tool_call.name, "get_weather");
+                assert_eq!(tool_call.raw_arguments.as_deref(), Some(r#"{"city":"SF"}"#));
+            }
+            other => panic!("Expected ToolCallEnd, got {other:?}"),
+        }
+        match &events[1] {
+            StreamEvent::Finish {
+                finish_reason,
+                response,
+                ..
+            } => {
+                assert_eq!(*finish_reason, FinishReason::ToolCalls);
+                let calls = response.tool_calls();
+                assert_eq!(calls.len(), 1);
+                assert_eq!(calls[0].name, "get_weather");
+            }
+            other => panic!("Expected Finish, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn stream_state_uses_request_model_as_fallback() {
+        let http_resp = reqwest::Response::from(
+            http::Response::builder()
+                .status(200)
+                .body("")
+                .unwrap(),
+        );
+        let mut state = StreamState::new(http_resp, "test".into(), "fallback-model".into(), None);
+        // response_model is empty, so finish_events should use the request model.
+        let events = state.finish_events();
+        match &events[0] {
+            StreamEvent::Finish { response, .. } => {
+                assert_eq!(response.model, "fallback-model");
+            }
+            other => panic!("Expected Finish, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn api_request_stream_field_serialization() {
+        let req = ApiRequest {
+            model: "test".into(),
+            messages: vec![],
+            temperature: None,
+            max_tokens: None,
+            top_p: None,
+            stop: None,
+            tools: None,
+            tool_choice: None,
+            response_format: None,
+            stream: Some(true),
+        };
+        let json = serde_json::to_value(&req).unwrap();
+        assert_eq!(json["stream"], true);
+
+        // When stream is None, it should be omitted.
+        let req_no_stream = ApiRequest {
+            model: "test".into(),
+            messages: vec![],
+            temperature: None,
+            max_tokens: None,
+            top_p: None,
+            stop: None,
+            tools: None,
+            tool_choice: None,
+            response_format: None,
+            stream: None,
+        };
+        let json_no_stream = serde_json::to_value(&req_no_stream).unwrap();
+        assert!(json_no_stream.get("stream").is_none());
+    }
+
+    #[test]
+    fn translate_assistant_message_with_tool_calls_only() {
+        let msg = Message {
+            role: Role::Assistant,
+            content: vec![ContentPart::ToolCall(ToolCall::new(
+                "call_1",
+                "get_weather",
+                serde_json::json!({"city": "SF"}),
+            ))],
+            name: None,
+            tool_call_id: None,
+        };
+        let translated = translate_messages(&[msg]);
+        assert_eq!(translated.len(), 1);
+        assert_eq!(translated[0].role, "assistant");
+        assert!(translated[0].content.is_none());
+        let tool_calls = translated[0].tool_calls.as_ref().unwrap();
+        assert_eq!(tool_calls.len(), 1);
+        assert_eq!(tool_calls[0].id, "call_1");
+        assert_eq!(tool_calls[0].kind, "function");
+        assert_eq!(tool_calls[0].function.name, "get_weather");
+        assert_eq!(tool_calls[0].function.arguments, r#"{"city":"SF"}"#);
+    }
+
+    #[test]
+    fn translate_assistant_message_with_text_and_tool_calls() {
+        let msg = Message {
+            role: Role::Assistant,
+            content: vec![
+                ContentPart::text("Let me check the weather"),
+                ContentPart::ToolCall(ToolCall::new(
+                    "call_2",
+                    "get_weather",
+                    serde_json::json!({"city": "NYC"}),
+                )),
+            ],
+            name: None,
+            tool_call_id: None,
+        };
+        let translated = translate_messages(&[msg]);
+        assert_eq!(translated[0].content.as_deref(), Some("Let me check the weather"));
+        let tool_calls = translated[0].tool_calls.as_ref().unwrap();
+        assert_eq!(tool_calls.len(), 1);
+        assert_eq!(tool_calls[0].function.name, "get_weather");
+    }
+
+    #[test]
+    fn translate_assistant_message_with_raw_arguments() {
+        let mut tc = ToolCall::new("call_3", "search", serde_json::json!({"q": "rust"}));
+        tc.raw_arguments = Some(r#"{"q": "rust"}"#.to_string());
+        let msg = Message {
+            role: Role::Assistant,
+            content: vec![ContentPart::ToolCall(tc)],
+            name: None,
+            tool_call_id: None,
+        };
+        let translated = translate_messages(&[msg]);
+        let tool_calls = translated[0].tool_calls.as_ref().unwrap();
+        // Should prefer raw_arguments over serializing arguments
+        assert_eq!(tool_calls[0].function.arguments, r#"{"q": "rust"}"#);
+    }
+
+    #[test]
+    fn translate_tool_message_has_tool_call_id() {
+        let msg = Message::tool_result("call_1", "72F and sunny", false);
+        let translated = translate_messages(&[msg]);
+        assert_eq!(translated[0].role, "tool");
+        assert_eq!(translated[0].tool_call_id.as_deref(), Some("call_1"));
+        assert!(translated[0].tool_calls.is_none());
+    }
+
+    #[test]
+    fn translate_user_message_has_no_tool_calls() {
+        let msg = Message::user("Hello");
+        let translated = translate_messages(&[msg]);
+        assert_eq!(translated[0].role, "user");
+        assert_eq!(translated[0].content.as_deref(), Some("Hello"));
+        assert!(translated[0].tool_calls.is_none());
+    }
+
+    #[test]
+    fn assistant_tool_calls_serialize_correctly() {
+        let msg = Message {
+            role: Role::Assistant,
+            content: vec![ContentPart::ToolCall(ToolCall::new(
+                "call_1",
+                "get_weather",
+                serde_json::json!({"city": "SF"}),
+            ))],
+            name: None,
+            tool_call_id: None,
+        };
+        let translated = translate_messages(&[msg]);
+        let json = serde_json::to_value(&translated[0]).unwrap();
+        assert!(json.get("content").is_none());
+        assert!(json.get("tool_call_id").is_none());
+        let tool_calls = json["tool_calls"].as_array().unwrap();
+        assert_eq!(tool_calls.len(), 1);
+        assert_eq!(tool_calls[0]["type"], "function");
+        assert_eq!(tool_calls[0]["id"], "call_1");
+        assert_eq!(tool_calls[0]["function"]["name"], "get_weather");
+    }
+}

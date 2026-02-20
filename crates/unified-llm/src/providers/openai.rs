@@ -1,93 +1,739 @@
+use base64::{engine::general_purpose::STANDARD as BASE64_STANDARD, Engine};
+use futures::StreamExt;
+
 use crate::error::SdkError;
 use crate::provider::{ProviderAdapter, StreamEventStream};
-use crate::error::{ProviderErrorDetail, ProviderErrorKind};
-use crate::providers::common::{send_and_read_body, ApiMessage};
+use crate::providers::common::{
+    parse_error_body, parse_rate_limit_headers, parse_retry_after, send_and_read_response,
+};
 use crate::types::{
-    ContentPart, FinishReason, Message, Request, Response, Role, ToolCall, Usage,
+    ContentPart, FinishReason, Message, Request, Response, ResponseFormat, ResponseFormatType,
+    Role, StreamEvent, ToolCall, ToolChoice, ToolDefinition, Usage,
 };
 
-/// Provider adapter for the `OpenAI` Chat Completions API.
+/// Provider adapter for the `OpenAI` Responses API (`/v1/responses`).
+///
+/// Per spec Section 2.7, this adapter uses the Responses API (not Chat Completions)
+/// to properly surface reasoning tokens, built-in tools, and server-side state.
 pub struct Adapter {
     api_key: String,
+    base_url: String,
     client: reqwest::Client,
+    request_timeout: std::time::Duration,
 }
 
 impl Adapter {
     #[must_use]
     pub fn new(api_key: impl Into<String>) -> Self {
+        let timeout = crate::types::AdapterTimeout::default();
+        let client = reqwest::Client::builder()
+            .connect_timeout(std::time::Duration::from_secs_f64(timeout.connect))
+            .build()
+            .unwrap_or_default();
         Self {
             api_key: api_key.into(),
-            client: reqwest::Client::new(),
+            base_url: "https://api.openai.com/v1".to_string(),
+            client,
+            request_timeout: std::time::Duration::from_secs_f64(timeout.request),
         }
+    }
+
+    #[must_use]
+    pub fn with_base_url(mut self, base_url: impl Into<String>) -> Self {
+        self.base_url = base_url.into();
+        self
     }
 }
 
-// --- Request types ---
+// --- Request types (Responses API format) ---
 
 #[derive(serde::Serialize)]
 struct ApiRequest {
     model: String,
-    messages: Vec<ApiMessage>,
+    input: Vec<serde_json::Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    instructions: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     temperature: Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    max_tokens: Option<i64>,
+    max_output_tokens: Option<i64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     top_p: Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    stop: Option<Vec<String>>,
+    tools: Option<Vec<serde_json::Value>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    tool_choice: Option<serde_json::Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    reasoning: Option<serde_json::Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    text: Option<serde_json::Value>,
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    stream: bool,
 }
 
-// --- Response types ---
+// --- Response types (Responses API format) ---
 
 #[derive(serde::Deserialize)]
 struct ApiResponse {
     id: String,
-    model: String,
-    choices: Vec<ApiChoice>,
+    model: Option<String>,
+    output: Vec<serde_json::Value>,
+    status: Option<String>,
     usage: Option<ApiUsage>,
-}
-
-#[derive(serde::Deserialize)]
-struct ApiChoice {
-    message: ApiChoiceMessage,
-    finish_reason: Option<String>,
-}
-
-#[derive(serde::Deserialize)]
-struct ApiChoiceMessage {
-    content: Option<String>,
-    tool_calls: Option<Vec<ApiToolCall>>,
-}
-
-#[derive(serde::Deserialize)]
-struct ApiToolCall {
-    id: String,
-    function: ApiFunction,
-}
-
-#[derive(serde::Deserialize)]
-struct ApiFunction {
-    name: String,
-    arguments: String,
 }
 
 #[derive(serde::Deserialize)]
 #[allow(clippy::struct_field_names)]
 struct ApiUsage {
-    prompt_tokens: i64,
-    completion_tokens: i64,
-    total_tokens: i64,
+    input_tokens: i64,
+    output_tokens: i64,
+    total_tokens: Option<i64>,
+    output_tokens_details: Option<OutputTokenDetails>,
+    input_tokens_details: Option<InputTokenDetails>,
 }
 
-fn map_finish_reason(reason: Option<&str>) -> FinishReason {
-    match reason {
-        Some("stop") | None => FinishReason::Stop,
-        Some("length") => FinishReason::Length,
-        Some("tool_calls") => FinishReason::ToolCalls,
-        Some("content_filter") => FinishReason::ContentFilter,
+#[derive(serde::Deserialize)]
+struct OutputTokenDetails {
+    reasoning_tokens: Option<i64>,
+}
+
+#[derive(serde::Deserialize)]
+struct InputTokenDetails {
+    cached_tokens: Option<i64>,
+}
+
+/// Map the Responses API status to a `FinishReason`.
+fn map_finish_reason(status: Option<&str>, has_tool_calls: bool) -> FinishReason {
+    if has_tool_calls {
+        return FinishReason::ToolCalls;
+    }
+    match status {
+        Some("completed") | None => FinishReason::Stop,
+        Some("incomplete") => FinishReason::Length,
+        Some("failed") => FinishReason::Error,
         Some(other) => FinishReason::Other(other.to_string()),
     }
+}
+
+/// Translate unified messages to Responses API `input` array format.
+fn translate_input(messages: &[Message]) -> (Option<String>, Vec<serde_json::Value>) {
+    let mut instructions_parts: Vec<String> = Vec::new();
+    let mut input: Vec<serde_json::Value> = Vec::new();
+
+    for msg in messages {
+        match msg.role {
+            Role::System | Role::Developer => {
+                instructions_parts.push(msg.text());
+            }
+            Role::User => {
+                let content: Vec<serde_json::Value> = msg
+                    .content
+                    .iter()
+                    .filter_map(|part| match part {
+                        ContentPart::Text(text) => {
+                            Some(serde_json::json!({"type": "input_text", "text": text}))
+                        }
+                        ContentPart::Image(img) => {
+                            img.url.as_ref().map_or_else(
+                                || {
+                                    img.data.as_ref().map(|data| {
+                                        let mime = img.media_type.as_deref().unwrap_or("image/png");
+                                        let b64 = BASE64_STANDARD.encode(data);
+                                        serde_json::json!({"type": "input_image", "image_url": format!("data:{mime};base64,{b64}")})
+                                    })
+                                },
+                                |url| {
+                                    if crate::providers::common::is_file_path(url) {
+                                        match crate::providers::common::load_file_as_base64(url) {
+                                            Ok((b64, mime)) => Some(serde_json::json!({"type": "input_image", "image_url": format!("data:{mime};base64,{b64}")})),
+                                            Err(_) => None,
+                                        }
+                                    } else {
+                                        Some(serde_json::json!({"type": "input_image", "image_url": url}))
+                                    }
+                                },
+                            )
+                        }
+                        _ => None,
+                    })
+                    .collect();
+                if !content.is_empty() {
+                    input.push(serde_json::json!({
+                        "type": "message",
+                        "role": "user",
+                        "content": content,
+                    }));
+                }
+            }
+            Role::Assistant => {
+                for part in &msg.content {
+                    match part {
+                        ContentPart::Text(text) => {
+                            input.push(serde_json::json!({
+                                "type": "message",
+                                "role": "assistant",
+                                "content": [{"type": "output_text", "text": text}],
+                            }));
+                        }
+                        ContentPart::ToolCall(tc) => {
+                            let args = tc
+                                .raw_arguments
+                                .as_ref()
+                                .map_or_else(|| tc.arguments.to_string(), Clone::clone);
+                            input.push(serde_json::json!({
+                                "type": "function_call",
+                                "id": tc.id,
+                                "call_id": tc.id,
+                                "name": tc.name,
+                                "arguments": args,
+                            }));
+                        }
+                        _ => {}
+                    }
+                }
+            }
+            Role::Tool => {
+                for part in &msg.content {
+                    if let ContentPart::ToolResult(tr) = part {
+                        let output = tr
+                            .content
+                            .as_str()
+                            .map_or_else(|| tr.content.to_string(), str::to_string);
+                        input.push(serde_json::json!({
+                            "type": "function_call_output",
+                            "call_id": tr.tool_call_id,
+                            "output": output,
+                        }));
+                    }
+                }
+            }
+        }
+    }
+
+    let instructions = if instructions_parts.is_empty() {
+        None
+    } else {
+        Some(instructions_parts.join("\n"))
+    };
+
+    (instructions, input)
+}
+
+/// Translate unified tool definitions to Responses API tool format.
+fn translate_tools(tools: &[ToolDefinition]) -> Vec<serde_json::Value> {
+    tools
+        .iter()
+        .map(|t| {
+            serde_json::json!({
+                "type": "function",
+                "name": t.name,
+                "description": t.description,
+                "parameters": t.parameters,
+            })
+        })
+        .collect()
+}
+
+/// Translate unified `ToolChoice` to Responses API format.
+fn translate_tool_choice(choice: &ToolChoice) -> serde_json::Value {
+    match choice {
+        ToolChoice::Auto => serde_json::json!("auto"),
+        ToolChoice::None => serde_json::json!("none"),
+        ToolChoice::Required => serde_json::json!("required"),
+        ToolChoice::Named { tool_name } => {
+            serde_json::json!({"type": "function", "name": tool_name})
+        }
+    }
+}
+
+/// Translate unified `ResponseFormat` to Responses API `text` field.
+///
+/// The Responses API uses `"text": {"format": {...}}` for structured output.
+fn translate_response_format(format: &ResponseFormat) -> Option<serde_json::Value> {
+    match format.kind {
+        ResponseFormatType::Text => None,
+        ResponseFormatType::JsonObject => {
+            Some(serde_json::json!({"format": {"type": "json_object"}}))
+        }
+        ResponseFormatType::JsonSchema => {
+            let mut schema_obj = serde_json::json!({
+                "type": "json_schema",
+                "name": "response",
+                "strict": format.strict,
+            });
+            if let Some(schema) = &format.json_schema {
+                schema_obj["schema"] = schema.clone();
+            }
+            Some(serde_json::json!({"format": schema_obj}))
+        }
+    }
+}
+
+/// Build an `ApiRequest` from a unified `Request`.
+fn build_api_request(request: &Request, stream: bool) -> ApiRequest {
+    let (instructions, input) = translate_input(&request.messages);
+    let api_tools = request.tools.as_ref().map(|t| translate_tools(t));
+    let tool_choice = request.tool_choice.as_ref().map(translate_tool_choice);
+    let reasoning = request
+        .reasoning_effort
+        .as_ref()
+        .map(|effort| serde_json::json!({"effort": effort}));
+    let text = request
+        .response_format
+        .as_ref()
+        .and_then(translate_response_format);
+
+    ApiRequest {
+        model: request.model.clone(),
+        input,
+        instructions,
+        temperature: request.temperature,
+        max_output_tokens: request.max_tokens,
+        top_p: request.top_p,
+        tools: api_tools,
+        tool_choice,
+        reasoning,
+        text,
+        stream,
+    }
+}
+
+/// Parse output items from the Responses API into content parts.
+fn parse_output(output: &[serde_json::Value]) -> (Vec<ContentPart>, bool) {
+    let mut parts = Vec::new();
+    let mut has_tool_calls = false;
+
+    for item in output {
+        let item_type = item.get("type").and_then(serde_json::Value::as_str);
+        match item_type {
+            Some("message") => {
+                if let Some(content) = item.get("content").and_then(|c| c.as_array()) {
+                    for block in content {
+                        if block.get("type").and_then(serde_json::Value::as_str)
+                            == Some("output_text")
+                        {
+                            if let Some(text) =
+                                block.get("text").and_then(serde_json::Value::as_str)
+                            {
+                                parts.push(ContentPart::text(text));
+                            }
+                        }
+                    }
+                }
+            }
+            Some("function_call") => {
+                has_tool_calls = true;
+                let id = item
+                    .get("call_id")
+                    .or_else(|| item.get("id"))
+                    .and_then(serde_json::Value::as_str)
+                    .unwrap_or("")
+                    .to_string();
+                let name = item
+                    .get("name")
+                    .and_then(serde_json::Value::as_str)
+                    .unwrap_or("")
+                    .to_string();
+                let args_str = item
+                    .get("arguments")
+                    .and_then(serde_json::Value::as_str)
+                    .unwrap_or("{}");
+                let arguments = serde_json::from_str(args_str)
+                    .unwrap_or_else(|_| serde_json::json!({}));
+                let mut tc = ToolCall::new(id, name, arguments);
+                tc.raw_arguments = Some(args_str.to_string());
+                parts.push(ContentPart::ToolCall(tc));
+            }
+            _ => {}
+        }
+    }
+
+    (parts, has_tool_calls)
+}
+
+// --- SSE streaming support ---
+
+/// Mutable state carried through SSE stream processing.
+struct SseStreamState {
+    byte_stream: std::pin::Pin<
+        Box<dyn futures::Stream<Item = Result<bytes::Bytes, reqwest::Error>> + Send>,
+    >,
+    buffer: String,
+    model: String,
+    response_id: String,
+    response_model: String,
+    accumulated_text: String,
+    tool_calls: Vec<ToolCall>,
+    usage: Usage,
+    finish_reason: FinishReason,
+    emitted_start: bool,
+    emitted_text_start: bool,
+    raw_response: Option<serde_json::Value>,
+    rate_limit: Option<crate::types::RateLimitInfo>,
+}
+
+/// Extract complete SSE messages from the buffer.
+///
+/// Each SSE message consists of one or more lines (`event:` and `data:` prefixed)
+/// terminated by a blank line. Returns parsed (`event_type`, data) pairs.
+fn extract_sse_messages(buffer: &mut String) -> Vec<(Option<String>, String)> {
+    let mut messages = Vec::new();
+
+    while let Some(pos) = buffer.find("\n\n") {
+        let message_block = buffer[..pos].to_string();
+        *buffer = buffer[pos + 2..].to_string();
+
+        let mut current_event: Option<String> = None;
+        let mut current_data = String::new();
+
+        for line in message_block.lines() {
+            if let Some(stripped) = line.strip_prefix("event: ") {
+                current_event = Some(stripped.to_string());
+            } else if let Some(stripped) = line.strip_prefix("event:") {
+                current_event = Some(stripped.trim().to_string());
+            } else if let Some(stripped) = line.strip_prefix("data: ") {
+                if !current_data.is_empty() {
+                    current_data.push('\n');
+                }
+                current_data.push_str(stripped);
+            } else if let Some(stripped) = line.strip_prefix("data:") {
+                if !current_data.is_empty() {
+                    current_data.push('\n');
+                }
+                current_data.push_str(stripped.trim());
+            }
+        }
+
+        if !current_data.is_empty() {
+            messages.push((current_event, current_data));
+        }
+    }
+
+    messages
+}
+
+/// Dispatch SSE messages from the buffer and return the resulting `StreamEvent`s.
+fn dispatch_sse_messages(
+    state: &mut SseStreamState,
+    messages: Vec<(Option<String>, String)>,
+) -> Vec<StreamEvent> {
+    let mut events = Vec::new();
+    for (event_type, data) in messages {
+        events.extend(process_sse_event(state, event_type.as_deref(), &data));
+    }
+    events
+}
+
+/// Process the next chunk(s) from the byte stream and return `StreamEvent`s.
+async fn process_next_sse_events(
+    state: &mut SseStreamState,
+) -> Result<Vec<StreamEvent>, SdkError> {
+    loop {
+        let messages = extract_sse_messages(&mut state.buffer);
+        if !messages.is_empty() {
+            return Ok(dispatch_sse_messages(state, messages));
+        }
+
+        match state.byte_stream.next().await {
+            Some(Ok(bytes)) => {
+                let text = String::from_utf8_lossy(&bytes);
+                state.buffer.push_str(&text);
+            }
+            Some(Err(e)) => {
+                return Err(SdkError::Stream {
+                    message: e.to_string(),
+                });
+            }
+            None => {
+                // Stream ended. Process any remaining data in the buffer.
+                if !state.buffer.is_empty() {
+                    state.buffer.push_str("\n\n");
+                    let messages = extract_sse_messages(&mut state.buffer);
+                    return Ok(dispatch_sse_messages(state, messages));
+                }
+                return Ok(vec![]);
+            }
+        }
+    }
+}
+
+/// Process a single SSE event and return the corresponding `StreamEvent`(s).
+fn process_sse_event(
+    state: &mut SseStreamState,
+    event_type: Option<&str>,
+    data: &str,
+) -> Vec<StreamEvent> {
+    let mut events = Vec::new();
+
+    if !state.emitted_start {
+        state.emitted_start = true;
+        events.push(StreamEvent::StreamStart);
+    }
+
+    let json: serde_json::Value = match serde_json::from_str(data) {
+        Ok(v) => v,
+        Err(_) => return events,
+    };
+
+    // Resolve event type from the `event:` SSE line or from the JSON `type` field.
+    let resolved_type = event_type
+        .map(str::to_string)
+        .or_else(|| {
+            json.get("type")
+                .and_then(serde_json::Value::as_str)
+                .map(str::to_string)
+        })
+        .unwrap_or_default();
+
+    match resolved_type.as_str() {
+        "response.created" => handle_response_created(state, &json),
+        "response.output_text.delta" => handle_text_delta(state, &json, &mut events),
+        "response.function_call_arguments.delta" => {
+            handle_tool_call_delta(state, &json, &mut events);
+        }
+        "response.output_item.done" => handle_output_item_done(state, &json, &mut events),
+        "response.completed" => handle_response_completed(state, &json, &mut events),
+        _ => {}
+    }
+
+    events
+}
+
+/// Handle `response.created` by extracting the response ID and model.
+fn handle_response_created(state: &mut SseStreamState, json: &serde_json::Value) {
+    if let Some(id) = json
+        .get("response")
+        .and_then(|r| r.get("id"))
+        .and_then(serde_json::Value::as_str)
+    {
+        state.response_id = id.to_string();
+    }
+    if let Some(model) = json
+        .get("response")
+        .and_then(|r| r.get("model"))
+        .and_then(serde_json::Value::as_str)
+    {
+        state.response_model = model.to_string();
+    }
+}
+
+/// Handle `response.output_text.delta` by accumulating text and emitting events.
+fn handle_text_delta(
+    state: &mut SseStreamState,
+    json: &serde_json::Value,
+    events: &mut Vec<StreamEvent>,
+) {
+    if let Some(delta) = json.get("delta").and_then(serde_json::Value::as_str) {
+        if !state.emitted_text_start {
+            state.emitted_text_start = true;
+            events.push(StreamEvent::TextStart { text_id: None });
+        }
+        state.accumulated_text.push_str(delta);
+        events.push(StreamEvent::text_delta(delta, None));
+    }
+}
+
+/// Handle `response.function_call_arguments.delta` by accumulating args and emitting events.
+fn handle_tool_call_delta(
+    state: &mut SseStreamState,
+    json: &serde_json::Value,
+    events: &mut Vec<StreamEvent>,
+) {
+    let Some(delta) = json.get("delta").and_then(serde_json::Value::as_str) else {
+        return;
+    };
+
+    let call_id = json
+        .get("call_id")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("")
+        .to_string();
+    let item_id = json
+        .get("item_id")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("")
+        .to_string();
+    let lookup_id = if call_id.is_empty() {
+        &item_id
+    } else {
+        &call_id
+    };
+
+    let tc_index = state
+        .tool_calls
+        .iter()
+        .position(|tc| tc.id == *lookup_id);
+
+    if let Some(idx) = tc_index {
+        if let Some(ref mut raw) = state.tool_calls[idx].raw_arguments {
+            raw.push_str(delta);
+        }
+    } else {
+        let name = json
+            .get("name")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("")
+            .to_string();
+        let mut tc = ToolCall::new(lookup_id, name, serde_json::json!({}));
+        tc.raw_arguments = Some(delta.to_string());
+        state.tool_calls.push(tc.clone());
+        events.push(StreamEvent::ToolCallStart { tool_call: tc });
+    }
+
+    let current_tc = state
+        .tool_calls
+        .iter()
+        .find(|tc| tc.id == *lookup_id)
+        .cloned()
+        .unwrap_or_else(|| ToolCall::new("", "", serde_json::json!({})));
+
+    events.push(StreamEvent::ToolCallDelta {
+        tool_call: ToolCall {
+            raw_arguments: Some(delta.to_string()),
+            ..current_tc
+        },
+    });
+}
+
+/// Handle `response.output_item.done` for text and function call items.
+fn handle_output_item_done(
+    state: &mut SseStreamState,
+    json: &serde_json::Value,
+    events: &mut Vec<StreamEvent>,
+) {
+    let item_type = json
+        .get("item")
+        .and_then(|i| i.get("type"))
+        .and_then(serde_json::Value::as_str);
+
+    match item_type {
+        Some("message") => {
+            if state.emitted_text_start {
+                events.push(StreamEvent::TextEnd { text_id: None });
+                state.emitted_text_start = false;
+            }
+        }
+        Some("function_call") => {
+            let item = json.get("item").unwrap_or(json);
+            let call_id = item
+                .get("call_id")
+                .or_else(|| item.get("id"))
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or("")
+                .to_string();
+            let name = item
+                .get("name")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or("")
+                .to_string();
+            let args_str = item
+                .get("arguments")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or("{}");
+            let arguments =
+                serde_json::from_str(args_str).unwrap_or_else(|_| serde_json::json!({}));
+
+            let mut tc = ToolCall::new(&call_id, &name, arguments);
+            tc.raw_arguments = Some(args_str.to_string());
+
+            if let Some(existing) = state.tool_calls.iter_mut().find(|t| t.id == call_id) {
+                existing.name.clone_from(&name);
+                existing.arguments = tc.arguments.clone();
+                existing.raw_arguments.clone_from(&tc.raw_arguments);
+            } else {
+                state.tool_calls.push(tc.clone());
+            }
+
+            events.push(StreamEvent::ToolCallEnd { tool_call: tc });
+        }
+        _ => {}
+    }
+}
+
+/// Handle `response.completed` by extracting usage and building the final response.
+fn handle_response_completed(
+    state: &mut SseStreamState,
+    json: &serde_json::Value,
+    events: &mut Vec<StreamEvent>,
+) {
+    let response_data = json.get("response").unwrap_or(json);
+
+    if let Some(usage_data) = response_data.get("usage") {
+        if let Ok(u) = serde_json::from_value::<ApiUsage>(usage_data.clone()) {
+            state.usage = Usage {
+                input_tokens: u.input_tokens,
+                output_tokens: u.output_tokens,
+                total_tokens: u.total_tokens.unwrap_or(u.input_tokens + u.output_tokens),
+                reasoning_tokens: u
+                    .output_tokens_details
+                    .as_ref()
+                    .and_then(|d| d.reasoning_tokens),
+                cache_read_tokens: u
+                    .input_tokens_details
+                    .as_ref()
+                    .and_then(|d| d.cached_tokens),
+                ..Usage::default()
+            };
+        }
+    }
+
+    if let Some(id) = response_data
+        .get("id")
+        .and_then(serde_json::Value::as_str)
+    {
+        state.response_id = id.to_string();
+    }
+    if let Some(model) = response_data
+        .get("model")
+        .and_then(serde_json::Value::as_str)
+    {
+        state.response_model = model.to_string();
+    }
+
+    let status = response_data
+        .get("status")
+        .and_then(serde_json::Value::as_str);
+    let has_tool_calls = !state.tool_calls.is_empty();
+    state.finish_reason = map_finish_reason(status, has_tool_calls);
+
+    state.raw_response = Some(response_data.clone());
+
+    let mut content_parts = Vec::new();
+    if !state.accumulated_text.is_empty() {
+        content_parts.push(ContentPart::text(&state.accumulated_text));
+    }
+    for tc in &state.tool_calls {
+        content_parts.push(ContentPart::ToolCall(tc.clone()));
+    }
+
+    let model = if state.response_model.is_empty() {
+        state.model.clone()
+    } else {
+        state.response_model.clone()
+    };
+
+    let response = Response {
+        id: state.response_id.clone(),
+        model,
+        provider: "openai".to_string(),
+        message: Message {
+            role: Role::Assistant,
+            content: content_parts,
+            name: None,
+            tool_call_id: None,
+        },
+        finish_reason: state.finish_reason.clone(),
+        usage: state.usage.clone(),
+        raw: state.raw_response.clone(),
+        warnings: vec![],
+        rate_limit: state.rate_limit.clone(),
+    };
+
+    events.push(StreamEvent::finish(
+        state.finish_reason.clone(),
+        state.usage.clone(),
+        response,
+    ));
 }
 
 #[allow(clippy::unnecessary_literal_bound)]
@@ -98,36 +744,15 @@ impl ProviderAdapter for Adapter {
     }
 
     async fn complete(&self, request: &Request) -> Result<Response, SdkError> {
-        let api_messages: Vec<ApiMessage> = request
-            .messages
-            .iter()
-            .map(|msg| {
-                let role = match msg.role {
-                    Role::System | Role::Developer => "system",
-                    Role::User | Role::Tool => "user",
-                    Role::Assistant => "assistant",
-                };
-                ApiMessage {
-                    role: role.to_string(),
-                    content: msg.text(),
-                }
-            })
-            .collect();
+        let api_request = build_api_request(request, false);
+        let url = format!("{}/responses", self.base_url);
 
-        let api_request = ApiRequest {
-            model: request.model.clone(),
-            messages: api_messages,
-            temperature: request.temperature,
-            max_tokens: request.max_tokens,
-            top_p: request.top_p,
-            stop: request.stop_sequences.clone(),
-        };
-
-        let body = send_and_read_body(
+        let (body, headers) = send_and_read_response(
             self.client
-                .post("https://api.openai.com/v1/chat/completions")
+                .post(&url)
                 .bearer_auth(&self.api_key)
-                .json(&api_request),
+                .json(&api_request)
+                .timeout(self.request_timeout),
             "openai",
             "type",
         )
@@ -138,41 +763,30 @@ impl ProviderAdapter for Adapter {
                 message: format!("failed to parse OpenAI response: {e}"),
             })?;
 
-        let choice = api_resp.choices.first().ok_or_else(|| SdkError::Provider {
-            kind: ProviderErrorKind::Server,
-            detail: Box::new(ProviderErrorDetail::new("no choices in OpenAI response", "openai")),
-        })?;
+        let (content_parts, has_tool_calls) = parse_output(&api_resp.output);
+        let finish_reason = map_finish_reason(api_resp.status.as_deref(), has_tool_calls);
 
-        let mut content_parts = Vec::new();
-        if let Some(text) = &choice.message.content {
-            if !text.is_empty() {
-                content_parts.push(ContentPart::text(text));
-            }
-        }
-        if let Some(tool_calls) = &choice.message.tool_calls {
-            for tc in tool_calls {
-                let arguments = serde_json::from_str(&tc.function.arguments)
-                    .unwrap_or_else(|_| serde_json::json!({}));
-                content_parts.push(ContentPart::ToolCall(ToolCall::new(
-                    &tc.id,
-                    &tc.function.name,
-                    arguments,
-                )));
-            }
-        }
-
-        let finish_reason = map_finish_reason(choice.finish_reason.as_deref());
-
-        let usage = api_resp.usage.as_ref().map_or_else(Usage::default, |u| Usage {
-            input_tokens: u.prompt_tokens,
-            output_tokens: u.completion_tokens,
-            total_tokens: u.total_tokens,
-            ..Usage::default()
-        });
+        let usage = api_resp
+            .usage
+            .as_ref()
+            .map_or_else(Usage::default, |u| Usage {
+                input_tokens: u.input_tokens,
+                output_tokens: u.output_tokens,
+                total_tokens: u.total_tokens.unwrap_or(u.input_tokens + u.output_tokens),
+                reasoning_tokens: u
+                    .output_tokens_details
+                    .as_ref()
+                    .and_then(|d| d.reasoning_tokens),
+                cache_read_tokens: u
+                    .input_tokens_details
+                    .as_ref()
+                    .and_then(|d| d.cached_tokens),
+                ..Usage::default()
+            });
 
         Ok(Response {
             id: api_resp.id,
-            model: api_resp.model,
+            model: api_resp.model.unwrap_or_else(|| request.model.clone()),
             provider: "openai".to_string(),
             message: Message {
                 role: Role::Assistant,
@@ -184,13 +798,73 @@ impl ProviderAdapter for Adapter {
             usage,
             raw: serde_json::from_str(&body).ok(),
             warnings: vec![],
-            rate_limit: None,
+            rate_limit: parse_rate_limit_headers(&headers),
         })
     }
 
-    async fn stream(&self, _request: &Request) -> Result<StreamEventStream, SdkError> {
-        Err(SdkError::Configuration {
-            message: "streaming not yet implemented".to_string(),
+    async fn stream(&self, request: &Request) -> Result<StreamEventStream, SdkError> {
+        let api_request = build_api_request(request, true);
+        let url = format!("{}/responses", self.base_url);
+
+        let http_resp = self
+            .client
+            .post(&url)
+            .bearer_auth(&self.api_key)
+            .json(&api_request)
+            .send()
+            .await
+            .map_err(|e| SdkError::Network {
+                message: e.to_string(),
+            })?;
+
+        let status = http_resp.status();
+        if !status.is_success() {
+            let retry_after = parse_retry_after(http_resp.headers());
+            let body = http_resp.text().await.map_err(|e| SdkError::Network {
+                message: e.to_string(),
+            })?;
+            let (msg, code, raw) = parse_error_body(&body, "type");
+            return Err(crate::error::error_from_status_code(
+                status.as_u16(),
+                msg,
+                "openai".to_string(),
+                code,
+                raw,
+                retry_after,
+            ));
+        }
+
+        let model = request.model.clone();
+        let rate_limit = parse_rate_limit_headers(http_resp.headers());
+        let byte_stream = http_resp.bytes_stream();
+
+        let state = SseStreamState {
+            byte_stream: Box::pin(byte_stream),
+            buffer: String::new(),
+            model,
+            response_id: String::new(),
+            response_model: String::new(),
+            accumulated_text: String::new(),
+            tool_calls: Vec::new(),
+            usage: Usage::default(),
+            finish_reason: FinishReason::Stop,
+            emitted_start: false,
+            emitted_text_start: false,
+            raw_response: None,
+            rate_limit,
+        };
+
+        let stream = futures::stream::unfold(state, |mut state| async move {
+            let events = process_next_sse_events(&mut state).await;
+            let items: Vec<Result<StreamEvent, SdkError>> = match events {
+                Ok(events) if events.is_empty() => return None,
+                Ok(events) => events.into_iter().map(Ok).collect(),
+                Err(e) => vec![Err(e)],
+            };
+            Some((futures::stream::iter(items), state))
         })
+        .flatten();
+
+        Ok(Box::pin(stream))
     }
 }

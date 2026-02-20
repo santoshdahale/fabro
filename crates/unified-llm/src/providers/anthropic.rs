@@ -1,25 +1,51 @@
+use base64::{engine::general_purpose::STANDARD as BASE64_STANDARD, Engine};
+
 use crate::error::SdkError;
 use crate::provider::{ProviderAdapter, StreamEventStream};
-use crate::providers::common::{extract_system_prompt, send_and_read_body, ApiMessage};
+use crate::providers::common::{
+    extract_system_prompt, parse_error_body, parse_rate_limit_headers, send_and_read_response,
+};
 use crate::types::{
-    ContentPart, FinishReason, Message, Request, Response, Role, ToolCall, Usage,
+    ContentPart, FinishReason, Message, Request, Response, Role, StreamEvent, ThinkingData,
+    ToolCall, ToolChoice, ToolDefinition, Usage,
 };
 
 /// Provider adapter for the Anthropic Messages API.
 pub struct Adapter {
     api_key: String,
+    base_url: String,
     client: reqwest::Client,
+    request_timeout: std::time::Duration,
 }
 
 impl Adapter {
     #[must_use]
     pub fn new(api_key: impl Into<String>) -> Self {
+        let timeout = crate::types::AdapterTimeout::default();
+        let client = reqwest::Client::builder()
+            .connect_timeout(std::time::Duration::from_secs_f64(timeout.connect))
+            .build()
+            .unwrap_or_default();
         Self {
             api_key: api_key.into(),
-            client: reqwest::Client::new(),
+            base_url: DEFAULT_BASE_URL.to_string(),
+            client,
+            request_timeout: std::time::Duration::from_secs_f64(timeout.request),
         }
     }
+
+    #[must_use]
+    pub fn with_base_url(mut self, base_url: impl Into<String>) -> Self {
+        self.base_url = base_url.into();
+        self
+    }
+
+    fn messages_url(&self) -> String {
+        format!("{}/messages", self.base_url)
+    }
 }
+
+const DEFAULT_BASE_URL: &str = "https://api.anthropic.com/v1";
 
 // --- Request types ---
 
@@ -28,14 +54,58 @@ struct ApiRequest {
     model: String,
     messages: Vec<ApiMessage>,
     max_tokens: i64,
+    /// System prompt: either a plain string or an array of content blocks
+    /// (with optional `cache_control` annotations for prompt caching).
     #[serde(skip_serializing_if = "Option::is_none")]
-    system: Option<String>,
+    system: Option<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
     temperature: Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     top_p: Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     stop_sequences: Option<Vec<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    tools: Option<Vec<ApiToolDef>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    tool_choice: Option<serde_json::Value>,
+    /// Extended thinking configuration (e.g. `{"type": "enabled", "budget_tokens": 10000}`).
+    /// Passed through from `provider_options.anthropic.thinking`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    thinking: Option<serde_json::Value>,
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    stream: bool,
+}
+
+/// Anthropic messages use structured content blocks, not plain strings.
+#[derive(serde::Serialize)]
+struct ApiMessage {
+    role: String,
+    content: Vec<serde_json::Value>,
+}
+
+/// Anthropic tool definition format.
+#[derive(serde::Serialize)]
+struct ApiToolDef {
+    name: String,
+    description: String,
+    input_schema: serde_json::Value,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    cache_control: Option<CacheControl>,
+}
+
+/// Anthropic `cache_control` annotation.
+#[derive(serde::Serialize, Clone)]
+struct CacheControl {
+    #[serde(rename = "type")]
+    kind: String,
+}
+
+impl CacheControl {
+    fn ephemeral() -> Self {
+        Self {
+            kind: "ephemeral".to_string(),
+        }
+    }
 }
 
 // --- Response types ---
@@ -50,14 +120,19 @@ struct ApiResponse {
 }
 
 #[derive(serde::Deserialize)]
+#[allow(clippy::struct_field_names)]
 struct ApiUsage {
     input_tokens: i64,
     output_tokens: i64,
+    #[serde(default)]
+    cache_read_input_tokens: Option<i64>,
+    #[serde(default)]
+    cache_creation_input_tokens: Option<i64>,
 }
 
 fn map_finish_reason(stop_reason: Option<&str>) -> FinishReason {
     match stop_reason {
-        Some("end_turn") | None => FinishReason::Stop,
+        Some("end_turn" | "stop_sequence") | None => FinishReason::Stop,
         Some("max_tokens") => FinishReason::Length,
         Some("tool_use") => FinishReason::ToolCalls,
         Some(other) => FinishReason::Other(other.to_string()),
@@ -72,8 +147,732 @@ fn parse_content_block(block: &serde_json::Value) -> Option<ContentPart> {
             block.get("name")?.as_str()?,
             block.get("input")?.clone(),
         ))),
+        "thinking" => Some(ContentPart::Thinking(ThinkingData {
+            text: block.get("thinking")?.as_str()?.to_string(),
+            signature: block
+                .get("signature")
+                .and_then(serde_json::Value::as_str)
+                .map(String::from),
+            redacted: false,
+        })),
+        "redacted_thinking" => Some(ContentPart::RedactedThinking(ThinkingData {
+            text: block
+                .get("data")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or("")
+                .to_string(),
+            signature: None,
+            redacted: true,
+        })),
         _ => None,
     }
+}
+
+/// Translate a unified `ContentPart` to an Anthropic content block JSON value.
+fn content_part_to_api(part: &ContentPart) -> Option<serde_json::Value> {
+    match part {
+        ContentPart::Text(text) => Some(serde_json::json!({"type": "text", "text": text})),
+        ContentPart::ToolCall(tc) => Some(serde_json::json!({
+            "type": "tool_use",
+            "id": tc.id,
+            "name": tc.name,
+            "input": tc.arguments,
+        })),
+        ContentPart::ToolResult(tr) => {
+            let content = tr
+                .content
+                .as_str()
+                .map_or_else(|| tr.content.to_string(), str::to_string);
+            Some(serde_json::json!({
+                "type": "tool_result",
+                "tool_use_id": tr.tool_call_id,
+                "content": content,
+                "is_error": tr.is_error,
+            }))
+        }
+        ContentPart::Thinking(td) => {
+            let mut block = serde_json::json!({
+                "type": "thinking",
+                "thinking": td.text,
+            });
+            if let Some(sig) = &td.signature {
+                block["signature"] = serde_json::Value::String(sig.clone());
+            }
+            Some(block)
+        }
+        ContentPart::RedactedThinking(td) => Some(serde_json::json!({
+            "type": "redacted_thinking",
+            "data": td.text,
+        })),
+        ContentPart::Image(img) => {
+            if let Some(url) = &img.url {
+                if crate::providers::common::is_file_path(url) {
+                    return match crate::providers::common::load_file_as_base64(url) {
+                        Ok((b64, mime)) => Some(serde_json::json!({
+                            "type": "image",
+                            "source": {"type": "base64", "media_type": mime, "data": b64}
+                        })),
+                        Err(_) => None,
+                    };
+                }
+                Some(serde_json::json!({"type": "image", "source": {"type": "url", "url": url}}))
+            } else {
+                img.data.as_ref().map(|data| {
+                    let mime = img.media_type.as_deref().unwrap_or("image/png");
+                    let b64 = BASE64_STANDARD.encode(data);
+                    serde_json::json!({"type": "image", "source": {"type": "base64", "media_type": mime, "data": b64}})
+                })
+            }
+        }
+        _ => None,
+    }
+}
+
+/// Convert unified messages to Anthropic API messages.
+///
+/// Handles: role mapping, content block translation, strict alternation
+/// (merging consecutive same-role messages), and tool results in user messages.
+fn translate_messages(messages: &[&Message]) -> Vec<ApiMessage> {
+    let mut api_messages: Vec<ApiMessage> = Vec::new();
+
+    for msg in messages {
+        let role = match msg.role {
+            Role::Assistant => "assistant",
+            // Tool results go in user messages for Anthropic
+            Role::User | Role::Tool => "user",
+            // System and Developer are extracted separately
+            Role::System | Role::Developer => continue,
+        };
+
+        let content: Vec<serde_json::Value> = msg
+            .content
+            .iter()
+            .filter_map(content_part_to_api)
+            .collect();
+
+        if content.is_empty() {
+            continue;
+        }
+
+        // Enforce strict user/assistant alternation by merging consecutive same-role messages
+        if let Some(last) = api_messages.last_mut() {
+            if last.role == role {
+                last.content.extend(content);
+                continue;
+            }
+        }
+
+        api_messages.push(ApiMessage {
+            role: role.to_string(),
+            content,
+        });
+    }
+
+    api_messages
+}
+
+/// Translate unified `ToolDefinition` to Anthropic format.
+fn translate_tools(tools: &[ToolDefinition]) -> Vec<ApiToolDef> {
+    tools
+        .iter()
+        .map(|t| ApiToolDef {
+            name: t.name.clone(),
+            description: t.description.clone(),
+            input_schema: t.parameters.clone(),
+            cache_control: None,
+        })
+        .collect()
+}
+
+/// Translate unified `ToolChoice` to Anthropic's `tool_choice` JSON.
+fn translate_tool_choice(choice: &ToolChoice) -> Option<serde_json::Value> {
+    match choice {
+        ToolChoice::Auto => Some(serde_json::json!({"type": "auto"})),
+        // Anthropic does not support tool_choice none with tools present.
+        // The caller should omit tools from the request instead.
+        ToolChoice::None => None,
+        ToolChoice::Required => Some(serde_json::json!({"type": "any"})),
+        ToolChoice::Named { tool_name } => {
+            Some(serde_json::json!({"type": "tool", "name": tool_name}))
+        }
+    }
+}
+
+// --- Prompt caching helpers ---
+
+const CACHE_BETA_HEADER: &str = "prompt-caching-2024-07-31";
+
+/// Check whether auto-caching is disabled via `provider_options`.
+///
+/// Returns `true` if caching should be applied (the default).
+/// Only returns `false` if `provider_options.anthropic.auto_cache` is explicitly `false`.
+/// Extract the `thinking` configuration from `provider_options.anthropic.thinking`.
+fn extract_thinking_config(provider_options: Option<&serde_json::Value>) -> Option<serde_json::Value> {
+    provider_options
+        .and_then(|opts| opts.get("anthropic"))
+        .and_then(|anthropic| anthropic.get("thinking"))
+        .cloned()
+}
+
+fn is_auto_cache_enabled(provider_options: Option<&serde_json::Value>) -> bool {
+    provider_options
+        .and_then(|opts| opts.get("anthropic"))
+        .and_then(|anthropic| anthropic.get("auto_cache"))
+        .and_then(serde_json::Value::as_bool)
+        .unwrap_or(true)
+}
+
+/// Wrap a system prompt string as an array of content blocks with `cache_control`
+/// on the last block.
+fn system_with_cache_control(system: &str) -> serde_json::Value {
+    serde_json::json!([{
+        "type": "text",
+        "text": system,
+        "cache_control": {"type": "ephemeral"}
+    }])
+}
+
+/// Add `cache_control` to the last tool definition.
+fn apply_cache_control_to_last_tool(tools: &mut [ApiToolDef]) {
+    if let Some(last) = tools.last_mut() {
+        last.cache_control = Some(CacheControl::ephemeral());
+    }
+}
+
+/// Add `cache_control` to the last content block of the second-to-last user message.
+///
+/// In a multi-turn conversation, the conversation prefix (everything before the latest
+/// user turn) is stable and benefits from caching. We find the last user message before
+/// the final one and annotate its last content block.
+fn apply_cache_control_to_conversation_prefix(messages: &mut [ApiMessage]) {
+    // Find all user message indices
+    let user_indices: Vec<usize> = messages
+        .iter()
+        .enumerate()
+        .filter(|(_, m)| m.role == "user")
+        .map(|(i, _)| i)
+        .collect();
+
+    // We need at least 2 user messages to have a "prefix" user message
+    if user_indices.len() < 2 {
+        return;
+    }
+
+    // The second-to-last user message is the one to cache
+    let target_idx = user_indices[user_indices.len() - 2];
+    if let Some(serde_json::Value::Object(map)) = messages[target_idx].content.last_mut() {
+        map.insert(
+            "cache_control".to_string(),
+            serde_json::json!({"type": "ephemeral"}),
+        );
+    }
+}
+
+/// Collect beta headers from `provider_options` and merge with the caching header
+/// when auto-caching is active.
+fn build_beta_header(
+    provider_options: Option<&serde_json::Value>,
+    include_cache_header: bool,
+) -> Option<String> {
+    let mut headers: Vec<String> = Vec::new();
+
+    // Add user-provided beta headers
+    if let Some(beta_array) = provider_options
+        .and_then(|opts| opts.get("anthropic"))
+        .and_then(|anthropic| anthropic.get("beta_headers"))
+        .and_then(serde_json::Value::as_array)
+    {
+        headers.extend(
+            beta_array
+                .iter()
+                .filter_map(serde_json::Value::as_str)
+                .map(String::from),
+        );
+    }
+
+    // Add prompt-caching header if caching is active and not already present
+    if include_cache_header && !headers.iter().any(|h| h == CACHE_BETA_HEADER) {
+        headers.push(CACHE_BETA_HEADER.to_string());
+    }
+
+    if headers.is_empty() {
+        None
+    } else {
+        Some(headers.join(","))
+    }
+}
+
+// --- Streaming types and helpers ---
+
+/// The type of the current content block being streamed.
+#[derive(Clone)]
+enum ContentBlockKind {
+    Text,
+    ToolUse { id: String, name: String },
+    Thinking { signature: Option<String> },
+}
+
+/// Accumulated state across SSE events during streaming.
+struct StreamAccumulator {
+    id: String,
+    model: String,
+    content_parts: Vec<ContentPart>,
+    usage: Usage,
+    finish_reason: FinishReason,
+    /// The kind of the current content block, set by `content_block_start`.
+    current_block: Option<ContentBlockKind>,
+    /// Accumulated text for the current text block.
+    current_text: String,
+    /// Accumulated thinking text for the current thinking block.
+    current_thinking: String,
+    /// Accumulated raw JSON arguments for the current `tool_use` block.
+    current_tool_args: String,
+    /// Rate limit info parsed from the initial HTTP response headers.
+    rate_limit: Option<crate::types::RateLimitInfo>,
+}
+
+impl StreamAccumulator {
+    fn new(rate_limit: Option<crate::types::RateLimitInfo>) -> Self {
+        Self {
+            id: String::new(),
+            model: String::new(),
+            content_parts: Vec::new(),
+            usage: Usage::default(),
+            finish_reason: FinishReason::Stop,
+            current_block: None,
+            current_text: String::new(),
+            current_thinking: String::new(),
+            current_tool_args: String::new(),
+            rate_limit,
+        }
+    }
+
+    /// Build the final `Response` from accumulated state, consuming content parts.
+    fn take_response(&mut self) -> Response {
+        let content_parts = std::mem::take(&mut self.content_parts);
+        Response {
+            id: self.id.clone(),
+            model: self.model.clone(),
+            provider: "anthropic".to_string(),
+            message: Message {
+                role: Role::Assistant,
+                content: content_parts,
+                name: None,
+                tool_call_id: None,
+            },
+            finish_reason: self.finish_reason.clone(),
+            usage: self.usage.clone(),
+            raw: None,
+            warnings: vec![],
+            rate_limit: self.rate_limit.clone(),
+        }
+    }
+}
+
+impl StreamAccumulator {
+    fn handle_message_start(&mut self, data: &serde_json::Value) -> Vec<StreamEvent> {
+        if let Some(message) = data.get("message") {
+            if let Some(id) = message.get("id").and_then(serde_json::Value::as_str) {
+                self.id = id.to_string();
+            }
+            if let Some(model) = message.get("model").and_then(serde_json::Value::as_str) {
+                self.model = model.to_string();
+            }
+            if let Some(usage) = message.get("usage") {
+                self.usage.input_tokens = usage
+                    .get("input_tokens")
+                    .and_then(serde_json::Value::as_i64)
+                    .unwrap_or(0);
+                self.usage.cache_read_tokens = usage
+                    .get("cache_read_input_tokens")
+                    .and_then(serde_json::Value::as_i64);
+                self.usage.cache_write_tokens = usage
+                    .get("cache_creation_input_tokens")
+                    .and_then(serde_json::Value::as_i64);
+            }
+        }
+        vec![StreamEvent::StreamStart]
+    }
+
+    fn handle_content_block_start(&mut self, data: &serde_json::Value) -> Vec<StreamEvent> {
+        let block_type = data
+            .get("content_block")
+            .and_then(|b| b.get("type"))
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("");
+
+        let index = data
+            .get("index")
+            .and_then(serde_json::Value::as_u64)
+            .unwrap_or(0);
+        let text_id = Some(format!("block_{index}"));
+
+        match block_type {
+            "text" => {
+                self.current_block = Some(ContentBlockKind::Text);
+                self.current_text.clear();
+                vec![StreamEvent::TextStart { text_id }]
+            }
+            "tool_use" => {
+                let content_block = data.get("content_block");
+                let id = content_block
+                    .and_then(|b| b.get("id"))
+                    .and_then(serde_json::Value::as_str)
+                    .unwrap_or("")
+                    .to_string();
+                let name = content_block
+                    .and_then(|b| b.get("name"))
+                    .and_then(serde_json::Value::as_str)
+                    .unwrap_or("")
+                    .to_string();
+                self.current_block = Some(ContentBlockKind::ToolUse {
+                    id: id.clone(),
+                    name: name.clone(),
+                });
+                self.current_tool_args.clear();
+                vec![StreamEvent::ToolCallStart {
+                    tool_call: ToolCall::new(id, name, serde_json::json!({})),
+                }]
+            }
+            "thinking" => {
+                let signature = data
+                    .get("content_block")
+                    .and_then(|b| b.get("signature"))
+                    .and_then(serde_json::Value::as_str)
+                    .map(String::from);
+                self.current_block = Some(ContentBlockKind::Thinking { signature });
+                self.current_thinking.clear();
+                vec![StreamEvent::ReasoningStart]
+            }
+            _ => vec![],
+        }
+    }
+
+    fn handle_content_block_delta(&mut self, data: &serde_json::Value) -> Vec<StreamEvent> {
+        let delta = data.get("delta");
+        let delta_type = delta
+            .and_then(|d| d.get("type"))
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("");
+
+        match delta_type {
+            "text_delta" => {
+                let text = delta
+                    .and_then(|d| d.get("text"))
+                    .and_then(serde_json::Value::as_str)
+                    .unwrap_or("");
+                self.current_text.push_str(text);
+
+                let index = data
+                    .get("index")
+                    .and_then(serde_json::Value::as_u64)
+                    .unwrap_or(0);
+
+                vec![StreamEvent::TextDelta {
+                    delta: text.to_string(),
+                    text_id: Some(format!("block_{index}")),
+                }]
+            }
+            "input_json_delta" => {
+                let partial_json = delta
+                    .and_then(|d| d.get("partial_json"))
+                    .and_then(serde_json::Value::as_str)
+                    .unwrap_or("");
+                self.current_tool_args.push_str(partial_json);
+
+                if let Some(ContentBlockKind::ToolUse { id, name }) = &self.current_block {
+                    vec![StreamEvent::ToolCallDelta {
+                        tool_call: ToolCall::new(
+                            id.clone(),
+                            name.clone(),
+                            serde_json::json!(partial_json),
+                        ),
+                    }]
+                } else {
+                    vec![]
+                }
+            }
+            "thinking_delta" => {
+                let thinking = delta
+                    .and_then(|d| d.get("thinking"))
+                    .and_then(serde_json::Value::as_str)
+                    .unwrap_or("");
+                self.current_thinking.push_str(thinking);
+                vec![StreamEvent::ReasoningDelta {
+                    delta: thinking.to_string(),
+                }]
+            }
+            _ => vec![],
+        }
+    }
+
+    fn handle_content_block_stop(&mut self, data: &serde_json::Value) -> Vec<StreamEvent> {
+        let current_block = self.current_block.take();
+        match current_block {
+            Some(ContentBlockKind::Text) => {
+                let text = std::mem::take(&mut self.current_text);
+                self.content_parts.push(ContentPart::text(&text));
+
+                let index = data
+                    .get("index")
+                    .and_then(serde_json::Value::as_u64)
+                    .unwrap_or(0);
+
+                vec![StreamEvent::TextEnd {
+                    text_id: Some(format!("block_{index}")),
+                }]
+            }
+            Some(ContentBlockKind::ToolUse { id, name }) => {
+                let raw_args = std::mem::take(&mut self.current_tool_args);
+                let arguments = serde_json::from_str(&raw_args)
+                    .unwrap_or_else(|_| serde_json::json!({}));
+                let mut tool_call = ToolCall::new(id, name, arguments);
+                tool_call.raw_arguments = Some(raw_args);
+                self.content_parts
+                    .push(ContentPart::ToolCall(tool_call.clone()));
+                vec![StreamEvent::ToolCallEnd { tool_call }]
+            }
+            Some(ContentBlockKind::Thinking { signature }) => {
+                let thinking_text = std::mem::take(&mut self.current_thinking);
+                // Prefer signature from content_block_stop if available,
+                // fall back to one captured at content_block_start.
+                let stop_signature = data
+                    .get("content_block")
+                    .and_then(|b| b.get("signature"))
+                    .and_then(serde_json::Value::as_str)
+                    .map(String::from);
+                self.content_parts.push(ContentPart::Thinking(ThinkingData {
+                    text: thinking_text,
+                    signature: stop_signature.or(signature),
+                    redacted: false,
+                }));
+                vec![StreamEvent::ReasoningEnd]
+            }
+            None => vec![],
+        }
+    }
+
+    fn handle_message_delta(&mut self, data: &serde_json::Value) {
+        if let Some(delta) = data.get("delta") {
+            let stop_reason = delta
+                .get("stop_reason")
+                .and_then(serde_json::Value::as_str);
+            self.finish_reason = map_finish_reason(stop_reason);
+        }
+        if let Some(usage) = data.get("usage") {
+            self.usage.output_tokens = usage
+                .get("output_tokens")
+                .and_then(serde_json::Value::as_i64)
+                .unwrap_or(0);
+            self.usage.total_tokens = self.usage.input_tokens + self.usage.output_tokens;
+        }
+    }
+
+    fn handle_message_stop(&mut self) -> Vec<StreamEvent> {
+        let response = self.take_response();
+        vec![StreamEvent::Finish {
+            finish_reason: response.finish_reason.clone(),
+            usage: response.usage.clone(),
+            response: Box::new(response),
+        }]
+    }
+}
+
+/// Process a single SSE event and return zero or more `StreamEvent`s.
+fn process_sse_event(
+    event_type: &str,
+    data: &serde_json::Value,
+    acc: &mut StreamAccumulator,
+) -> Vec<StreamEvent> {
+    match event_type {
+        "message_start" => acc.handle_message_start(data),
+        "content_block_start" => acc.handle_content_block_start(data),
+        "content_block_delta" => acc.handle_content_block_delta(data),
+        "content_block_stop" => acc.handle_content_block_stop(data),
+        "message_delta" => {
+            acc.handle_message_delta(data);
+            vec![]
+        }
+        "message_stop" => acc.handle_message_stop(),
+        _ => vec![],
+    }
+}
+
+// --- SSE reader ---
+
+enum SseResult {
+    Event { event_type: String, data: String },
+    Done,
+    Error(SdkError),
+}
+
+struct SseReaderState {
+    byte_stream: futures::stream::BoxStream<'static, Result<bytes::Bytes, reqwest::Error>>,
+    buffer: String,
+    accumulator: StreamAccumulator,
+    pending_events: std::collections::VecDeque<StreamEvent>,
+    done: bool,
+}
+
+impl SseReaderState {
+    fn new(
+        byte_stream: impl futures::Stream<Item = Result<bytes::Bytes, reqwest::Error>>
+            + Send
+            + 'static,
+        rate_limit: Option<crate::types::RateLimitInfo>,
+    ) -> Self {
+        use futures::StreamExt;
+        Self {
+            byte_stream: byte_stream.boxed(),
+            buffer: String::new(),
+            accumulator: StreamAccumulator::new(rate_limit),
+            pending_events: std::collections::VecDeque::new(),
+            done: false,
+        }
+    }
+
+    /// Read the next complete SSE event from the byte stream.
+    ///
+    /// SSE events are separated by double newlines. Each event has optional
+    /// `event:` and `data:` lines.
+    async fn next_sse_event(&mut self) -> SseResult {
+        use futures::StreamExt;
+
+        loop {
+            // Try to extract a complete SSE event from the buffer.
+            if let Some(result) = self.try_parse_event() {
+                return result;
+            }
+
+            if self.done {
+                return SseResult::Done;
+            }
+
+            // Read more bytes from the stream.
+            match self.byte_stream.next().await {
+                Some(Ok(chunk)) => {
+                    let text = String::from_utf8_lossy(&chunk);
+                    self.buffer.push_str(&text);
+                }
+                Some(Err(e)) => {
+                    return SseResult::Error(SdkError::Stream {
+                        message: e.to_string(),
+                    });
+                }
+                None => {
+                    self.done = true;
+                    // Try one more time to parse any remaining data.
+                    if let Some(result) = self.try_parse_event() {
+                        return result;
+                    }
+                    return SseResult::Done;
+                }
+            }
+        }
+    }
+
+    /// Attempt to parse one complete SSE event from the buffer.
+    ///
+    /// Returns `None` if no complete event is available yet.
+    fn try_parse_event(&mut self) -> Option<SseResult> {
+        // SSE events are terminated by a blank line (double newline).
+        let separator = self.buffer.find("\n\n")?;
+        let event_block = self.buffer[..separator].to_string();
+        self.buffer = self.buffer[separator + 2..].to_string();
+
+        let mut event_type = String::new();
+        let mut data_parts: Vec<String> = Vec::new();
+
+        for line in event_block.lines() {
+            if let Some(rest) = line.strip_prefix("event:") {
+                event_type = rest.trim().to_string();
+            } else if let Some(rest) = line.strip_prefix("data:") {
+                data_parts.push(rest.trim().to_string());
+            }
+            // Ignore other SSE fields (id:, retry:, comments starting with :)
+        }
+
+        // Skip events with no data (e.g. heartbeat comments).
+        if data_parts.is_empty() {
+            return None;
+        }
+
+        let data = data_parts.join("\n");
+        Some(SseResult::Event { event_type, data })
+    }
+}
+
+/// Build the streaming request body and headers, mirroring `complete()` logic
+/// but with `stream: true`.
+fn build_stream_request(
+    adapter: &Adapter,
+    request: &Request,
+) -> (ApiRequest, reqwest::RequestBuilder) {
+    let (system, other_messages) = extract_system_prompt(&request.messages);
+    let mut api_messages = translate_messages(&other_messages);
+
+    let mut omit_tools = false;
+    let tool_choice_json = request.tool_choice.as_ref().and_then(|tc| {
+        if matches!(tc, ToolChoice::None) {
+            omit_tools = true;
+            None
+        } else {
+            translate_tool_choice(tc)
+        }
+    });
+
+    let mut api_tools = if omit_tools {
+        None
+    } else {
+        request.tools.as_ref().map(|t| translate_tools(t))
+    };
+
+    let auto_cache = is_auto_cache_enabled(request.provider_options.as_ref());
+
+    let system_value = system.map(|s| {
+        if auto_cache {
+            system_with_cache_control(&s)
+        } else {
+            serde_json::Value::String(s)
+        }
+    });
+
+    if auto_cache {
+        if let Some(ref mut tools) = api_tools {
+            apply_cache_control_to_last_tool(tools);
+        }
+        apply_cache_control_to_conversation_prefix(&mut api_messages);
+    }
+
+    let thinking = extract_thinking_config(request.provider_options.as_ref());
+
+    let api_request = ApiRequest {
+        model: request.model.clone(),
+        messages: api_messages,
+        max_tokens: request.max_tokens.unwrap_or(4096),
+        system: system_value,
+        temperature: request.temperature,
+        top_p: request.top_p,
+        stop_sequences: request.stop_sequences.clone(),
+        tools: api_tools,
+        tool_choice: tool_choice_json,
+        thinking,
+        stream: true,
+    };
+
+    let url = adapter.messages_url();
+    let mut req_builder = adapter
+        .client
+        .post(&url)
+        .header("x-api-key", &adapter.api_key)
+        .header("anthropic-version", "2023-06-01");
+
+    if let Some(beta_str) = build_beta_header(request.provider_options.as_ref(), auto_cache) {
+        req_builder = req_builder.header("anthropic-beta", beta_str);
+    }
+
+    let req_builder = req_builder.json(&api_request);
+    (api_request, req_builder)
 }
 
 #[allow(clippy::unnecessary_literal_bound)]
@@ -85,41 +884,78 @@ impl ProviderAdapter for Adapter {
 
     async fn complete(&self, request: &Request) -> Result<Response, SdkError> {
         let (system, other_messages) = extract_system_prompt(&request.messages);
+        let mut api_messages = translate_messages(&other_messages);
 
-        let api_messages: Vec<ApiMessage> = other_messages
-            .iter()
-            .map(|msg| {
-                let role = match msg.role {
-                    Role::Assistant => "assistant",
-                    Role::System | Role::User | Role::Tool | Role::Developer => "user",
-                };
-                ApiMessage {
-                    role: role.to_string(),
-                    content: msg.text(),
-                }
-            })
-            .collect();
+        // Handle tools and tool_choice
+        let mut omit_tools = false;
+        let tool_choice_json = request.tool_choice.as_ref().and_then(|tc| {
+            if matches!(tc, ToolChoice::None) {
+                omit_tools = true;
+                None
+            } else {
+                translate_tool_choice(tc)
+            }
+        });
+
+        let mut api_tools = if omit_tools {
+            None
+        } else {
+            request.tools.as_ref().map(|t| translate_tools(t))
+        };
+
+        // Determine if auto-caching is enabled
+        let auto_cache = is_auto_cache_enabled(request.provider_options.as_ref());
+
+        // Build system prompt value, optionally with cache_control
+        let system_value = system.map(|s| {
+            if auto_cache {
+                system_with_cache_control(&s)
+            } else {
+                serde_json::Value::String(s)
+            }
+        });
+
+        // Apply cache_control breakpoints when auto-caching is enabled
+        if auto_cache {
+            if let Some(ref mut tools) = api_tools {
+                apply_cache_control_to_last_tool(tools);
+            }
+            apply_cache_control_to_conversation_prefix(&mut api_messages);
+        }
+
+        let thinking = extract_thinking_config(request.provider_options.as_ref());
 
         let api_request = ApiRequest {
             model: request.model.clone(),
             messages: api_messages,
-            max_tokens: request.max_tokens.unwrap_or(1024),
-            system,
+            max_tokens: request.max_tokens.unwrap_or(4096),
+            system: system_value,
             temperature: request.temperature,
             top_p: request.top_p,
             stop_sequences: request.stop_sequences.clone(),
+            tools: api_tools,
+            tool_choice: tool_choice_json,
+            thinking,
+            stream: false,
         };
 
-        let body = send_and_read_body(
-            self.client
-                .post("https://api.anthropic.com/v1/messages")
-                .header("x-api-key", &self.api_key)
-                .header("anthropic-version", "2023-06-01")
-                .json(&api_request),
-            "anthropic",
-            "type",
-        )
-        .await?;
+        // Build headers
+        let url = self.messages_url();
+        let mut req_builder = self
+            .client
+            .post(&url)
+            .header("x-api-key", &self.api_key)
+            .header("anthropic-version", "2023-06-01");
+
+        // Build beta header: merge user-provided headers with cache header when active
+        if let Some(beta_str) =
+            build_beta_header(request.provider_options.as_ref(), auto_cache)
+        {
+            req_builder = req_builder.header("anthropic-beta", beta_str);
+        }
+
+        let (body, headers) =
+            send_and_read_response(req_builder.json(&api_request).timeout(self.request_timeout), "anthropic", "type").await?;
 
         let api_resp: ApiResponse =
             serde_json::from_str(&body).map_err(|e| SdkError::Network {
@@ -150,17 +986,394 @@ impl ProviderAdapter for Adapter {
                 input_tokens: api_resp.usage.input_tokens,
                 output_tokens: api_resp.usage.output_tokens,
                 total_tokens: total,
+                cache_read_tokens: api_resp.usage.cache_read_input_tokens,
+                cache_write_tokens: api_resp.usage.cache_creation_input_tokens,
                 ..Usage::default()
             },
             raw: serde_json::from_str(&body).ok(),
             warnings: vec![],
-            rate_limit: None,
+            rate_limit: parse_rate_limit_headers(&headers),
         })
     }
 
-    async fn stream(&self, _request: &Request) -> Result<StreamEventStream, SdkError> {
-        Err(SdkError::Configuration {
-            message: "streaming not yet implemented".to_string(),
-        })
+    async fn stream(&self, request: &Request) -> Result<StreamEventStream, SdkError> {
+        let (_api_request, req_builder) = build_stream_request(self, request);
+
+        let http_resp = req_builder.send().await.map_err(|e| SdkError::Network {
+            message: e.to_string(),
+        })?;
+
+        let status = http_resp.status();
+        if !status.is_success() {
+            let body = http_resp.text().await.map_err(|e| SdkError::Network {
+                message: e.to_string(),
+            })?;
+            let (msg, code, raw) = parse_error_body(&body, "type");
+            return Err(crate::error::error_from_status_code(
+                status.as_u16(),
+                msg,
+                "anthropic".to_string(),
+                code,
+                raw,
+                None,
+            ));
+        }
+
+        let rate_limit = parse_rate_limit_headers(http_resp.headers());
+        let byte_stream = http_resp.bytes_stream();
+
+        let stream = futures::stream::unfold(
+            SseReaderState::new(byte_stream, rate_limit),
+            |mut state| async move {
+                loop {
+                    // Drain any buffered events first.
+                    if let Some(event) = state.pending_events.pop_front() {
+                        return Some((Ok(event), state));
+                    }
+
+                    // Read more SSE data from the byte stream.
+                    match state.next_sse_event().await {
+                        SseResult::Event { event_type, data } => {
+                            let parsed: serde_json::Value = match serde_json::from_str(&data) {
+                                Ok(v) => v,
+                                Err(e) => {
+                                    return Some((
+                                        Err(SdkError::Stream {
+                                            message: format!("failed to parse SSE data: {e}"),
+                                        }),
+                                        state,
+                                    ));
+                                }
+                            };
+                            let events =
+                                process_sse_event(&event_type, &parsed, &mut state.accumulator);
+                            state.pending_events.extend(events);
+                            // Loop to drain from pending_events.
+                        }
+                        SseResult::Done => return None,
+                        SseResult::Error(err) => return Some((Err(err), state)),
+                    }
+                }
+            },
+        );
+
+        Ok(Box::pin(stream))
+    }
+
+    fn supports_tool_choice(&self, mode: &str) -> bool {
+        matches!(mode, "auto" | "none" | "required" | "named")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn auto_cache_enabled_by_default() {
+        assert!(is_auto_cache_enabled(None));
+    }
+
+    #[test]
+    fn auto_cache_enabled_when_true() {
+        let opts = serde_json::json!({"anthropic": {"auto_cache": true}});
+        assert!(is_auto_cache_enabled(Some(&opts)));
+    }
+
+    #[test]
+    fn auto_cache_disabled_when_false() {
+        let opts = serde_json::json!({"anthropic": {"auto_cache": false}});
+        assert!(!is_auto_cache_enabled(Some(&opts)));
+    }
+
+    #[test]
+    fn auto_cache_enabled_when_key_missing() {
+        let opts = serde_json::json!({"anthropic": {}});
+        assert!(is_auto_cache_enabled(Some(&opts)));
+    }
+
+    #[test]
+    fn auto_cache_enabled_when_anthropic_missing() {
+        let opts = serde_json::json!({"openai": {}});
+        assert!(is_auto_cache_enabled(Some(&opts)));
+    }
+
+    #[test]
+    fn system_prompt_cache_control_wraps_as_array() {
+        let result = system_with_cache_control("You are helpful.");
+        let arr = result.as_array().expect("should be an array");
+        assert_eq!(arr.len(), 1);
+        assert_eq!(arr[0]["type"], "text");
+        assert_eq!(arr[0]["text"], "You are helpful.");
+        assert_eq!(arr[0]["cache_control"]["type"], "ephemeral");
+    }
+
+    #[test]
+    fn tool_cache_control_applied_to_last_tool() {
+        let mut tools = vec![
+            ApiToolDef {
+                name: "tool_a".to_string(),
+                description: "first".to_string(),
+                input_schema: serde_json::json!({}),
+                cache_control: None,
+            },
+            ApiToolDef {
+                name: "tool_b".to_string(),
+                description: "second".to_string(),
+                input_schema: serde_json::json!({}),
+                cache_control: None,
+            },
+        ];
+        apply_cache_control_to_last_tool(&mut tools);
+
+        assert!(tools[0].cache_control.is_none());
+        assert!(tools[1].cache_control.is_some());
+        assert_eq!(tools[1].cache_control.as_ref().unwrap().kind, "ephemeral");
+    }
+
+    #[test]
+    fn tool_cache_control_empty_slice() {
+        let mut tools: Vec<ApiToolDef> = vec![];
+        apply_cache_control_to_last_tool(&mut tools);
+        assert!(tools.is_empty());
+    }
+
+    #[test]
+    fn tool_cache_control_single_tool() {
+        let mut tools = vec![ApiToolDef {
+            name: "only_tool".to_string(),
+            description: "the one".to_string(),
+            input_schema: serde_json::json!({}),
+            cache_control: None,
+        }];
+        apply_cache_control_to_last_tool(&mut tools);
+        assert!(tools[0].cache_control.is_some());
+    }
+
+    #[test]
+    fn conversation_prefix_cache_control_with_two_user_messages() {
+        let mut messages = vec![
+            ApiMessage {
+                role: "user".to_string(),
+                content: vec![serde_json::json!({"type": "text", "text": "Hello"})],
+            },
+            ApiMessage {
+                role: "assistant".to_string(),
+                content: vec![serde_json::json!({"type": "text", "text": "Hi there"})],
+            },
+            ApiMessage {
+                role: "user".to_string(),
+                content: vec![serde_json::json!({"type": "text", "text": "How are you?"})],
+            },
+        ];
+
+        apply_cache_control_to_conversation_prefix(&mut messages);
+
+        // First user message should have cache_control
+        assert_eq!(
+            messages[0].content[0]["cache_control"]["type"],
+            "ephemeral"
+        );
+        // Last user message should NOT have cache_control
+        assert!(messages[2].content[0].get("cache_control").is_none());
+        // Assistant message should NOT have cache_control
+        assert!(messages[1].content[0].get("cache_control").is_none());
+    }
+
+    #[test]
+    fn conversation_prefix_cache_control_with_multiple_content_blocks() {
+        let mut messages = vec![
+            ApiMessage {
+                role: "user".to_string(),
+                content: vec![
+                    serde_json::json!({"type": "text", "text": "Part 1"}),
+                    serde_json::json!({"type": "text", "text": "Part 2"}),
+                ],
+            },
+            ApiMessage {
+                role: "assistant".to_string(),
+                content: vec![serde_json::json!({"type": "text", "text": "Reply"})],
+            },
+            ApiMessage {
+                role: "user".to_string(),
+                content: vec![serde_json::json!({"type": "text", "text": "Follow up"})],
+            },
+        ];
+
+        apply_cache_control_to_conversation_prefix(&mut messages);
+
+        // Only the LAST content block of the first user message should have cache_control
+        assert!(messages[0].content[0].get("cache_control").is_none());
+        assert_eq!(
+            messages[0].content[1]["cache_control"]["type"],
+            "ephemeral"
+        );
+    }
+
+    #[test]
+    fn conversation_prefix_cache_control_single_user_message() {
+        let mut messages = vec![ApiMessage {
+            role: "user".to_string(),
+            content: vec![serde_json::json!({"type": "text", "text": "Hello"})],
+        }];
+
+        apply_cache_control_to_conversation_prefix(&mut messages);
+
+        // With only one user message, no cache_control should be added
+        assert!(messages[0].content[0].get("cache_control").is_none());
+    }
+
+    #[test]
+    fn conversation_prefix_cache_control_no_user_messages() {
+        let mut messages: Vec<ApiMessage> = vec![];
+        // Should not panic on empty messages
+        apply_cache_control_to_conversation_prefix(&mut messages);
+    }
+
+    #[test]
+    fn conversation_prefix_cache_control_three_user_messages() {
+        let mut messages = vec![
+            ApiMessage {
+                role: "user".to_string(),
+                content: vec![serde_json::json!({"type": "text", "text": "First"})],
+            },
+            ApiMessage {
+                role: "assistant".to_string(),
+                content: vec![serde_json::json!({"type": "text", "text": "Reply 1"})],
+            },
+            ApiMessage {
+                role: "user".to_string(),
+                content: vec![serde_json::json!({"type": "text", "text": "Second"})],
+            },
+            ApiMessage {
+                role: "assistant".to_string(),
+                content: vec![serde_json::json!({"type": "text", "text": "Reply 2"})],
+            },
+            ApiMessage {
+                role: "user".to_string(),
+                content: vec![serde_json::json!({"type": "text", "text": "Third"})],
+            },
+        ];
+
+        apply_cache_control_to_conversation_prefix(&mut messages);
+
+        // Only the second-to-last user message (index 2) should get cache_control
+        assert!(messages[0].content[0].get("cache_control").is_none());
+        assert_eq!(
+            messages[2].content[0]["cache_control"]["type"],
+            "ephemeral"
+        );
+        assert!(messages[4].content[0].get("cache_control").is_none());
+    }
+
+    #[test]
+    fn beta_header_includes_cache_header() {
+        let result = build_beta_header(None, true);
+        assert_eq!(result, Some(CACHE_BETA_HEADER.to_string()));
+    }
+
+    #[test]
+    fn beta_header_no_cache_no_user_headers() {
+        let result = build_beta_header(None, false);
+        assert_eq!(result, None);
+    }
+
+    #[test]
+    fn beta_header_merges_user_headers_with_cache() {
+        let opts = serde_json::json!({
+            "anthropic": {
+                "beta_headers": ["interleaved-thinking-2025-05-14"]
+            }
+        });
+        let result = build_beta_header(Some(&opts), true);
+        assert_eq!(
+            result,
+            Some(format!(
+                "interleaved-thinking-2025-05-14,{CACHE_BETA_HEADER}"
+            ))
+        );
+    }
+
+    #[test]
+    fn beta_header_no_duplicate_cache_header() {
+        let opts = serde_json::json!({
+            "anthropic": {
+                "beta_headers": [CACHE_BETA_HEADER]
+            }
+        });
+        let result = build_beta_header(Some(&opts), true);
+        // Should not duplicate the header
+        assert_eq!(result, Some(CACHE_BETA_HEADER.to_string()));
+    }
+
+    #[test]
+    fn beta_header_user_headers_only_when_cache_disabled() {
+        let opts = serde_json::json!({
+            "anthropic": {
+                "beta_headers": ["interleaved-thinking-2025-05-14"]
+            }
+        });
+        let result = build_beta_header(Some(&opts), false);
+        assert_eq!(
+            result,
+            Some("interleaved-thinking-2025-05-14".to_string())
+        );
+    }
+
+    #[test]
+    fn tool_serialization_includes_cache_control() {
+        let tool = ApiToolDef {
+            name: "test_tool".to_string(),
+            description: "A test tool".to_string(),
+            input_schema: serde_json::json!({"type": "object"}),
+            cache_control: Some(CacheControl::ephemeral()),
+        };
+        let json = serde_json::to_value(&tool).expect("should serialize");
+        assert_eq!(json["cache_control"]["type"], "ephemeral");
+    }
+
+    #[test]
+    fn tool_serialization_omits_cache_control_when_none() {
+        let tool = ApiToolDef {
+            name: "test_tool".to_string(),
+            description: "A test tool".to_string(),
+            input_schema: serde_json::json!({"type": "object"}),
+            cache_control: None,
+        };
+        let json = serde_json::to_value(&tool).expect("should serialize");
+        assert!(json.get("cache_control").is_none());
+    }
+
+    #[test]
+    fn system_prompt_as_string_when_cache_disabled() {
+        let system = "You are helpful.".to_string();
+        let value = serde_json::Value::String(system);
+        assert_eq!(value.as_str(), Some("You are helpful."));
+    }
+
+    #[test]
+    fn api_request_serialization_with_cached_system() {
+        let api_request = ApiRequest {
+            model: "claude-sonnet-4-20250514".to_string(),
+            messages: vec![ApiMessage {
+                role: "user".to_string(),
+                content: vec![serde_json::json!({"type": "text", "text": "Hello"})],
+            }],
+            max_tokens: 4096,
+            system: Some(system_with_cache_control("You are helpful.")),
+            temperature: None,
+            top_p: None,
+            stop_sequences: None,
+            tools: None,
+            tool_choice: None,
+            thinking: None,
+            stream: false,
+        };
+
+        let json = serde_json::to_value(&api_request).expect("should serialize");
+        let system = json.get("system").expect("system should be present");
+        let arr = system.as_array().expect("system should be an array");
+        assert_eq!(arr.len(), 1);
+        assert_eq!(arr[0]["cache_control"]["type"], "ephemeral");
     }
 }

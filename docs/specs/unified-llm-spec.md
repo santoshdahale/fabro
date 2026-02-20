@@ -510,10 +510,10 @@ RECORD DocumentData:
 
 ```
 RECORD ToolCallData:
-    id          : String            -- unique identifier for this call (provider-assigned)
-    name        : String            -- tool name
-    arguments   : Dict | String     -- parsed JSON arguments or raw argument string
-    type        : String            -- "function" (default) or "custom"
+    id              : String            -- unique identifier for this call (provider-assigned)
+    name            : String            -- tool name
+    arguments       : Dict              -- parsed JSON arguments
+    raw_arguments   : String | None     -- raw argument string before parsing (for debugging)
 ```
 
 The `id` field is assigned by the provider and is required for linking tool results back to calls. For providers that do not assign unique IDs (e.g., Gemini), the adapter must generate synthetic unique IDs (e.g., `"call_" + random_uuid()`) and maintain a mapping to the function name.
@@ -617,6 +617,8 @@ RECORD FinishReason:
     raw     : String | None -- the provider's native finish reason string
 ```
 
+**Note for statically-typed languages:** An enum (discriminated union) with variants `Stop`, `Length`, `ToolCalls`, `ContentFilter`, `Error`, and `Other(String)` is an acceptable representation. The provider's raw finish reason string is available in `Response.raw` (the full provider response). A separate `raw` field on FinishReason itself is optional in typed implementations.
+
 Unified reason values:
 
 | Value            | Meaning                                      |
@@ -632,10 +634,14 @@ Provider finish reason mapping:
 
 | Provider  | Provider Value    | Unified Value    |
 |-----------|-------------------|------------------|
-| OpenAI    | stop              | stop             |
-| OpenAI    | length            | length           |
-| OpenAI    | tool_calls        | tool_calls       |
-| OpenAI    | content_filter    | content_filter   |
+| OpenAI (Responses API) | completed   | stop             |
+| OpenAI (Responses API) | incomplete  | length           |
+| OpenAI (Responses API) | failed      | error            |
+| OpenAI (Responses API) | (has function_call items) | tool_calls |
+| OpenAI (Chat Completions) | stop     | stop             |
+| OpenAI (Chat Completions) | length   | length           |
+| OpenAI (Chat Completions) | tool_calls | tool_calls     |
+| OpenAI (Chat Completions) | content_filter | content_filter |
 | Anthropic | end_turn          | stop             |
 | Anthropic | stop_sequence     | stop             |
 | Anthropic | max_tokens        | length           |
@@ -646,7 +652,7 @@ Provider finish reason mapping:
 | Gemini    | RECITATION        | content_filter   |
 | Gemini    | (has tool calls)  | tool_calls       |
 
-Note: Gemini does not have a dedicated "tool_calls" finish reason. The adapter infers it from the presence of `functionCall` parts in the response.
+Note: Gemini does not have a dedicated "tool_calls" finish reason. The adapter infers it from the presence of `functionCall` parts in the response. Similarly, the OpenAI Responses API uses `completed`/`incomplete`/`failed` status rather than Chat Completions-style finish reasons, and tool calls are inferred from the presence of `function_call` output items.
 
 ### 3.9 Usage
 

@@ -1,5 +1,7 @@
+use crate::error::SdkError;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::sync::Arc;
 
 // --- 3.2 Role ---
 
@@ -75,6 +77,10 @@ pub struct ToolResult {
     pub tool_call_id: String,
     pub content: serde_json::Value,
     pub is_error: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub image_data: Option<Vec<u8>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub image_media_type: Option<String>,
 }
 
 // --- 3.3 ContentPart ---
@@ -149,6 +155,8 @@ impl Message {
                 tool_call_id: id.clone(),
                 content: serde_json::Value::String(content.into()),
                 is_error,
+                image_data: None,
+                image_media_type: None,
             })],
             name: None,
             tool_call_id: Some(id),
@@ -503,13 +511,31 @@ impl Default for AdapterTimeout {
 
 // --- 6.6 RetryPolicy ---
 
-#[derive(Debug, Clone)]
+/// Callback invoked before each retry attempt with (error, attempt, delay in seconds).
+pub type OnRetryCallback = Arc<dyn Fn(&SdkError, u32, f64) + Send + Sync>;
+
+#[derive(Clone)]
 pub struct RetryPolicy {
     pub max_retries: u32,
     pub base_delay: f64,
     pub max_delay: f64,
     pub backoff_multiplier: f64,
     pub jitter: bool,
+    /// Called before each retry with (error, attempt number, delay in seconds).
+    pub on_retry: Option<OnRetryCallback>,
+}
+
+impl std::fmt::Debug for RetryPolicy {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("RetryPolicy")
+            .field("max_retries", &self.max_retries)
+            .field("base_delay", &self.base_delay)
+            .field("max_delay", &self.max_delay)
+            .field("backoff_multiplier", &self.backoff_multiplier)
+            .field("jitter", &self.jitter)
+            .field("on_retry", &self.on_retry.as_ref().map(|_| "..."))
+            .finish()
+    }
 }
 
 impl Default for RetryPolicy {
@@ -520,6 +546,7 @@ impl Default for RetryPolicy {
             max_delay: 60.0,
             backoff_multiplier: 2.0,
             jitter: true,
+            on_retry: None,
         }
     }
 }
@@ -538,6 +565,22 @@ impl RetryPolicy {
             delay
         }
     }
+}
+
+// --- 4.6 ObjectStreamEvent ---
+
+/// Events yielded by `stream_object()` for streaming structured output.
+#[derive(Debug, Clone)]
+pub enum ObjectStreamEvent {
+    /// A new partial parse of the accumulated JSON text.
+    Partial { object: serde_json::Value },
+    /// A raw stream event from the underlying provider stream.
+    Delta { event: StreamEvent },
+    /// The stream completed with a fully parsed object and response.
+    Complete {
+        object: serde_json::Value,
+        response: Box<Response>,
+    },
 }
 
 // --- 4.3 GenerateResult / StepResult ---
@@ -905,6 +948,7 @@ mod tests {
             max_delay: 60.0,
             backoff_multiplier: 2.0,
             jitter: false,
+            ..Default::default()
         };
         assert!((policy.delay_for_attempt(0) - 1.0).abs() < f64::EPSILON);
         assert!((policy.delay_for_attempt(1) - 2.0).abs() < f64::EPSILON);
@@ -920,6 +964,7 @@ mod tests {
             max_delay: 5.0,
             backoff_multiplier: 2.0,
             jitter: false,
+            ..Default::default()
         };
         assert!((policy.delay_for_attempt(5) - 5.0).abs() < f64::EPSILON);
     }
@@ -932,6 +977,7 @@ mod tests {
             max_delay: 60.0,
             backoff_multiplier: 2.0,
             jitter: true,
+            ..Default::default()
         };
         let delay = policy.delay_for_attempt(0);
         // base * 0.5 to base * 1.5 => 0.5 to 1.5
@@ -970,6 +1016,19 @@ mod tests {
         let json = serde_json::to_string(&tc).unwrap();
         let deserialized: ToolCall = serde_json::from_str(&json).unwrap();
         assert_eq!(deserialized, tc);
+    }
+
+    #[test]
+    fn tool_result_with_image_data() {
+        let result = ToolResult {
+            tool_call_id: "call_1".into(),
+            content: serde_json::json!("screenshot taken"),
+            is_error: false,
+            image_data: Some(vec![0x89, 0x50, 0x4E, 0x47]),
+            image_media_type: Some("image/png".into()),
+        };
+        assert!(result.image_data.is_some());
+        assert_eq!(result.image_media_type.as_deref(), Some("image/png"));
     }
 
     #[test]

@@ -140,6 +140,18 @@ pub fn error_from_status_code(
 
     // First check message-based classification for ambiguous cases
     let lower_msg = detail.message.to_lowercase();
+    if lower_msg.contains("not found") || lower_msg.contains("does not exist") {
+        return SdkError::Provider {
+            kind: ProviderErrorKind::NotFound,
+            detail: Box::new(detail),
+        };
+    }
+    if lower_msg.contains("unauthorized") || lower_msg.contains("invalid key") {
+        return SdkError::Provider {
+            kind: ProviderErrorKind::Authentication,
+            detail: Box::new(detail),
+        };
+    }
     if lower_msg.contains("context length") || lower_msg.contains("too many tokens") {
         return SdkError::Provider {
             kind: ProviderErrorKind::ContextLength,
@@ -370,6 +382,58 @@ mod tests {
             None,
         );
         assert!(matches!(err, SdkError::Provider { kind: ProviderErrorKind::ContentFilter, .. }));
+    }
+
+    #[test]
+    fn error_message_classification_not_found() {
+        let err = error_from_status_code(
+            400,
+            "The model gpt-5 was not found".into(),
+            "openai".into(),
+            None,
+            None,
+            None,
+        );
+        assert!(matches!(err, SdkError::Provider { kind: ProviderErrorKind::NotFound, .. }));
+    }
+
+    #[test]
+    fn error_message_classification_does_not_exist() {
+        let err = error_from_status_code(
+            400,
+            "The resource does not exist".into(),
+            "openai".into(),
+            None,
+            None,
+            None,
+        );
+        assert!(matches!(err, SdkError::Provider { kind: ProviderErrorKind::NotFound, .. }));
+    }
+
+    #[test]
+    fn error_message_classification_unauthorized() {
+        let err = error_from_status_code(
+            400,
+            "Request unauthorized for this resource".into(),
+            "openai".into(),
+            None,
+            None,
+            None,
+        );
+        assert!(matches!(err, SdkError::Provider { kind: ProviderErrorKind::Authentication, .. }));
+    }
+
+    #[test]
+    fn error_message_classification_invalid_key() {
+        let err = error_from_status_code(
+            400,
+            "Provided invalid key for authentication".into(),
+            "openai".into(),
+            None,
+            None,
+            None,
+        );
+        assert!(matches!(err, SdkError::Provider { kind: ProviderErrorKind::Authentication, .. }));
     }
 
     #[test]

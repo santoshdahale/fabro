@@ -27,15 +27,20 @@ where
                 }
 
                 // Check Retry-After
-                if let Some(retry_after) = err.retry_after() {
+                let delay = if let Some(retry_after) = err.retry_after() {
                     if retry_after > policy.max_delay {
                         return Err(err);
                     }
-                    tokio::time::sleep(std::time::Duration::from_secs_f64(retry_after)).await;
+                    retry_after
                 } else {
-                    let delay = policy.delay_for_attempt(attempt);
-                    tokio::time::sleep(std::time::Duration::from_secs_f64(delay)).await;
+                    policy.delay_for_attempt(attempt)
+                };
+
+                if let Some(ref on_retry) = policy.on_retry {
+                    on_retry(&err, attempt, delay);
                 }
+
+                tokio::time::sleep(std::time::Duration::from_secs_f64(delay)).await;
 
                 attempt += 1;
             }
@@ -46,6 +51,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::types::RetryPolicy;
     use std::sync::atomic::{AtomicU32, Ordering};
     use std::sync::Arc;
 
@@ -242,5 +248,48 @@ mod tests {
         assert_eq!(call_count.load(Ordering::SeqCst), 2);
         // Should have waited ~0.01s, not ~10s
         assert!(elapsed.as_secs_f64() < 1.0);
+    }
+
+    #[tokio::test]
+    async fn retry_invokes_on_retry_callback() {
+        let retry_attempts = Arc::new(AtomicU32::new(0));
+        let retry_attempts_clone = retry_attempts.clone();
+
+        let policy = RetryPolicy {
+            max_retries: 2,
+            base_delay: 0.001,
+            jitter: false,
+            on_retry: Some(Arc::new(move |_err, _attempt, _delay| {
+                retry_attempts_clone.fetch_add(1, Ordering::SeqCst);
+            })),
+            ..Default::default()
+        };
+
+        let call_count = Arc::new(AtomicU32::new(0));
+        let cc = call_count.clone();
+
+        let result = retry(&policy, || {
+            let cc = cc.clone();
+            async move {
+                let count = cc.fetch_add(1, Ordering::SeqCst);
+                if count < 2 {
+                    Err(SdkError::Provider {
+                        kind: crate::error::ProviderErrorKind::Server,
+                        detail: Box::new(crate::error::ProviderErrorDetail {
+                            status_code: Some(500),
+                            ..crate::error::ProviderErrorDetail::new("error", "test")
+                        }),
+                    })
+                } else {
+                    Ok(99)
+                }
+            }
+        })
+        .await;
+
+        assert_eq!(result.unwrap(), 99);
+        assert_eq!(call_count.load(Ordering::SeqCst), 3);
+        // on_retry should have been called twice (before each retry)
+        assert_eq!(retry_attempts.load(Ordering::SeqCst), 2);
     }
 }

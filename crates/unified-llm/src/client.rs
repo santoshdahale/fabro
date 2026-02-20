@@ -1,6 +1,7 @@
 use crate::error::SdkError;
 use crate::middleware::{Middleware, NextFn, NextStreamFn};
 use crate::provider::{ProviderAdapter, StreamEventStream};
+use crate::providers;
 use crate::types::{Request, Response};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -32,13 +33,38 @@ impl Client {
     /// The first registered provider becomes the default.
     #[must_use]
     pub fn from_env() -> Self {
-        // In a real implementation, this would check for OPENAI_API_KEY, ANTHROPIC_API_KEY, etc.
-        // and register the appropriate adapters. For now, return an empty client.
-        Self {
+        let mut client = Self {
             providers: HashMap::new(),
             default_provider: None,
             middleware: Vec::new(),
+        };
+
+        // Register providers whose API keys are present in the environment.
+        // Order determines which becomes the default provider.
+        if let Ok(key) = std::env::var("ANTHROPIC_API_KEY") {
+            let mut adapter = providers::AnthropicAdapter::new(key);
+            if let Ok(base_url) = std::env::var("ANTHROPIC_BASE_URL") {
+                adapter = adapter.with_base_url(base_url);
+            }
+            client.register_provider(Arc::new(adapter));
         }
+        if let Ok(key) = std::env::var("OPENAI_API_KEY") {
+            let mut adapter = providers::OpenAiAdapter::new(key);
+            if let Ok(base_url) = std::env::var("OPENAI_BASE_URL") {
+                adapter = adapter.with_base_url(base_url);
+            }
+            client.register_provider(Arc::new(adapter));
+        }
+        if let Ok(key) = std::env::var("GEMINI_API_KEY").or_else(|_| std::env::var("GOOGLE_API_KEY"))
+        {
+            let mut adapter = providers::GeminiAdapter::new(key);
+            if let Ok(base_url) = std::env::var("GEMINI_BASE_URL") {
+                adapter = adapter.with_base_url(base_url);
+            }
+            client.register_provider(Arc::new(adapter));
+        }
+
+        client
     }
 
     /// Register a provider adapter.

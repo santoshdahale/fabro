@@ -20,8 +20,15 @@ pub struct Tool {
 
 impl Tool {
     /// Create a passive tool (no execute handler).
-    #[must_use] 
+    ///
+    /// # Panics
+    ///
+    /// Panics if the tool name is invalid (see [`validate_tool_name`]).
+    #[must_use]
     pub fn passive(name: &str, description: &str, parameters: serde_json::Value) -> Self {
+        if let Err(e) = validate_tool_name(name) {
+            panic!("Invalid tool name: {e}");
+        }
         Self {
             definition: ToolDefinition {
                 name: name.to_string(),
@@ -33,6 +40,10 @@ impl Tool {
     }
 
     /// Create an active tool with an execute handler.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the tool name is invalid (see [`validate_tool_name`]).
     pub fn active<F, Fut>(
         name: &str,
         description: &str,
@@ -43,6 +54,9 @@ impl Tool {
         F: Fn(serde_json::Value) -> Fut + Send + Sync + 'static,
         Fut: Future<Output = Result<serde_json::Value, String>> + Send + 'static,
     {
+        if let Err(e) = validate_tool_name(name) {
+            panic!("Invalid tool name: {e}");
+        }
         Self {
             definition: ToolDefinition {
                 name: name.to_string(),
@@ -121,11 +135,15 @@ pub async fn execute_all_tools(
                                 tool_call_id: call_id,
                                 content: result,
                                 is_error: false,
+                                image_data: None,
+                                image_media_type: None,
                             },
                             Err(err_msg) => ToolResult {
                                 tool_call_id: call_id,
                                 content: serde_json::Value::String(err_msg),
                                 is_error: true,
+                                image_data: None,
+                                image_media_type: None,
                             },
                         }
                     }
@@ -135,6 +153,8 @@ pub async fn execute_all_tools(
                             "Unknown tool: {call_name}"
                         )),
                         is_error: true,
+                        image_data: None,
+                        image_media_type: None,
                     },
                 }
             }
@@ -339,5 +359,26 @@ mod tests {
         assert_eq!(results.len(), 2);
         assert!(!results[0].is_error);
         assert!(results[1].is_error);
+    }
+
+    #[test]
+    #[should_panic(expected = "Invalid tool name")]
+    fn passive_tool_panics_on_invalid_name() {
+        let _ = Tool::passive(
+            "1invalid",
+            "bad name",
+            serde_json::json!({"type": "object"}),
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "Invalid tool name")]
+    fn active_tool_panics_on_invalid_name() {
+        Tool::active(
+            "my-tool",
+            "bad name",
+            serde_json::json!({"type": "object"}),
+            |_args| async { Ok(serde_json::json!("result")) },
+        );
     }
 }

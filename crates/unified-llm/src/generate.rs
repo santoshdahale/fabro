@@ -4,9 +4,12 @@ use crate::provider::StreamEventStream;
 use crate::retry::retry;
 use crate::tools::{execute_all_tools, Tool};
 use crate::types::{
-    FinishReason, GenerateResult, Message, Request, Response, ResponseFormat, ResponseFormatType,
-    RetryPolicy, StepResult, StreamEvent, ToolCall, ToolChoice, ToolDefinition, Usage,
+    FinishReason, GenerateResult, Message, ObjectStreamEvent, Request, Response, ResponseFormat,
+    ResponseFormatType, RetryPolicy, StepResult, StreamEvent, TimeoutConfig, ToolCall, ToolChoice,
+    ToolDefinition, Usage,
 };
+use futures::StreamExt;
+use std::pin::Pin;
 use std::sync::Arc;
 use tokio::sync::OnceCell;
 
@@ -61,7 +64,7 @@ fn build_request(
         max_tokens: params.max_tokens,
         stop_sequences: params.stop_sequences.clone(),
         reasoning_effort: params.reasoning_effort.clone(),
-        metadata: None,
+        metadata: params.metadata.clone(),
         provider_options: params.provider_options.clone(),
     }
 }
@@ -108,68 +111,100 @@ pub async fn generate(params: GenerateParams) -> Result<GenerateResult, SdkError
         .map(|tools| tools.iter().map(|t| t.definition.clone()).collect());
 
     let max_tool_rounds = params.max_tool_rounds;
-    let mut steps: Vec<StepResult> = Vec::new();
-    let mut total_usage = Usage::default();
 
-    let mut round = 0u32;
-    loop {
-        let request = build_request(&params, &messages, tool_definitions.as_deref());
+    let generate_future = async {
+        let mut steps: Vec<StepResult> = Vec::new();
+        let mut total_usage = Usage::default();
 
-        let client_ref = client.clone();
-        let response = retry(&retry_policy, || {
-            let c = client_ref.clone();
-            let r = request.clone();
-            async move { c.complete(&r).await }
-        })
-        .await?;
+        let mut round = 0u32;
+        loop {
+            let request = build_request(&params, &messages, tool_definitions.as_deref());
 
-        let tool_calls = response.tool_calls();
-        let mut tool_results = Vec::new();
+            let client_ref = client.clone();
+            let response =
+                if let Some(per_step) = params.timeout.as_ref().and_then(|t| t.per_step) {
+                    let duration = std::time::Duration::from_secs_f64(per_step);
+                    tokio::time::timeout(duration, retry(&retry_policy, || {
+                        let c = client_ref.clone();
+                        let r = request.clone();
+                        async move { c.complete(&r).await }
+                    }))
+                    .await
+                    .map_err(|_| SdkError::RequestTimeout {
+                        message: format!("Per-step timeout of {per_step}s exceeded"),
+                    })?
+                } else {
+                    retry(&retry_policy, || {
+                        let c = client_ref.clone();
+                        let r = request.clone();
+                        async move { c.complete(&r).await }
+                    })
+                    .await
+                }?;
 
-        if !tool_calls.is_empty()
-            && response.finish_reason == FinishReason::ToolCalls
-            && params.tools.is_some()
-        {
-            let tools = params.tools.as_ref().expect("checked above");
-            if tools.iter().any(|t| t.is_active()) {
-                let tool_refs: Vec<&Tool> =
-                    tools.iter().map(std::convert::AsRef::as_ref).collect();
-                tool_results = execute_all_tools(&tool_refs, &tool_calls).await;
+            let tool_calls = response.tool_calls();
+            let mut tool_results = Vec::new();
+
+            if !tool_calls.is_empty()
+                && response.finish_reason == FinishReason::ToolCalls
+                && params.tools.is_some()
+            {
+                let tools = params.tools.as_ref().expect("checked above");
+                if tools.iter().any(|t| t.is_active()) {
+                    let tool_refs: Vec<&Tool> =
+                        tools.iter().map(std::convert::AsRef::as_ref).collect();
+                    tool_results = execute_all_tools(&tool_refs, &tool_calls).await;
+                }
             }
-        }
 
-        total_usage = total_usage + response.usage.clone();
+            total_usage = total_usage + response.usage.clone();
 
-        let should_continue = !tool_calls.is_empty()
-            && response.finish_reason == FinishReason::ToolCalls
-            && round < max_tool_rounds
-            && !tool_results.is_empty();
+            steps.push(StepResult {
+                response,
+                tool_results,
+            });
 
-        if should_continue {
-            messages.push(response.message.clone());
-            for result in &tool_results {
+            let last = steps.last().expect("just pushed");
+            let should_continue = !tool_calls.is_empty()
+                && last.response.finish_reason == FinishReason::ToolCalls
+                && round < max_tool_rounds
+                && !last.tool_results.is_empty()
+                && !params.stop_when.as_ref().is_some_and(|f| f(&steps));
+
+            if !should_continue {
+                break;
+            }
+
+            let last = steps.last().expect("just pushed");
+            messages.push(last.response.message.clone());
+            for result in &last.tool_results {
                 messages.push(Message::tool_result(
                     &result.tool_call_id,
                     result.content.to_string(),
                     result.is_error,
                 ));
             }
+
+            round += 1;
         }
 
-        steps.push(StepResult {
-            response,
-            tool_results,
-        });
+        Ok(build_generate_result(steps, total_usage))
+    };
 
-        if !should_continue {
-            break;
-        }
-
-        round += 1;
+    if let Some(total) = params.timeout.as_ref().and_then(|t| t.total) {
+        let duration = std::time::Duration::from_secs_f64(total);
+        tokio::time::timeout(duration, generate_future)
+            .await
+            .map_err(|_| SdkError::RequestTimeout {
+                message: format!("Total timeout of {total}s exceeded"),
+            })?
+    } else {
+        generate_future.await
     }
-
-    Ok(build_generate_result(steps, total_usage))
 }
+
+/// Callback type for custom stop conditions in the tool loop.
+pub type StopCondition = Arc<dyn Fn(&[StepResult]) -> bool + Send + Sync>;
 
 /// Parameters for `generate()` (Section 4.3).
 #[derive(Clone)]
@@ -189,8 +224,12 @@ pub struct GenerateParams {
     pub reasoning_effort: Option<String>,
     pub provider: Option<String>,
     pub provider_options: Option<serde_json::Value>,
+    pub metadata: Option<std::collections::HashMap<String, String>>,
     pub max_retries: u32,
+    pub timeout: Option<TimeoutConfig>,
     pub client: Option<Arc<Client>>,
+    /// Custom stop condition checked after each tool round (Section 4.3).
+    pub stop_when: Option<StopCondition>,
 }
 
 impl GenerateParams {
@@ -211,8 +250,11 @@ impl GenerateParams {
             reasoning_effort: None,
             provider: None,
             provider_options: None,
+            metadata: None,
             max_retries: 2,
+            timeout: None,
             client: None,
+            stop_when: None,
         }
     }
 
@@ -255,6 +297,85 @@ impl GenerateParams {
     #[must_use]
     pub fn provider(mut self, provider: impl Into<String>) -> Self {
         self.provider = Some(provider.into());
+        self
+    }
+
+    #[must_use]
+    pub fn tool_choice(mut self, tool_choice: ToolChoice) -> Self {
+        self.tool_choice = Some(tool_choice);
+        self
+    }
+
+    #[must_use]
+    pub fn response_format(mut self, response_format: ResponseFormat) -> Self {
+        self.response_format = Some(response_format);
+        self
+    }
+
+    #[must_use]
+    pub const fn temperature(mut self, temperature: f64) -> Self {
+        self.temperature = Some(temperature);
+        self
+    }
+
+    #[must_use]
+    pub const fn top_p(mut self, top_p: f64) -> Self {
+        self.top_p = Some(top_p);
+        self
+    }
+
+    #[must_use]
+    pub const fn max_tokens(mut self, max_tokens: i64) -> Self {
+        self.max_tokens = Some(max_tokens);
+        self
+    }
+
+    #[must_use]
+    pub fn stop_sequences(mut self, stop_sequences: Vec<String>) -> Self {
+        self.stop_sequences = Some(stop_sequences);
+        self
+    }
+
+    #[must_use]
+    pub fn reasoning_effort(mut self, reasoning_effort: impl Into<String>) -> Self {
+        self.reasoning_effort = Some(reasoning_effort.into());
+        self
+    }
+
+    #[must_use]
+    pub fn provider_options(mut self, provider_options: serde_json::Value) -> Self {
+        self.provider_options = Some(provider_options);
+        self
+    }
+
+    #[must_use]
+    pub fn metadata(mut self, metadata: std::collections::HashMap<String, String>) -> Self {
+        self.metadata = Some(metadata);
+        self
+    }
+
+    #[must_use]
+    pub const fn max_retries(mut self, max_retries: u32) -> Self {
+        self.max_retries = max_retries;
+        self
+    }
+
+    #[must_use]
+    pub const fn timeout(mut self, timeout: TimeoutConfig) -> Self {
+        self.timeout = Some(timeout);
+        self
+    }
+
+    /// Set a custom stop condition for the tool loop (Section 4.3).
+    ///
+    /// The callback receives the accumulated steps so far and returns `true`
+    /// to stop the tool loop early.
+    #[must_use]
+    pub fn stop_when(
+        mut self,
+        f: impl Fn(&[StepResult]) -> bool + Send + Sync + 'static,
+    ) -> Self {
+        self.stop_when = Some(Arc::new(f));
         self
     }
 }
@@ -339,6 +460,19 @@ impl Default for StreamAccumulator {
 ///
 /// Returns `SdkError::Configuration` if both `prompt` and `messages` are set,
 /// or any provider error encountered during streaming setup.
+pub async fn stream(params: GenerateParams) -> Result<StreamEventStream, SdkError> {
+    stream_generate(params).await
+}
+
+/// High-level streaming generation (Section 4.4).
+/// Returns a `StreamEventStream` that the caller can iterate over.
+///
+/// Alias: prefer [`stream()`] for consistency with the spec.
+///
+/// # Errors
+///
+/// Returns `SdkError::Configuration` if both `prompt` and `messages` are set,
+/// or any provider error encountered during streaming setup.
 pub async fn stream_generate(params: GenerateParams) -> Result<StreamEventStream, SdkError> {
     let client = params.client.clone().unwrap_or_else(get_default_client);
     let messages = build_initial_messages(&params)?;
@@ -382,6 +516,94 @@ pub async fn generate_object(
             message: format!("Failed to parse response as JSON: {e}"),
         }),
     }
+}
+
+/// Stream type for `stream_object()`.
+pub type ObjectStream =
+    Pin<Box<dyn futures::Stream<Item = Result<ObjectStreamEvent, SdkError>> + Send>>;
+
+/// Streaming structured output with incremental JSON parsing (Section 4.6).
+///
+/// Combines streaming with structured output: sets `response_format` to `json_schema`,
+/// streams the response, and attempts to parse the accumulated text as JSON on each
+/// text delta. Yields `ObjectStreamEvent::Partial` when a new valid partial parse is
+/// obtained, `ObjectStreamEvent::Delta` for every raw stream event, and
+/// `ObjectStreamEvent::Complete` when the stream finishes with the final parsed object.
+///
+/// # Errors
+///
+/// Returns `SdkError::Configuration` if both `prompt` and `messages` are set,
+/// `SdkError::NoObjectGenerated` if the final accumulated text is not valid JSON,
+/// or any provider error encountered during streaming.
+pub async fn stream_object(
+    params: GenerateParams,
+    schema: serde_json::Value,
+) -> Result<ObjectStream, SdkError> {
+    let params = GenerateParams {
+        response_format: Some(ResponseFormat {
+            kind: ResponseFormatType::JsonSchema,
+            json_schema: Some(schema),
+            strict: true,
+        }),
+        ..params
+    };
+
+    let inner_stream = stream(params).await?;
+
+    let mapped = inner_stream.scan(
+        (String::new(), Option::<serde_json::Value>::None),
+        |(accumulated_text, last_parsed), event| {
+            let mut events: Vec<Result<ObjectStreamEvent, SdkError>> = Vec::new();
+
+            match &event {
+                Ok(stream_event) => {
+                    // Accumulate text from TextDelta events
+                    if let StreamEvent::TextDelta { delta, .. } = stream_event {
+                        accumulated_text.push_str(delta);
+
+                        // Try incremental JSON parse
+                        if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(accumulated_text) {
+                            if last_parsed.as_ref() != Some(&parsed) {
+                                *last_parsed = Some(parsed.clone());
+                                events.push(Ok(ObjectStreamEvent::Partial { object: parsed }));
+                            }
+                        }
+                    }
+
+                    // On Finish, yield the Complete event with final parsed object
+                    if let StreamEvent::Finish { response, .. } = stream_event {
+                        match serde_json::from_str::<serde_json::Value>(accumulated_text) {
+                            Ok(final_object) => {
+                                events.push(Ok(ObjectStreamEvent::Complete {
+                                    object: final_object,
+                                    response: response.clone(),
+                                }));
+                            }
+                            Err(e) => {
+                                events.push(Err(SdkError::NoObjectGenerated {
+                                    message: format!("Failed to parse final response as JSON: {e}"),
+                                }));
+                            }
+                        }
+                    } else {
+                        // Yield the raw delta event
+                        events.push(Ok(ObjectStreamEvent::Delta {
+                            event: stream_event.clone(),
+                        }));
+                    }
+                }
+                Err(e) => {
+                    events.push(Err(SdkError::Stream {
+                        message: format!("{e}"),
+                    }));
+                }
+            }
+
+            futures::future::ready(Some(futures::stream::iter(events)))
+        },
+    );
+
+    Ok(Box::pin(mapped.flatten()))
 }
 
 #[cfg(test)]
@@ -773,5 +995,303 @@ mod tests {
             result.unwrap_err(),
             SdkError::NoObjectGenerated { .. }
         ));
+    }
+
+    #[tokio::test]
+    async fn generate_stop_when_halts_tool_loop() {
+        let call_count = Arc::new(AtomicU32::new(0));
+        let provider: Arc<dyn ProviderAdapter> = Arc::new(ToolCallMockProvider {
+            call_count: call_count.clone(),
+        });
+
+        let mut providers: HashMap<String, Arc<dyn ProviderAdapter>> = HashMap::new();
+        providers.insert("mock".to_string(), provider);
+        let client = Arc::new(Client::new(
+            providers,
+            Some("mock".to_string()),
+            vec![],
+        ));
+
+        let result = generate(
+            GenerateParams::new("mock-model")
+                .prompt("What's the weather in SF?")
+                .tools(vec![Tool::active(
+                    "get_weather",
+                    "Get weather",
+                    serde_json::json!({"type": "object", "properties": {"city": {"type": "string"}}}),
+                    |args| async move {
+                        let city = args["city"].as_str().unwrap_or("unknown");
+                        Ok(serde_json::json!(format!("72F in {}", city)))
+                    },
+                )])
+                .max_tool_rounds(5)
+                .stop_when(|_steps| true) // Stop immediately after first round
+                .client(client),
+        )
+        .await
+        .unwrap();
+
+        // stop_when returned true, so the tool loop should stop after 1 step
+        assert_eq!(result.steps.len(), 1);
+        assert_eq!(call_count.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn generate_params_builder_methods() {
+        let params = GenerateParams::new("test-model")
+            .prompt("hello")
+            .system("you are helpful")
+            .temperature(0.7)
+            .top_p(0.9)
+            .max_tokens(100)
+            .stop_sequences(vec!["STOP".to_string()])
+            .reasoning_effort("high")
+            .provider("anthropic")
+            .provider_options(serde_json::json!({"key": "value"}))
+            .max_retries(5)
+            .tool_choice(ToolChoice::Required)
+            .response_format(ResponseFormat {
+                kind: ResponseFormatType::JsonObject,
+                json_schema: None,
+                strict: false,
+            })
+            .max_tool_rounds(3);
+
+        assert_eq!(params.model, "test-model");
+        assert_eq!(params.prompt.as_deref(), Some("hello"));
+        assert_eq!(params.system.as_deref(), Some("you are helpful"));
+        assert_eq!(params.temperature, Some(0.7));
+        assert_eq!(params.top_p, Some(0.9));
+        assert_eq!(params.max_tokens, Some(100));
+        assert_eq!(
+            params.stop_sequences,
+            Some(vec!["STOP".to_string()])
+        );
+        assert_eq!(params.reasoning_effort.as_deref(), Some("high"));
+        assert_eq!(params.provider.as_deref(), Some("anthropic"));
+        assert!(params.provider_options.is_some());
+        assert_eq!(params.max_retries, 5);
+        assert_eq!(params.tool_choice, Some(ToolChoice::Required));
+        assert!(params.response_format.is_some());
+        assert_eq!(params.max_tool_rounds, 3);
+    }
+
+    #[test]
+    fn generate_params_timeout_builder() {
+        let params = GenerateParams::new("test-model")
+            .timeout(TimeoutConfig {
+                total: Some(30.0),
+                per_step: Some(10.0),
+            });
+        assert!(params.timeout.is_some());
+        let t = params.timeout.unwrap();
+        assert_eq!(t.total, Some(30.0));
+        assert_eq!(t.per_step, Some(10.0));
+    }
+
+    /// Mock provider that streams JSON tokens incrementally.
+    struct StreamingJsonMockProvider {
+        deltas: Vec<String>,
+        full_text: String,
+    }
+
+    impl StreamingJsonMockProvider {
+        fn new(deltas: Vec<&str>) -> Self {
+            let full_text: String = deltas.iter().copied().collect();
+            Self {
+                deltas: deltas.into_iter().map(String::from).collect(),
+                full_text,
+            }
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl ProviderAdapter for StreamingJsonMockProvider {
+        fn name(&self) -> &str {
+            "mock"
+        }
+
+        async fn complete(&self, _request: &Request) -> Result<Response, SdkError> {
+            Ok(Response {
+                id: "resp_1".into(),
+                model: "mock-model".into(),
+                provider: "mock".into(),
+                message: Message::assistant(&self.full_text),
+                finish_reason: FinishReason::Stop,
+                usage: Usage::default(),
+                raw: None,
+                warnings: vec![],
+                rate_limit: None,
+            })
+        }
+
+        async fn stream(
+            &self,
+            _request: &Request,
+        ) -> Result<StreamEventStream, SdkError> {
+            let mut events: Vec<Result<StreamEvent, SdkError>> = self
+                .deltas
+                .iter()
+                .map(|d| Ok(StreamEvent::text_delta(d.as_str(), Some("t1".into()))))
+                .collect();
+
+            events.push(Ok(StreamEvent::finish(
+                FinishReason::Stop,
+                Usage {
+                    input_tokens: 10,
+                    output_tokens: 20,
+                    total_tokens: 30,
+                    ..Default::default()
+                },
+                Response {
+                    id: "resp_1".into(),
+                    model: "mock-model".into(),
+                    provider: "mock".into(),
+                    message: Message::assistant(&self.full_text),
+                    finish_reason: FinishReason::Stop,
+                    usage: Usage {
+                        input_tokens: 10,
+                        output_tokens: 20,
+                        total_tokens: 30,
+                        ..Default::default()
+                    },
+                    raw: None,
+                    warnings: vec![],
+                    rate_limit: None,
+                },
+            )));
+
+            Ok(Box::pin(stream::iter(events)))
+        }
+    }
+
+    fn streaming_json_mock_client(deltas: Vec<&str>) -> Arc<Client> {
+        let mut providers: HashMap<String, Arc<dyn ProviderAdapter>> = HashMap::new();
+        providers.insert(
+            "mock".to_string(),
+            Arc::new(StreamingJsonMockProvider::new(deltas)),
+        );
+        Arc::new(Client::new(
+            providers,
+            Some("mock".to_string()),
+            vec![],
+        ))
+    }
+
+    #[tokio::test]
+    async fn stream_object_yields_complete_event() {
+        let client = streaming_json_mock_client(vec![r#"{"name": "Alice", "age": 30}"#]);
+
+        let schema = serde_json::json!({
+            "type": "object",
+            "properties": {
+                "name": {"type": "string"},
+                "age": {"type": "integer"}
+            },
+            "required": ["name", "age"]
+        });
+
+        let obj_stream = stream_object(
+            GenerateParams::new("mock-model")
+                .prompt("Extract info")
+                .client(client),
+            schema,
+        )
+        .await
+        .unwrap();
+
+        let events: Vec<ObjectStreamEvent> = obj_stream
+            .filter_map(|r| futures::future::ready(r.ok()))
+            .collect()
+            .await;
+
+        let complete = events
+            .iter()
+            .find(|e| matches!(e, ObjectStreamEvent::Complete { .. }));
+        assert!(complete.is_some(), "Expected a Complete event");
+
+        if let ObjectStreamEvent::Complete { object, .. } = complete.unwrap() {
+            assert_eq!(object["name"], "Alice");
+            assert_eq!(object["age"], 30);
+        }
+    }
+
+    #[tokio::test]
+    async fn stream_object_yields_partial_events_incrementally() {
+        let client = streaming_json_mock_client(vec![
+            r#"{"name""#,
+            r#": "Bob""#,
+            r#", "age": 25}"#,
+        ]);
+
+        let schema = serde_json::json!({
+            "type": "object",
+            "properties": {
+                "name": {"type": "string"},
+                "age": {"type": "integer"}
+            }
+        });
+
+        let obj_stream = stream_object(
+            GenerateParams::new("mock-model")
+                .prompt("Extract info")
+                .client(client),
+            schema,
+        )
+        .await
+        .unwrap();
+
+        let events: Vec<ObjectStreamEvent> = obj_stream
+            .filter_map(|r| futures::future::ready(r.ok()))
+            .collect()
+            .await;
+
+        let partial_count = events
+            .iter()
+            .filter(|e| matches!(e, ObjectStreamEvent::Partial { .. }))
+            .count();
+
+        assert!(
+            partial_count >= 1,
+            "Expected at least one Partial event, got {partial_count}"
+        );
+
+        let delta_count = events
+            .iter()
+            .filter(|e| matches!(e, ObjectStreamEvent::Delta { .. }))
+            .count();
+
+        assert_eq!(delta_count, 3);
+
+        let last_complete = events
+            .iter()
+            .rev()
+            .find(|e| matches!(e, ObjectStreamEvent::Complete { .. }));
+        assert!(last_complete.is_some(), "Expected a Complete event");
+        if let ObjectStreamEvent::Complete { object, .. } = last_complete.unwrap() {
+            assert_eq!(object["name"], "Bob");
+            assert_eq!(object["age"], 25);
+        }
+    }
+
+    #[tokio::test]
+    async fn stream_object_errors_on_invalid_final_json() {
+        let client = streaming_json_mock_client(vec![r#"{"name": "Alice"#]);
+
+        let schema = serde_json::json!({"type": "object"});
+
+        let obj_stream = stream_object(
+            GenerateParams::new("mock-model")
+                .prompt("Extract info")
+                .client(client),
+            schema,
+        )
+        .await
+        .unwrap();
+
+        let results: Vec<Result<ObjectStreamEvent, SdkError>> = obj_stream.collect().await;
+
+        let has_error = results.iter().any(|r| r.is_err());
+        assert!(has_error, "Expected an error for invalid final JSON");
     }
 }
