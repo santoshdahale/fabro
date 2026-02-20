@@ -200,6 +200,7 @@ fn build_tool_call_id_to_name(messages: &[&Message]) -> std::collections::HashMa
 }
 
 /// Translate unified messages to Gemini content format.
+#[allow(clippy::too_many_lines)]
 fn translate_messages(messages: &[&Message]) -> Vec<Content> {
     let id_to_name = build_tool_call_id_to_name(messages);
     let mut contents: Vec<Content> = Vec::new();
@@ -239,6 +240,50 @@ fn translate_messages(messages: &[&Message]) -> Vec<Content> {
                                 }
                             } else {
                                 let mime = img.media_type.as_deref().unwrap_or("image/png");
+                                Some(serde_json::json!({"fileData": {"mimeType": mime, "fileUri": url}}))
+                            }
+                        },
+                    )
+                }
+                ContentPart::Audio(audio) => {
+                    audio.url.as_ref().map_or_else(
+                        || {
+                            audio.data.as_ref().map(|data| {
+                                let mime = audio.media_type.as_deref().unwrap_or("audio/wav");
+                                let b64 = BASE64_STANDARD.encode(data);
+                                serde_json::json!({"inlineData": {"mimeType": mime, "data": b64}})
+                            })
+                        },
+                        |url| {
+                            if crate::providers::common::is_file_path(url) {
+                                match crate::providers::common::load_file_as_base64(url) {
+                                    Ok((b64, mime)) => Some(serde_json::json!({"inlineData": {"mimeType": mime, "data": b64}})),
+                                    Err(_) => None,
+                                }
+                            } else {
+                                let mime = audio.media_type.as_deref().unwrap_or("audio/wav");
+                                Some(serde_json::json!({"fileData": {"mimeType": mime, "fileUri": url}}))
+                            }
+                        },
+                    )
+                }
+                ContentPart::Document(doc) => {
+                    doc.url.as_ref().map_or_else(
+                        || {
+                            doc.data.as_ref().map(|data| {
+                                let mime = doc.media_type.as_deref().unwrap_or("application/pdf");
+                                let b64 = BASE64_STANDARD.encode(data);
+                                serde_json::json!({"inlineData": {"mimeType": mime, "data": b64}})
+                            })
+                        },
+                        |url| {
+                            if crate::providers::common::is_file_path(url) {
+                                match crate::providers::common::load_file_as_base64(url) {
+                                    Ok((b64, mime)) => Some(serde_json::json!({"inlineData": {"mimeType": mime, "data": b64}})),
+                                    Err(_) => None,
+                                }
+                            } else {
+                                let mime = doc.media_type.as_deref().unwrap_or("application/pdf");
                                 Some(serde_json::json!({"fileData": {"mimeType": mime, "fileUri": url}}))
                             }
                         },
@@ -941,5 +986,80 @@ mod tests {
         merge_provider_options(&mut body, Some(&opts));
         // Should not crash and body should be unchanged
         assert!(body.get("contents").is_some());
+    }
+
+    #[test]
+    fn audio_url_translates_to_file_data() {
+        let msg = Message {
+            role: Role::User,
+            content: vec![ContentPart::Audio(crate::types::AudioData {
+                url: Some("https://example.com/audio.wav".to_string()),
+                data: None,
+                media_type: Some("audio/wav".to_string()),
+            })],
+            name: None,
+            tool_call_id: None,
+        };
+        let contents = translate_messages(&[&msg]);
+        assert_eq!(contents.len(), 1);
+        let part = &contents[0].parts[0];
+        assert_eq!(part["fileData"]["mimeType"], "audio/wav");
+        assert_eq!(part["fileData"]["fileUri"], "https://example.com/audio.wav");
+    }
+
+    #[test]
+    fn audio_base64_translates_to_inline_data() {
+        let msg = Message {
+            role: Role::User,
+            content: vec![ContentPart::Audio(crate::types::AudioData {
+                url: None,
+                data: Some(vec![0xFF, 0xFB, 0x90]),
+                media_type: None,
+            })],
+            name: None,
+            tool_call_id: None,
+        };
+        let contents = translate_messages(&[&msg]);
+        let part = &contents[0].parts[0];
+        assert_eq!(part["inlineData"]["mimeType"], "audio/wav");
+        assert!(part["inlineData"]["data"].as_str().is_some());
+    }
+
+    #[test]
+    fn document_url_translates_to_file_data() {
+        let msg = Message {
+            role: Role::User,
+            content: vec![ContentPart::Document(crate::types::DocumentData {
+                url: Some("https://example.com/doc.pdf".to_string()),
+                data: None,
+                media_type: Some("application/pdf".to_string()),
+                file_name: Some("doc.pdf".to_string()),
+            })],
+            name: None,
+            tool_call_id: None,
+        };
+        let contents = translate_messages(&[&msg]);
+        let part = &contents[0].parts[0];
+        assert_eq!(part["fileData"]["mimeType"], "application/pdf");
+        assert_eq!(part["fileData"]["fileUri"], "https://example.com/doc.pdf");
+    }
+
+    #[test]
+    fn document_base64_translates_to_inline_data() {
+        let msg = Message {
+            role: Role::User,
+            content: vec![ContentPart::Document(crate::types::DocumentData {
+                url: None,
+                data: Some(vec![0x25, 0x50, 0x44, 0x46]),
+                media_type: None,
+                file_name: None,
+            })],
+            name: None,
+            tool_call_id: None,
+        };
+        let contents = translate_messages(&[&msg]);
+        let part = &contents[0].parts[0];
+        assert_eq!(part["inlineData"]["mimeType"], "application/pdf");
+        assert!(part["inlineData"]["data"].as_str().is_some());
     }
 }

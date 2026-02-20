@@ -159,6 +159,7 @@ fn map_finish_reason(status: Option<&str>, has_tool_calls: bool) -> FinishReason
 }
 
 /// Translate unified messages to Responses API `input` array format.
+#[allow(clippy::too_many_lines)]
 fn translate_input(messages: &[Message]) -> (Option<String>, Vec<serde_json::Value>) {
     let mut instructions_parts: Vec<String> = Vec::new();
     let mut input: Vec<serde_json::Value> = Vec::new();
@@ -196,6 +197,16 @@ fn translate_input(messages: &[Message]) -> (Option<String>, Vec<serde_json::Val
                                     }
                                 },
                             )
+                        }
+                        ContentPart::Audio(_) => {
+                            Some(serde_json::json!({"type": "input_text", "text": "[Audio content not supported by this provider]"}))
+                        }
+                        ContentPart::Document(doc) => {
+                            let desc = doc.file_name.as_ref().map_or_else(
+                                || "[Document content not supported by this provider]".to_string(),
+                                |name| format!("[Document '{name}': content type not supported by this provider]"),
+                            );
+                            Some(serde_json::json!({"type": "input_text", "text": desc}))
                         }
                         _ => None,
                     })
@@ -1078,5 +1089,61 @@ mod tests {
         assert!(adapter.org_id.is_none());
         assert!(adapter.project_id.is_none());
         assert!(adapter.default_headers.is_empty());
+    }
+
+    #[test]
+    fn audio_content_produces_text_fallback() {
+        let msg = Message {
+            role: Role::User,
+            content: vec![ContentPart::Audio(crate::types::AudioData {
+                url: Some("https://example.com/audio.wav".to_string()),
+                data: None,
+                media_type: None,
+            })],
+            name: None,
+            tool_call_id: None,
+        };
+        let (_, input) = translate_input(&[msg]);
+        let content = input[0]["content"].as_array().expect("content should be array");
+        assert_eq!(content[0]["type"], "input_text");
+        assert_eq!(content[0]["text"], "[Audio content not supported by this provider]");
+    }
+
+    #[test]
+    fn document_content_produces_text_fallback_with_filename() {
+        let msg = Message {
+            role: Role::User,
+            content: vec![ContentPart::Document(crate::types::DocumentData {
+                url: Some("https://example.com/doc.pdf".to_string()),
+                data: None,
+                media_type: None,
+                file_name: Some("report.pdf".to_string()),
+            })],
+            name: None,
+            tool_call_id: None,
+        };
+        let (_, input) = translate_input(&[msg]);
+        let content = input[0]["content"].as_array().expect("content should be array");
+        assert_eq!(content[0]["type"], "input_text");
+        assert_eq!(content[0]["text"], "[Document 'report.pdf': content type not supported by this provider]");
+    }
+
+    #[test]
+    fn document_content_produces_text_fallback_without_filename() {
+        let msg = Message {
+            role: Role::User,
+            content: vec![ContentPart::Document(crate::types::DocumentData {
+                url: None,
+                data: Some(vec![1, 2, 3]),
+                media_type: None,
+                file_name: None,
+            })],
+            name: None,
+            tool_call_id: None,
+        };
+        let (_, input) = translate_input(&[msg]);
+        let content = input[0]["content"].as_array().expect("content should be array");
+        assert_eq!(content[0]["type"], "input_text");
+        assert_eq!(content[0]["text"], "[Document content not supported by this provider]");
     }
 }

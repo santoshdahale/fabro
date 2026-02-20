@@ -212,6 +212,29 @@ fn map_finish_reason(reason: Option<&str>) -> FinishReason {
     }
 }
 
+/// Build the content string from a message's parts, including fallback text
+/// for unsupported content types (Audio, Document).
+fn content_text_with_fallbacks(parts: &[ContentPart]) -> String {
+    let mut segments: Vec<String> = Vec::new();
+    for part in parts {
+        match part {
+            ContentPart::Text(text) => segments.push(text.clone()),
+            ContentPart::Audio(_) => {
+                segments.push("[Audio content not supported by this provider]".to_string());
+            }
+            ContentPart::Document(doc) => {
+                let desc = doc.file_name.as_ref().map_or_else(
+                    || "[Document content not supported by this provider]".to_string(),
+                    |name| format!("[Document '{name}': content type not supported by this provider]"),
+                );
+                segments.push(desc);
+            }
+            _ => {}
+        }
+    }
+    segments.join("")
+}
+
 fn translate_messages(messages: &[Message]) -> Vec<ChatMessage> {
     messages
         .iter()
@@ -243,7 +266,7 @@ fn translate_messages(messages: &[Message]) -> Vec<ChatMessage> {
                 }
             }
 
-            let text = msg.text();
+            let text = content_text_with_fallbacks(&msg.content);
             let content = if text.is_empty() { None } else { Some(text) };
             let tool_calls = if tool_calls.is_empty() {
                 None
@@ -1262,5 +1285,86 @@ mod tests {
         merge_provider_options(&mut body, Some(&opts), "groq");
         // Should not crash and body should be unchanged
         assert_eq!(body["model"], "test");
+    }
+
+    #[test]
+    fn audio_content_produces_text_fallback() {
+        let msg = Message {
+            role: Role::User,
+            content: vec![ContentPart::Audio(crate::types::AudioData {
+                url: Some("https://example.com/audio.wav".to_string()),
+                data: None,
+                media_type: None,
+            })],
+            name: None,
+            tool_call_id: None,
+        };
+        let translated = translate_messages(&[msg]);
+        assert_eq!(
+            translated[0].content.as_deref(),
+            Some("[Audio content not supported by this provider]")
+        );
+    }
+
+    #[test]
+    fn document_content_produces_text_fallback_with_filename() {
+        let msg = Message {
+            role: Role::User,
+            content: vec![ContentPart::Document(crate::types::DocumentData {
+                url: Some("https://example.com/doc.pdf".to_string()),
+                data: None,
+                media_type: None,
+                file_name: Some("report.pdf".to_string()),
+            })],
+            name: None,
+            tool_call_id: None,
+        };
+        let translated = translate_messages(&[msg]);
+        assert_eq!(
+            translated[0].content.as_deref(),
+            Some("[Document 'report.pdf': content type not supported by this provider]")
+        );
+    }
+
+    #[test]
+    fn document_content_produces_text_fallback_without_filename() {
+        let msg = Message {
+            role: Role::User,
+            content: vec![ContentPart::Document(crate::types::DocumentData {
+                url: None,
+                data: Some(vec![1, 2, 3]),
+                media_type: None,
+                file_name: None,
+            })],
+            name: None,
+            tool_call_id: None,
+        };
+        let translated = translate_messages(&[msg]);
+        assert_eq!(
+            translated[0].content.as_deref(),
+            Some("[Document content not supported by this provider]")
+        );
+    }
+
+    #[test]
+    fn mixed_text_and_audio_content_concatenates() {
+        let msg = Message {
+            role: Role::User,
+            content: vec![
+                ContentPart::text("Check this: "),
+                ContentPart::Audio(crate::types::AudioData {
+                    url: None,
+                    data: Some(vec![1, 2]),
+                    media_type: None,
+                }),
+            ],
+            name: None,
+            tool_call_id: None,
+        };
+        let translated = translate_messages(&[msg]);
+        assert_eq!(
+            translated[0].content.as_deref(),
+            Some("Check this: [Audio content not supported by this provider]")
+        );
     }
 }

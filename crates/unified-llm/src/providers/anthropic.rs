@@ -234,7 +234,29 @@ fn content_part_to_api(part: &ContentPart) -> Option<serde_json::Value> {
                 })
             }
         }
-        _ => None,
+        ContentPart::Document(doc) => {
+            if let Some(url) = &doc.url {
+                if crate::providers::common::is_file_path(url) {
+                    return match crate::providers::common::load_file_as_base64(url) {
+                        Ok((b64, mime)) => Some(serde_json::json!({
+                            "type": "document",
+                            "source": {"type": "base64", "media_type": mime, "data": b64}
+                        })),
+                        Err(_) => None,
+                    };
+                }
+                Some(serde_json::json!({"type": "document", "source": {"type": "url", "url": url}}))
+            } else {
+                doc.data.as_ref().map(|data| {
+                    let mime = doc.media_type.as_deref().unwrap_or("application/pdf");
+                    let b64 = BASE64_STANDARD.encode(data);
+                    serde_json::json!({"type": "document", "source": {"type": "base64", "media_type": mime, "data": b64}})
+                })
+            }
+        }
+        ContentPart::Audio(_) => {
+            Some(serde_json::json!({"type": "text", "text": "[Audio content not supported by this provider]"}))
+        }
     }
 }
 
@@ -1764,5 +1786,58 @@ mod tests {
             }
             _ => panic!("expected Finish"),
         }
+    }
+
+    #[test]
+    fn document_url_translates_to_url_source() {
+        let part = ContentPart::Document(crate::types::DocumentData {
+            url: Some("https://example.com/doc.pdf".to_string()),
+            data: None,
+            media_type: None,
+            file_name: None,
+        });
+        let result = content_part_to_api(&part).expect("should produce JSON");
+        assert_eq!(result["type"], "document");
+        assert_eq!(result["source"]["type"], "url");
+        assert_eq!(result["source"]["url"], "https://example.com/doc.pdf");
+    }
+
+    #[test]
+    fn document_base64_data_translates_to_base64_source() {
+        let part = ContentPart::Document(crate::types::DocumentData {
+            url: None,
+            data: Some(vec![0x25, 0x50, 0x44, 0x46]),
+            media_type: Some("application/pdf".to_string()),
+            file_name: Some("test.pdf".to_string()),
+        });
+        let result = content_part_to_api(&part).expect("should produce JSON");
+        assert_eq!(result["type"], "document");
+        assert_eq!(result["source"]["type"], "base64");
+        assert_eq!(result["source"]["media_type"], "application/pdf");
+        assert!(result["source"]["data"].as_str().is_some());
+    }
+
+    #[test]
+    fn document_base64_defaults_to_pdf_mime() {
+        let part = ContentPart::Document(crate::types::DocumentData {
+            url: None,
+            data: Some(vec![1, 2, 3]),
+            media_type: None,
+            file_name: None,
+        });
+        let result = content_part_to_api(&part).expect("should produce JSON");
+        assert_eq!(result["source"]["media_type"], "application/pdf");
+    }
+
+    #[test]
+    fn audio_produces_text_fallback() {
+        let part = ContentPart::Audio(crate::types::AudioData {
+            url: Some("https://example.com/audio.wav".to_string()),
+            data: None,
+            media_type: None,
+        });
+        let result = content_part_to_api(&part).expect("should produce JSON");
+        assert_eq!(result["type"], "text");
+        assert_eq!(result["text"], "[Audio content not supported by this provider]");
     }
 }
