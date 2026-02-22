@@ -398,243 +398,17 @@ mod tests {
     use super::*;
     use crate::execution_env::*;
     use crate::test_support::MockExecutionEnvironment;
-    use async_trait::async_trait;
-    use std::sync::Mutex;
-
-    /// A specialized mock that applies offset/limit to file content (for read_file tool tests).
-    struct ReadFileEnv {
-        content: String,
-    }
-
-    #[async_trait]
-    impl ExecutionEnvironment for ReadFileEnv {
-        async fn read_file(&self, _path: &str, offset: Option<usize>, limit: Option<usize>) -> Result<String, String> {
-            let lines: Vec<&str> = self.content.lines().collect();
-            let start = offset.unwrap_or(1).saturating_sub(1);
-            let count = limit.unwrap_or(2000);
-            let selected: Vec<&str> = lines.into_iter().skip(start).take(count).collect();
-            Ok(selected.join("\n"))
-        }
-        async fn write_file(&self, _: &str, _: &str) -> Result<(), String> {
-            Ok(())
-        }
-        async fn delete_file(&self, _: &str) -> Result<(), String> {
-            Ok(())
-        }
-        async fn file_exists(&self, _: &str) -> Result<bool, String> {
-            Ok(false)
-        }
-        async fn list_directory(&self, _: &str, _depth: Option<usize>) -> Result<Vec<DirEntry>, String> {
-            Ok(vec![])
-        }
-        async fn exec_command(&self, _: &str, _: u64, _: Option<&str>, _: Option<&std::collections::HashMap<String, String>>) -> Result<ExecResult, String> {
-            Ok(ExecResult {
-                stdout: String::new(),
-                stderr: String::new(),
-                exit_code: 0,
-                timed_out: false,
-                duration_ms: 0,
-            })
-        }
-        async fn grep(&self, _: &str, _: &str, _: &GrepOptions) -> Result<Vec<String>, String> {
-            Ok(vec![])
-        }
-        async fn glob(&self, _: &str, _path: Option<&str>) -> Result<Vec<String>, String> {
-            Ok(vec![])
-        }
-        async fn initialize(&self) -> Result<(), String> {
-            Ok(())
-        }
-        async fn cleanup(&self) -> Result<(), String> {
-            Ok(())
-        }
-        fn working_directory(&self) -> &str {
-            "/tmp"
-        }
-        fn platform(&self) -> &str {
-            "darwin"
-        }
-        fn os_version(&self) -> String {
-            String::new()
-        }
-    }
-
-    struct WriteFileEnv {
-        written: Mutex<Option<(String, String)>>,
-    }
-
-    #[async_trait]
-    impl ExecutionEnvironment for WriteFileEnv {
-        async fn read_file(&self, _path: &str, _offset: Option<usize>, _limit: Option<usize>) -> Result<String, String> {
-            Ok(String::new())
-        }
-        async fn write_file(&self, path: &str, content: &str) -> Result<(), String> {
-            *self.written.lock().unwrap() = Some((path.into(), content.into()));
-            Ok(())
-        }
-        async fn delete_file(&self, _: &str) -> Result<(), String> {
-            Ok(())
-        }
-        async fn file_exists(&self, _: &str) -> Result<bool, String> {
-            Ok(false)
-        }
-        async fn list_directory(&self, _: &str, _depth: Option<usize>) -> Result<Vec<DirEntry>, String> {
-            Ok(vec![])
-        }
-        async fn exec_command(&self, _: &str, _: u64, _: Option<&str>, _: Option<&std::collections::HashMap<String, String>>) -> Result<ExecResult, String> {
-            Ok(ExecResult {
-                stdout: String::new(),
-                stderr: String::new(),
-                exit_code: 0,
-                timed_out: false,
-                duration_ms: 0,
-            })
-        }
-        async fn grep(&self, _: &str, _: &str, _: &GrepOptions) -> Result<Vec<String>, String> {
-            Ok(vec![])
-        }
-        async fn glob(&self, _: &str, _path: Option<&str>) -> Result<Vec<String>, String> {
-            Ok(vec![])
-        }
-        async fn initialize(&self) -> Result<(), String> {
-            Ok(())
-        }
-        async fn cleanup(&self) -> Result<(), String> {
-            Ok(())
-        }
-        fn working_directory(&self) -> &str {
-            "/tmp"
-        }
-        fn platform(&self) -> &str {
-            "darwin"
-        }
-        fn os_version(&self) -> String {
-            String::new()
-        }
-    }
-
-    struct EditFileEnv {
-        content: String,
-        written: Mutex<Option<String>>,
-    }
-
-    #[async_trait]
-    impl ExecutionEnvironment for EditFileEnv {
-        async fn read_file(&self, _path: &str, _offset: Option<usize>, _limit: Option<usize>) -> Result<String, String> {
-            Ok(self.content.clone())
-        }
-        async fn write_file(&self, _path: &str, content: &str) -> Result<(), String> {
-            *self.written.lock().unwrap() = Some(content.into());
-            Ok(())
-        }
-        async fn delete_file(&self, _: &str) -> Result<(), String> {
-            Ok(())
-        }
-        async fn file_exists(&self, _: &str) -> Result<bool, String> {
-            Ok(false)
-        }
-        async fn list_directory(&self, _: &str, _depth: Option<usize>) -> Result<Vec<DirEntry>, String> {
-            Ok(vec![])
-        }
-        async fn exec_command(&self, _: &str, _: u64, _: Option<&str>, _: Option<&std::collections::HashMap<String, String>>) -> Result<ExecResult, String> {
-            Ok(ExecResult {
-                stdout: String::new(),
-                stderr: String::new(),
-                exit_code: 0,
-                timed_out: false,
-                duration_ms: 0,
-            })
-        }
-        async fn grep(&self, _: &str, _: &str, _: &GrepOptions) -> Result<Vec<String>, String> {
-            Ok(vec![])
-        }
-        async fn glob(&self, _: &str, _path: Option<&str>) -> Result<Vec<String>, String> {
-            Ok(vec![])
-        }
-        async fn initialize(&self) -> Result<(), String> {
-            Ok(())
-        }
-        async fn cleanup(&self) -> Result<(), String> {
-            Ok(())
-        }
-        fn working_directory(&self) -> &str {
-            "/tmp"
-        }
-        fn platform(&self) -> &str {
-            "darwin"
-        }
-        fn os_version(&self) -> String {
-            String::new()
-        }
-    }
-
-
-    struct ShellCapturingEnv {
-        captured_timeout: Mutex<Option<u64>>,
-    }
-
-    #[async_trait]
-    impl ExecutionEnvironment for ShellCapturingEnv {
-        async fn read_file(&self, _: &str, _offset: Option<usize>, _limit: Option<usize>) -> Result<String, String> {
-            Ok(String::new())
-        }
-        async fn write_file(&self, _: &str, _: &str) -> Result<(), String> {
-            Ok(())
-        }
-        async fn delete_file(&self, _: &str) -> Result<(), String> {
-            Ok(())
-        }
-        async fn file_exists(&self, _: &str) -> Result<bool, String> {
-            Ok(false)
-        }
-        async fn list_directory(&self, _: &str, _depth: Option<usize>) -> Result<Vec<DirEntry>, String> {
-            Ok(vec![])
-        }
-        async fn exec_command(
-            &self,
-            _: &str,
-            timeout_ms: u64,
-            _: Option<&str>,
-            _: Option<&std::collections::HashMap<String, String>>,
-        ) -> Result<ExecResult, String> {
-            *self.captured_timeout.lock().unwrap() = Some(timeout_ms);
-            Ok(ExecResult {
-                stdout: String::new(),
-                stderr: String::new(),
-                exit_code: 0,
-                timed_out: false,
-                duration_ms: 0,
-            })
-        }
-        async fn grep(&self, _: &str, _: &str, _: &GrepOptions) -> Result<Vec<String>, String> {
-            Ok(vec![])
-        }
-        async fn glob(&self, _: &str, _path: Option<&str>) -> Result<Vec<String>, String> {
-            Ok(vec![])
-        }
-        async fn initialize(&self) -> Result<(), String> {
-            Ok(())
-        }
-        async fn cleanup(&self) -> Result<(), String> {
-            Ok(())
-        }
-        fn working_directory(&self) -> &str {
-            "/tmp"
-        }
-        fn platform(&self) -> &str {
-            "darwin"
-        }
-        fn os_version(&self) -> String {
-            String::new()
-        }
-    }
-
+    use std::collections::HashMap;
 
     #[tokio::test]
     async fn read_file_returns_content() {
         let tool = make_read_file_tool();
-        let env: Arc<dyn ExecutionEnvironment> = Arc::new(ReadFileEnv {
-            content: "  1 | hello\n  2 | world".into(),
+        let mut files = HashMap::new();
+        files.insert("/test.txt".into(), "  1 | hello\n  2 | world".into());
+        let env: Arc<dyn ExecutionEnvironment> = Arc::new(MockExecutionEnvironment {
+            files,
+            apply_read_offset_limit: true,
+            ..Default::default()
         });
         let result = (tool.executor)(serde_json::json!({"file_path": "/test.txt"}), env).await;
         assert_eq!(result.unwrap(), "  1 | hello\n  2 | world");
@@ -643,8 +417,15 @@ mod tests {
     #[tokio::test]
     async fn read_file_with_offset_and_limit() {
         let tool = make_read_file_tool();
-        let env: Arc<dyn ExecutionEnvironment> = Arc::new(ReadFileEnv {
-            content: "  1 | line1\n  2 | line2\n  3 | line3\n  4 | line4".into(),
+        let mut files = HashMap::new();
+        files.insert(
+            "/test.txt".into(),
+            "  1 | line1\n  2 | line2\n  3 | line3\n  4 | line4".into(),
+        );
+        let env: Arc<dyn ExecutionEnvironment> = Arc::new(MockExecutionEnvironment {
+            files,
+            apply_read_offset_limit: true,
+            ..Default::default()
         });
         let result = (tool.executor)(
             serde_json::json!({"file_path": "/test.txt", "offset": 2, "limit": 2}),
@@ -657,9 +438,7 @@ mod tests {
     #[tokio::test]
     async fn write_file_calls_env() {
         let tool = make_write_file_tool();
-        let env = Arc::new(WriteFileEnv {
-            written: Mutex::new(None),
-        });
+        let env = Arc::new(MockExecutionEnvironment::default());
         let env_clone: Arc<dyn ExecutionEnvironment> = env.clone();
         let result = (tool.executor)(
             serde_json::json!({"file_path": "/out.txt", "content": "hello"}),
@@ -667,18 +446,20 @@ mod tests {
         )
         .await;
         assert_eq!(result.unwrap(), "Successfully wrote to /out.txt");
-        let written = env.written.lock().unwrap();
-        let (path, content) = written.as_ref().unwrap();
-        assert_eq!(path, "/out.txt");
-        assert_eq!(content, "hello");
+        let written = env.written_files.lock().unwrap();
+        assert_eq!(written.len(), 1);
+        assert_eq!(written[0].0, "/out.txt");
+        assert_eq!(written[0].1, "hello");
     }
 
     #[tokio::test]
     async fn edit_file_replaces_match() {
         let tool = make_edit_file_tool();
-        let env = Arc::new(EditFileEnv {
-            content: "  1 | hello world".into(),
-            written: Mutex::new(None),
+        let mut files = HashMap::new();
+        files.insert("/f.txt".into(), "  1 | hello world".into());
+        let env = Arc::new(MockExecutionEnvironment {
+            files,
+            ..Default::default()
         });
         let env_clone: Arc<dyn ExecutionEnvironment> = env.clone();
         let result = (tool.executor)(
@@ -691,16 +472,19 @@ mod tests {
         )
         .await;
         assert_eq!(result.unwrap(), "Successfully edited /f.txt");
-        let written = env.written.lock().unwrap();
-        assert_eq!(written.as_ref().unwrap(), "goodbye world");
+        let written = env.written_files.lock().unwrap();
+        assert_eq!(written.len(), 1);
+        assert_eq!(written[0].1, "goodbye world");
     }
 
     #[tokio::test]
     async fn edit_file_not_found_error() {
         let tool = make_edit_file_tool();
-        let env: Arc<dyn ExecutionEnvironment> = Arc::new(EditFileEnv {
-            content: "  1 | hello world".into(),
-            written: Mutex::new(None),
+        let mut files = HashMap::new();
+        files.insert("/f.txt".into(), "  1 | hello world".into());
+        let env: Arc<dyn ExecutionEnvironment> = Arc::new(MockExecutionEnvironment {
+            files,
+            ..Default::default()
         });
         let result = (tool.executor)(
             serde_json::json!({
@@ -717,9 +501,11 @@ mod tests {
     #[tokio::test]
     async fn edit_file_not_unique_error() {
         let tool = make_edit_file_tool();
-        let env: Arc<dyn ExecutionEnvironment> = Arc::new(EditFileEnv {
-            content: "  1 | aa bb aa".into(),
-            written: Mutex::new(None),
+        let mut files = HashMap::new();
+        files.insert("/f.txt".into(), "  1 | aa bb aa".into());
+        let env: Arc<dyn ExecutionEnvironment> = Arc::new(MockExecutionEnvironment {
+            files,
+            ..Default::default()
         });
         let result = (tool.executor)(
             serde_json::json!({
@@ -738,9 +524,11 @@ mod tests {
     #[tokio::test]
     async fn edit_file_replace_all() {
         let tool = make_edit_file_tool();
-        let env = Arc::new(EditFileEnv {
-            content: "  1 | aa bb aa".into(),
-            written: Mutex::new(None),
+        let mut files = HashMap::new();
+        files.insert("/f.txt".into(), "  1 | aa bb aa".into());
+        let env = Arc::new(MockExecutionEnvironment {
+            files,
+            ..Default::default()
         });
         let env_clone: Arc<dyn ExecutionEnvironment> = env.clone();
         let result = (tool.executor)(
@@ -754,8 +542,9 @@ mod tests {
         )
         .await;
         assert_eq!(result.unwrap(), "Successfully edited /f.txt");
-        let written = env.written.lock().unwrap();
-        assert_eq!(written.as_ref().unwrap(), "cc bb cc");
+        let written = env.written_files.lock().unwrap();
+        assert_eq!(written.len(), 1);
+        assert_eq!(written[0].1, "cc bb cc");
     }
 
     #[tokio::test]
@@ -780,9 +569,7 @@ mod tests {
     #[tokio::test]
     async fn shell_with_timeout() {
         let tool = make_shell_tool();
-        let env = Arc::new(ShellCapturingEnv {
-            captured_timeout: Mutex::new(None),
-        });
+        let env = Arc::new(MockExecutionEnvironment::default());
         let env_clone: Arc<dyn ExecutionEnvironment> = env.clone();
         let _result = (tool.executor)(
             serde_json::json!({"command": "sleep 1", "timeout_ms": 5000}),

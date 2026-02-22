@@ -419,104 +419,8 @@ fn make_apply_patch_tool() -> RegisteredTool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::execution_env::*;
-    use crate::test_support::MockExecutionEnvironment;
-    use async_trait::async_trait;
+    use crate::test_support::{MockExecutionEnvironment, MutableMockExecutionEnvironment};
     use std::collections::HashMap;
-    use std::sync::Mutex;
-
-    fn linux_env() -> MockExecutionEnvironment {
-        MockExecutionEnvironment {
-            working_dir: "/home/test",
-            platform_str: "linux",
-            os_version_str: "Linux 6.1.0".into(),
-            ..Default::default()
-        }
-    }
-
-    /// A specialized mock with Mutex-protected files for apply_patch tests that
-    /// need mutable write/delete operations.
-    struct MockFileEnv {
-        files: Mutex<HashMap<String, String>>,
-    }
-
-    impl MockFileEnv {
-        fn new(files: HashMap<String, String>) -> Self {
-            Self {
-                files: Mutex::new(files),
-            }
-        }
-    }
-
-    #[async_trait]
-    impl ExecutionEnvironment for MockFileEnv {
-        async fn read_file(&self, path: &str, _: Option<usize>, _: Option<usize>) -> Result<String, String> {
-            self.files
-                .lock()
-                .unwrap()
-                .get(path)
-                .cloned()
-                .ok_or_else(|| format!("File not found: {path}"))
-        }
-        async fn write_file(&self, path: &str, content: &str) -> Result<(), String> {
-            self.files
-                .lock()
-                .unwrap()
-                .insert(path.to_string(), content.to_string());
-            Ok(())
-        }
-        async fn delete_file(&self, path: &str) -> Result<(), String> {
-            self.files.lock().unwrap().remove(path);
-            Ok(())
-        }
-        async fn file_exists(&self, path: &str) -> Result<bool, String> {
-            Ok(self.files.lock().unwrap().contains_key(path))
-        }
-        async fn list_directory(&self, _: &str, _: Option<usize>) -> Result<Vec<DirEntry>, String> {
-            Ok(vec![])
-        }
-        async fn exec_command(
-            &self,
-            _: &str,
-            _: u64,
-            _: Option<&str>,
-            _: Option<&std::collections::HashMap<String, String>>,
-        ) -> Result<ExecResult, String> {
-            Ok(ExecResult {
-                stdout: String::new(),
-                stderr: String::new(),
-                exit_code: 0,
-                timed_out: false,
-                duration_ms: 0,
-            })
-        }
-        async fn grep(
-            &self,
-            _: &str,
-            _: &str,
-            _: &GrepOptions,
-        ) -> Result<Vec<String>, String> {
-            Ok(vec![])
-        }
-        async fn glob(&self, _: &str, _: Option<&str>) -> Result<Vec<String>, String> {
-            Ok(vec![])
-        }
-        async fn initialize(&self) -> Result<(), String> {
-            Ok(())
-        }
-        async fn cleanup(&self) -> Result<(), String> {
-            Ok(())
-        }
-        fn working_directory(&self) -> &str {
-            "/tmp"
-        }
-        fn platform(&self) -> &str {
-            "linux"
-        }
-        fn os_version(&self) -> String {
-            "Linux 6.1.0".into()
-        }
-    }
 
     #[test]
     fn openai_profile_identity() {
@@ -537,7 +441,7 @@ mod tests {
     #[test]
     fn openai_system_prompt_contains_env_context() {
         let profile = OpenAiProfile::new("o3-mini");
-        let env = linux_env();
+        let env = MockExecutionEnvironment::linux();
         let prompt = profile.build_system_prompt(&env, &EnvContext::default(), &[], None);
         assert!(prompt.contains("You are a coding agent powered by OpenAI"));
         assert!(prompt.contains("<environment>"));
@@ -549,7 +453,7 @@ mod tests {
     #[test]
     fn openai_system_prompt_contains_tool_guidance() {
         let profile = OpenAiProfile::new("o3-mini");
-        let env = linux_env();
+        let env = MockExecutionEnvironment::linux();
         let prompt = profile.build_system_prompt(&env, &EnvContext::default(), &[], None);
         assert!(prompt.contains("read_file"));
         assert!(prompt.contains("apply_patch"));
@@ -563,7 +467,7 @@ mod tests {
     #[test]
     fn openai_system_prompt_contains_coding_best_practices() {
         let profile = OpenAiProfile::new("o3-mini");
-        let env = linux_env();
+        let env = MockExecutionEnvironment::linux();
         let prompt = profile.build_system_prompt(&env, &EnvContext::default(), &[], None);
         assert!(prompt.contains("clean, maintainable code"));
         assert!(prompt.contains("existing code conventions"));
@@ -572,7 +476,7 @@ mod tests {
     #[test]
     fn openai_system_prompt_includes_project_docs() {
         let profile = OpenAiProfile::new("o3-mini");
-        let env = linux_env();
+        let env = MockExecutionEnvironment::linux();
         let docs = vec!["# Project README".into(), "# CONTRIBUTING guide".into()];
         let prompt = profile.build_system_prompt(&env, &EnvContext::default(), &docs, None);
         assert!(prompt.contains("# Project README"));
@@ -582,7 +486,7 @@ mod tests {
     #[test]
     fn openai_system_prompt_includes_user_instructions() {
         let profile = OpenAiProfile::new("o3-mini");
-        let env = linux_env();
+        let env = MockExecutionEnvironment::linux();
         let prompt = profile.build_system_prompt(&env, &EnvContext::default(), &[], Some("Always write tests first"));
         assert!(prompt.contains("Always write tests first"));
         assert!(prompt.contains("# User Instructions"));
@@ -740,7 +644,7 @@ mod tests {
 
     #[tokio::test]
     async fn apply_patch_add_file() {
-        let env = MockFileEnv::new(HashMap::new());
+        let env = MutableMockExecutionEnvironment::new(HashMap::new());
         let ops = vec![PatchOperation::Add {
             path: "src/new.rs".into(),
             content: "fn new() {}".into(),
@@ -760,7 +664,7 @@ mod tests {
             "src/lib.rs".to_string(),
             "fn hello() {\n    println!(\"old\");\n}".to_string(),
         );
-        let env = MockFileEnv::new(files);
+        let env = MutableMockExecutionEnvironment::new(files);
 
         let ops = vec![PatchOperation::Update {
             path: "src/lib.rs".into(),

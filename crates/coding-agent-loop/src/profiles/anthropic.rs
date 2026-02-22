@@ -164,15 +164,6 @@ mod tests {
     use super::*;
     use crate::test_support::MockExecutionEnvironment;
 
-    fn linux_env() -> MockExecutionEnvironment {
-        MockExecutionEnvironment {
-            working_dir: "/home/test",
-            platform_str: "linux",
-            os_version_str: "Linux 6.1.0".into(),
-            ..Default::default()
-        }
-    }
-
     #[test]
     fn anthropic_profile_identity() {
         let profile = AnthropicProfile::new("claude-sonnet-4-20250514");
@@ -192,7 +183,7 @@ mod tests {
     #[test]
     fn anthropic_system_prompt_contains_env_context() {
         let profile = AnthropicProfile::new("claude-sonnet-4-20250514");
-        let env = linux_env();
+        let env = MockExecutionEnvironment::linux();
         let prompt = profile.build_system_prompt(&env, &EnvContext::default(), &[], None);
         assert!(prompt.contains("You are Claude, an AI coding assistant made by Anthropic"));
         assert!(prompt.contains("<environment>"));
@@ -225,7 +216,7 @@ mod tests {
     #[test]
     fn anthropic_system_prompt_includes_project_docs() {
         let profile = AnthropicProfile::new("claude-sonnet-4-20250514");
-        let env = linux_env();
+        let env = MockExecutionEnvironment::linux();
         let docs = vec!["# Project README".into(), "# CONTRIBUTING guide".into()];
         let prompt = profile.build_system_prompt(&env, &EnvContext::default(), &docs, None);
         assert!(prompt.contains("# Project README"));
@@ -235,7 +226,7 @@ mod tests {
     #[test]
     fn anthropic_system_prompt_includes_env_context() {
         let profile = AnthropicProfile::new("claude-opus-4-6");
-        let env = linux_env();
+        let env = MockExecutionEnvironment::linux();
         let ctx = EnvContext {
             git_branch: Some("feature-branch".into()),
             is_git_repo: true,
@@ -256,7 +247,7 @@ mod tests {
     #[test]
     fn anthropic_system_prompt_includes_user_instructions() {
         let profile = AnthropicProfile::new("claude-opus-4-6");
-        let env = linux_env();
+        let env = MockExecutionEnvironment::linux();
         let ctx = EnvContext::default();
         let prompt = profile.build_system_prompt(&env, &ctx, &[], Some("Always write tests first"));
         assert!(prompt.contains("Always write tests first"));

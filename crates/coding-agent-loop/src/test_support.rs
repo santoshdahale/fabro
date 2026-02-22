@@ -7,7 +7,7 @@ use crate::tool_registry::ToolRegistry;
 use async_trait::async_trait;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use unified_llm::client::Client;
 use unified_llm::error::SdkError;
 use unified_llm::provider::{ProviderAdapter, StreamEventStream};
@@ -23,6 +23,23 @@ pub(crate) struct MockExecutionEnvironment {
     pub working_dir: &'static str,
     pub platform_str: &'static str,
     pub os_version_str: String,
+    /// When true, read_file applies offset/limit by splitting on lines.
+    pub apply_read_offset_limit: bool,
+    /// Captures (path, content) pairs from write_file calls.
+    pub written_files: Mutex<Vec<(String, String)>>,
+    /// Captures the timeout_ms argument from exec_command calls.
+    pub captured_timeout: Mutex<Option<u64>>,
+}
+
+impl MockExecutionEnvironment {
+    pub fn linux() -> Self {
+        Self {
+            working_dir: "/home/test",
+            platform_str: "linux",
+            os_version_str: "Linux 6.1.0".into(),
+            ..Default::default()
+        }
+    }
 }
 
 impl Default for MockExecutionEnvironment {
@@ -41,6 +58,9 @@ impl Default for MockExecutionEnvironment {
             working_dir: "/tmp/test",
             platform_str: "darwin",
             os_version_str: "Darwin 24.0.0".into(),
+            apply_read_offset_limit: false,
+            written_files: Mutex::new(Vec::new()),
+            captured_timeout: Mutex::new(None),
         }
     }
 }
@@ -50,16 +70,31 @@ impl ExecutionEnvironment for MockExecutionEnvironment {
     async fn read_file(
         &self,
         path: &str,
-        _offset: Option<usize>,
-        _limit: Option<usize>,
+        offset: Option<usize>,
+        limit: Option<usize>,
     ) -> Result<String, String> {
-        self.files
+        let content = self
+            .files
             .get(path)
             .cloned()
-            .ok_or_else(|| format!("File not found: {path}"))
+            .ok_or_else(|| format!("File not found: {path}"))?;
+
+        if self.apply_read_offset_limit {
+            let lines: Vec<&str> = content.lines().collect();
+            let start = offset.unwrap_or(1).saturating_sub(1);
+            let count = limit.unwrap_or(2000);
+            let selected: Vec<&str> = lines.into_iter().skip(start).take(count).collect();
+            Ok(selected.join("\n"))
+        } else {
+            Ok(content)
+        }
     }
 
-    async fn write_file(&self, _path: &str, _content: &str) -> Result<(), String> {
+    async fn write_file(&self, path: &str, content: &str) -> Result<(), String> {
+        self.written_files
+            .lock()
+            .expect("written_files lock poisoned")
+            .push((path.to_string(), content.to_string()));
         Ok(())
     }
 
@@ -82,10 +117,14 @@ impl ExecutionEnvironment for MockExecutionEnvironment {
     async fn exec_command(
         &self,
         _command: &str,
-        _timeout_ms: u64,
+        timeout_ms: u64,
         _working_dir: Option<&str>,
         _env_vars: Option<&std::collections::HashMap<String, String>>,
     ) -> Result<ExecResult, String> {
+        *self
+            .captured_timeout
+            .lock()
+            .expect("captured_timeout lock poisoned") = Some(timeout_ms);
         Ok(self.exec_result.clone())
     }
 
@@ -123,21 +162,159 @@ impl ExecutionEnvironment for MockExecutionEnvironment {
     }
 }
 
+// --- MutableMockExecutionEnvironment ---
+
+/// A mock execution environment with Mutex-protected files for tests that need
+/// write operations to be visible to subsequent reads (e.g., apply_patch tests).
+pub(crate) struct MutableMockExecutionEnvironment {
+    pub files: Mutex<HashMap<String, String>>,
+}
+
+impl MutableMockExecutionEnvironment {
+    pub fn new(files: HashMap<String, String>) -> Self {
+        Self {
+            files: Mutex::new(files),
+        }
+    }
+}
+
+#[async_trait]
+impl ExecutionEnvironment for MutableMockExecutionEnvironment {
+    async fn read_file(
+        &self,
+        path: &str,
+        _offset: Option<usize>,
+        _limit: Option<usize>,
+    ) -> Result<String, String> {
+        self.files
+            .lock()
+            .expect("files lock poisoned")
+            .get(path)
+            .cloned()
+            .ok_or_else(|| format!("File not found: {path}"))
+    }
+
+    async fn write_file(&self, path: &str, content: &str) -> Result<(), String> {
+        self.files
+            .lock()
+            .expect("files lock poisoned")
+            .insert(path.to_string(), content.to_string());
+        Ok(())
+    }
+
+    async fn delete_file(&self, path: &str) -> Result<(), String> {
+        self.files
+            .lock()
+            .expect("files lock poisoned")
+            .remove(path);
+        Ok(())
+    }
+
+    async fn file_exists(&self, path: &str) -> Result<bool, String> {
+        Ok(self
+            .files
+            .lock()
+            .expect("files lock poisoned")
+            .contains_key(path))
+    }
+
+    async fn list_directory(
+        &self,
+        _path: &str,
+        _depth: Option<usize>,
+    ) -> Result<Vec<DirEntry>, String> {
+        Ok(vec![])
+    }
+
+    async fn exec_command(
+        &self,
+        _command: &str,
+        _timeout_ms: u64,
+        _working_dir: Option<&str>,
+        _env_vars: Option<&std::collections::HashMap<String, String>>,
+    ) -> Result<ExecResult, String> {
+        Ok(ExecResult {
+            stdout: String::new(),
+            stderr: String::new(),
+            exit_code: 0,
+            timed_out: false,
+            duration_ms: 0,
+        })
+    }
+
+    async fn grep(
+        &self,
+        _pattern: &str,
+        _path: &str,
+        _options: &GrepOptions,
+    ) -> Result<Vec<String>, String> {
+        Ok(vec![])
+    }
+
+    async fn glob(&self, _pattern: &str, _path: Option<&str>) -> Result<Vec<String>, String> {
+        Ok(vec![])
+    }
+
+    async fn initialize(&self) -> Result<(), String> {
+        Ok(())
+    }
+
+    async fn cleanup(&self) -> Result<(), String> {
+        Ok(())
+    }
+
+    fn working_directory(&self) -> &str {
+        "/tmp"
+    }
+
+    fn platform(&self) -> &str {
+        "linux"
+    }
+
+    fn os_version(&self) -> String {
+        "Linux 6.1.0".into()
+    }
+}
+
 // --- TestProfile ---
 
 pub(crate) struct TestProfile {
     pub registry: ToolRegistry,
+    pub parallel_tool_calls: bool,
+    pub context_window: usize,
 }
 
 impl TestProfile {
     pub fn new() -> Self {
         Self {
             registry: ToolRegistry::new(),
+            parallel_tool_calls: false,
+            context_window: 200_000,
         }
     }
 
     pub fn with_tools(registry: ToolRegistry) -> Self {
-        Self { registry }
+        Self {
+            registry,
+            parallel_tool_calls: false,
+            context_window: 200_000,
+        }
+    }
+
+    pub fn parallel(registry: ToolRegistry) -> Self {
+        Self {
+            registry,
+            parallel_tool_calls: true,
+            context_window: 200_000,
+        }
+    }
+
+    pub fn parallel_with_context_window(registry: ToolRegistry, context_window: usize) -> Self {
+        Self {
+            registry,
+            parallel_tool_calls: true,
+            context_window,
+        }
     }
 }
 
@@ -163,17 +340,20 @@ impl ProviderProfile for TestProfile {
         _env: &dyn ExecutionEnvironment,
         _env_context: &EnvContext,
         _project_docs: &[String],
-        _user_instructions: Option<&str>,
+        user_instructions: Option<&str>,
     ) -> String {
-        "You are a test assistant.".into()
+        match user_instructions {
+            Some(instructions) => format!("You are a test assistant.\n\n# User Instructions\n{instructions}"),
+            None => "You are a test assistant.".into(),
+        }
     }
 
     fn capabilities(&self) -> ProfileCapabilities {
         ProfileCapabilities {
             supports_reasoning: false,
             supports_streaming: false,
-            supports_parallel_tool_calls: false,
-            context_window_size: 200_000,
+            supports_parallel_tool_calls: self.parallel_tool_calls,
+            context_window_size: self.context_window,
         }
     }
 
@@ -355,70 +535,6 @@ pub(crate) fn make_error_tool() -> crate::tool_registry::RegisteredTool {
     }
 }
 
-// --- ParallelTestProfile ---
-
-pub(crate) struct ParallelTestProfile {
-    pub registry: ToolRegistry,
-    pub context_window: usize,
-}
-
-impl ParallelTestProfile {
-    pub fn with_tools(registry: ToolRegistry) -> Self {
-        Self {
-            registry,
-            context_window: 200_000,
-        }
-    }
-
-    pub fn with_tools_and_context_window(registry: ToolRegistry, context_window: usize) -> Self {
-        Self {
-            registry,
-            context_window,
-        }
-    }
-}
-
-impl ProviderProfile for ParallelTestProfile {
-    fn id(&self) -> &str {
-        "mock"
-    }
-
-    fn model(&self) -> &str {
-        "mock-model"
-    }
-
-    fn tool_registry(&self) -> &ToolRegistry {
-        &self.registry
-    }
-
-    fn tool_registry_mut(&mut self) -> &mut ToolRegistry {
-        &mut self.registry
-    }
-
-    fn build_system_prompt(
-        &self,
-        _env: &dyn ExecutionEnvironment,
-        _env_context: &EnvContext,
-        _project_docs: &[String],
-        _user_instructions: Option<&str>,
-    ) -> String {
-        "You are a test assistant.".into()
-    }
-
-    fn capabilities(&self) -> ProfileCapabilities {
-        ProfileCapabilities {
-            supports_reasoning: false,
-            supports_streaming: false,
-            supports_parallel_tool_calls: true,
-            context_window_size: self.context_window,
-        }
-    }
-
-    fn knowledge_cutoff(&self) -> &str {
-        "May 2025"
-    }
-}
-
 // --- MockErrorProvider ---
 
 pub(crate) struct MockErrorProvider {
@@ -433,6 +549,42 @@ impl ProviderAdapter for MockErrorProvider {
 
     async fn complete(&self, _request: &Request) -> Result<Response, SdkError> {
         Err(self.error.clone())
+    }
+
+    async fn stream(&self, _request: &Request) -> Result<StreamEventStream, SdkError> {
+        Err(SdkError::Configuration {
+            message: "streaming not supported in mock".into(),
+        })
+    }
+}
+
+// --- CapturingLlmProvider ---
+
+/// A mock LLM provider that captures the full Request for test assertions.
+pub(crate) struct CapturingLlmProvider {
+    pub captured_request: Mutex<Option<Request>>,
+}
+
+impl CapturingLlmProvider {
+    pub fn new() -> Self {
+        Self {
+            captured_request: Mutex::new(None),
+        }
+    }
+}
+
+#[async_trait]
+impl ProviderAdapter for CapturingLlmProvider {
+    fn name(&self) -> &str {
+        "mock"
+    }
+
+    async fn complete(&self, request: &Request) -> Result<Response, SdkError> {
+        *self
+            .captured_request
+            .lock()
+            .expect("captured_request lock poisoned") = Some(request.clone());
+        Ok(text_response("captured"))
     }
 
     async fn stream(&self, _request: &Request) -> Result<StreamEventStream, SdkError> {

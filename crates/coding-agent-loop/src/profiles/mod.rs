@@ -105,18 +105,9 @@ mod tests {
     use super::*;
     use crate::test_support::MockExecutionEnvironment;
 
-    fn linux_env() -> MockExecutionEnvironment {
-        MockExecutionEnvironment {
-            working_dir: "/home/test",
-            platform_str: "linux",
-            os_version_str: "Linux 6.1.0".into(),
-            ..Default::default()
-        }
-    }
-
     #[test]
     fn env_context_block_contains_platform() {
-        let env = linux_env();
+        let env = MockExecutionEnvironment::linux();
         let block = build_env_context_block(&env);
         assert!(block.contains("<environment>"));
         assert!(block.contains("</environment>"));
@@ -127,7 +118,7 @@ mod tests {
 
     #[test]
     fn env_context_block_with_extra_context() {
-        let env = linux_env();
+        let env = MockExecutionEnvironment::linux();
         let ctx = EnvContext {
             git_branch: Some("main".into()),
             is_git_repo: true,

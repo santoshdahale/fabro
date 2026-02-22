@@ -669,10 +669,9 @@ mod tests {
     use super::*;
     use crate::test_support::*;
     use crate::tool_registry::{RegisteredTool, ToolRegistry};
-    use async_trait::async_trait;
     use unified_llm::error::ProviderErrorDetail;
-    use unified_llm::provider::{ProviderAdapter, StreamEventStream};
-    use unified_llm::types::{Response, ToolDefinition};
+    use unified_llm::provider::ProviderAdapter;
+    use unified_llm::types::ToolDefinition;
 
     // --- Tests ---
 
@@ -1133,7 +1132,7 @@ mod tests {
 
         let provider = Arc::new(MockLlmProvider::new(responses));
         let client = make_client(provider).await;
-        let profile = Arc::new(ParallelTestProfile::with_tools(registry));
+        let profile = Arc::new(TestProfile::parallel(registry));
         let env = Arc::new(MockExecutionEnvironment::default());
         let mut session = Session::new(client, profile, env, SessionConfig::default());
         let mut rx = session.subscribe();
@@ -1184,7 +1183,7 @@ mod tests {
         let provider = Arc::new(MockLlmProvider::new(responses));
         let client = make_client(provider).await;
         let registry = ToolRegistry::new();
-        let profile = Arc::new(ParallelTestProfile::with_tools_and_context_window(
+        let profile = Arc::new(TestProfile::parallel_with_context_window(
             registry, 100,
         ));
         let env = Arc::new(MockExecutionEnvironment::default());
@@ -1211,44 +1210,11 @@ mod tests {
         assert!(found_warning);
     }
 
-    // --- Capturing LLM Provider (captures reasoning_effort from request) ---
-
-    struct CapturingLlmProvider {
-        captured_effort: Arc<Mutex<Option<Option<String>>>>,
-    }
-
-    impl CapturingLlmProvider {
-        fn new(captured_effort: Arc<Mutex<Option<Option<String>>>>) -> Self {
-            Self { captured_effort }
-        }
-    }
-
-    #[async_trait]
-    impl ProviderAdapter for CapturingLlmProvider {
-        fn name(&self) -> &str {
-            "mock"
-        }
-
-        async fn complete(&self, request: &Request) -> Result<Response, SdkError> {
-            *self.captured_effort.lock().unwrap() = Some(request.reasoning_effort.clone());
-            Ok(text_response("captured"))
-        }
-
-        async fn stream(
-            &self,
-            _request: &Request,
-        ) -> Result<StreamEventStream, SdkError> {
-            Err(SdkError::Configuration {
-                message: "streaming not supported in mock".into(),
-            })
-        }
-    }
-
     #[tokio::test]
     async fn set_reasoning_effort_mid_session() {
-        let captured_effort: Arc<Mutex<Option<Option<String>>>> = Arc::new(Mutex::new(None));
-        let provider = Arc::new(CapturingLlmProvider::new(captured_effort.clone()));
-        let client = make_client(provider).await;
+        let provider = Arc::new(CapturingLlmProvider::new());
+        let provider_ref = provider.clone();
+        let client = make_client(provider as Arc<dyn ProviderAdapter>).await;
         let profile = Arc::new(TestProfile::new());
         let env = Arc::new(MockExecutionEnvironment::default());
         let mut session = Session::new(client, profile, env, SessionConfig::default());
@@ -1257,8 +1223,9 @@ mod tests {
         session.set_reasoning_effort(Some("high".to_string()));
         session.process_input("test").await.unwrap();
 
-        let effort = captured_effort.lock().unwrap().clone();
-        assert_eq!(effort, Some(Some("high".to_string())));
+        let captured = provider_ref.captured_request.lock().unwrap();
+        let request = captured.as_ref().expect("request should have been captured");
+        assert_eq!(request.reasoning_effort, Some("high".to_string()));
     }
 
     #[tokio::test]
@@ -1269,7 +1236,7 @@ mod tests {
         let client = make_client(provider).await;
         let registry = ToolRegistry::new();
         // Large context window so short input stays well under 80%
-        let profile = Arc::new(ParallelTestProfile::with_tools_and_context_window(
+        let profile = Arc::new(TestProfile::parallel_with_context_window(
             registry, 200_000,
         ));
         let env = Arc::new(MockExecutionEnvironment::default());
@@ -1395,37 +1362,9 @@ mod tests {
 
     #[tokio::test]
     async fn user_instructions_in_system_prompt() {
-        // Use a capturing provider that records the system prompt
-        let captured_messages: Arc<Mutex<Option<Vec<Message>>>> = Arc::new(Mutex::new(None));
-        let captured_messages_clone = captured_messages.clone();
-
-        struct CapturingProvider {
-            captured: Arc<Mutex<Option<Vec<Message>>>>,
-        }
-
-        #[async_trait]
-        impl ProviderAdapter for CapturingProvider {
-            fn name(&self) -> &str {
-                "mock"
-            }
-            async fn complete(&self, request: &Request) -> Result<Response, SdkError> {
-                *self.captured.lock().unwrap() = Some(request.messages.clone());
-                Ok(text_response("ok"))
-            }
-            async fn stream(
-                &self,
-                _request: &Request,
-            ) -> Result<StreamEventStream, SdkError> {
-                Err(SdkError::Configuration {
-                    message: "not supported".into(),
-                })
-            }
-        }
-
-        let provider = Arc::new(CapturingProvider {
-            captured: captured_messages_clone,
-        });
-        let client = make_client(provider).await;
+        let provider = Arc::new(CapturingLlmProvider::new());
+        let provider_ref = provider.clone();
+        let client = make_client(provider as Arc<dyn ProviderAdapter>).await;
         let profile = Arc::new(TestProfile::new());
         let env = Arc::new(MockExecutionEnvironment::default());
         let config = SessionConfig {
@@ -1435,11 +1374,14 @@ mod tests {
         let mut session = Session::new(client, profile, env, config);
         session.process_input("test").await.unwrap();
 
-        // The test profile doesn't include user_instructions in prompt (it's stubbed),
-        // but we verify the config is wired through by checking the session accepted it
-        assert_eq!(
-            session.config.user_instructions,
-            Some("Always use TDD".into())
+        // Verify user instructions are included in the system prompt
+        let captured = provider_ref.captured_request.lock().unwrap();
+        let request = captured.as_ref().expect("request should have been captured");
+        let system_msg = &request.messages[0];
+        let system_text = system_msg.text();
+        assert!(
+            system_text.contains("Always use TDD"),
+            "System prompt should contain user instructions"
         );
     }
 }
