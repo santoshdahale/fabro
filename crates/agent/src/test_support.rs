@@ -12,6 +12,7 @@ use llm::client::Client;
 use llm::error::SdkError;
 use llm::provider::{ProviderAdapter, StreamEventStream};
 use llm::types::{ContentPart, FinishReason, Message, Request, Response, StreamEvent, Usage};
+use tokio_util::sync::CancellationToken;
 
 // --- MockExecutionEnvironment ---
 
@@ -120,6 +121,7 @@ impl ExecutionEnvironment for MockExecutionEnvironment {
         timeout_ms: u64,
         _working_dir: Option<&str>,
         _env_vars: Option<&std::collections::HashMap<String, String>>,
+        _cancel_token: Option<CancellationToken>,
     ) -> Result<ExecResult, String> {
         *self
             .captured_timeout
@@ -232,6 +234,7 @@ impl ExecutionEnvironment for MutableMockExecutionEnvironment {
         _timeout_ms: u64,
         _working_dir: Option<&str>,
         _env_vars: Option<&std::collections::HashMap<String, String>>,
+        _cancel_token: Option<CancellationToken>,
     ) -> Result<ExecResult, String> {
         Ok(ExecResult {
             stdout: String::new(),
@@ -542,7 +545,7 @@ pub(crate) fn make_echo_tool() -> crate::tool_registry::RegisteredTool {
             description: "Echoes the input".into(),
             parameters: serde_json::json!({"type": "object", "properties": {"text": {"type": "string"}}}),
         },
-        executor: Arc::new(|args, _env| {
+        executor: Arc::new(|args, _env, _cancel| {
             Box::pin(async move {
                 let text = args
                     .get("text")
@@ -562,7 +565,7 @@ pub(crate) fn make_error_tool() -> crate::tool_registry::RegisteredTool {
             description: "Always fails".into(),
             parameters: serde_json::json!({"type": "object"}),
         },
-        executor: Arc::new(|_args, _env| {
+        executor: Arc::new(|_args, _env, _cancel| {
             Box::pin(async move { Err("tool execution failed".to_string()) })
         }),
     }

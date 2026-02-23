@@ -6,7 +6,6 @@ use clap::{Parser, ValueEnum};
 use llm::client::Client;
 use std::io::{IsTerminal, Write};
 use std::path::PathBuf;
-use std::sync::atomic::Ordering;
 use std::sync::{Arc, Mutex};
 use terminal::Styles;
 
@@ -337,10 +336,10 @@ pub async fn run() -> anyhow::Result<()> {
     let mut session = Session::new(client, profile, env, config);
 
     // SIGINT handler
-    let abort_flag = session.abort_flag_handle();
+    let cancel_token = session.cancel_token();
     tokio::spawn(async move {
         tokio::signal::ctrl_c().await.ok();
-        abort_flag.store(true, Ordering::SeqCst);
+        cancel_token.cancel();
     });
 
     // Subscribe to events for real-time tool status on stderr

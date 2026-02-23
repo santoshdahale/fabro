@@ -11,7 +11,6 @@ use crate::tool_registry::ToolRegistry;
 use crate::truncation::truncate_tool_output;
 use crate::types::{EventData, EventKind, SessionState, Turn};
 use std::collections::VecDeque;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::SystemTime;
 use futures::StreamExt;
@@ -19,6 +18,7 @@ use llm::client::Client;
 use llm::error::{ProviderErrorKind, SdkError};
 use llm::generate::StreamAccumulator;
 use llm::types::{Message, Request, StreamEvent, ToolChoice, ToolResult};
+use tokio_util::sync::CancellationToken;
 
 pub struct Session {
     id: String,
@@ -31,7 +31,7 @@ pub struct Session {
     execution_env: Arc<dyn ExecutionEnvironment>,
     steering_queue: Arc<Mutex<VecDeque<String>>>,
     followup_queue: Arc<Mutex<VecDeque<String>>>,
-    abort_flag: Arc<AtomicBool>,
+    cancel_token: CancellationToken,
     project_docs: Vec<String>,
     env_context: EnvContext,
 }
@@ -55,7 +55,7 @@ impl Session {
             execution_env,
             steering_queue: Arc::new(Mutex::new(VecDeque::new())),
             followup_queue: Arc::new(Mutex::new(VecDeque::new())),
-            abort_flag: Arc::new(AtomicBool::new(false)),
+            cancel_token: CancellationToken::new(),
             project_docs: Vec::new(),
             env_context: EnvContext::default(),
         }
@@ -91,7 +91,7 @@ impl Session {
         // Detect git info via execution environment
         let git_branch = self
             .execution_env
-            .exec_command("git rev-parse --abbrev-ref HEAD", 5000, None, None)
+            .exec_command("git rev-parse --abbrev-ref HEAD", 5000, None, None, None)
             .await
             .ok()
             .filter(|r| r.exit_code == 0)
@@ -101,7 +101,7 @@ impl Session {
 
         let git_status_short = if is_git_repo {
             self.execution_env
-                .exec_command("git status --short", 5000, None, None)
+                .exec_command("git status --short", 5000, None, None, None)
                 .await
                 .ok()
                 .filter(|r| r.exit_code == 0)
@@ -113,7 +113,7 @@ impl Session {
 
         let git_recent_commits = if is_git_repo {
             self.execution_env
-                .exec_command("git log --oneline -10", 5000, None, None)
+                .exec_command("git log --oneline -10", 5000, None, None, None)
                 .await
                 .ok()
                 .filter(|r| r.exit_code == 0)
@@ -157,15 +157,15 @@ impl Session {
     }
 
     pub fn abort(&self) {
-        self.abort_flag.store(true, Ordering::SeqCst);
+        self.cancel_token.cancel();
     }
 
     pub fn followup_queue_handle(&self) -> Arc<Mutex<VecDeque<String>>> {
         self.followup_queue.clone()
     }
 
-    pub fn abort_flag_handle(&self) -> Arc<AtomicBool> {
-        self.abort_flag.clone()
+    pub fn cancel_token(&self) -> CancellationToken {
+        self.cancel_token.clone()
     }
 
     pub fn close(&mut self) {
@@ -253,8 +253,8 @@ impl Session {
                 break;
             }
 
-            // Check abort flag
-            if self.abort_flag.load(Ordering::SeqCst) {
+            // Check cancellation
+            if self.cancel_token.is_cancelled() {
                 self.close();
                 return Err(AgentError::Aborted);
             }
@@ -315,15 +315,15 @@ impl Session {
                     }
                 }
 
-                // Check abort flag between chunks
-                if self.abort_flag.load(Ordering::SeqCst) {
+                // Check cancellation between chunks
+                if self.cancel_token.is_cancelled() {
                     break;
                 }
             }
 
             // If aborted during streaming, drop the stream to cancel the HTTP
             // connection, then close the session before returning.
-            if self.abort_flag.load(Ordering::SeqCst) {
+            if self.cancel_token.is_cancelled() {
                 drop(event_stream);
                 self.close();
                 return Err(AgentError::Aborted);
@@ -384,6 +384,16 @@ impl Session {
 
             // Execute tool calls (parallel or sequential based on provider)
             let results = self.execute_tool_calls(&tool_calls).await;
+
+            // Check cancellation after tool execution
+            if self.cancel_token.is_cancelled() {
+                self.history.push(Turn::ToolResults {
+                    results,
+                    timestamp: SystemTime::now(),
+                });
+                self.close();
+                return Err(AgentError::Aborted);
+            }
 
             // Record tool results turn
             self.history.push(Turn::ToolResults {
@@ -479,6 +489,17 @@ impl Session {
     ) -> Vec<ToolResult> {
         let mut results = Vec::new();
         for tc in tool_calls {
+            if self.cancel_token.is_cancelled() {
+                results.push(ToolResult {
+                    tool_call_id: tc.id.clone(),
+                    content: serde_json::json!("Cancelled"),
+                    is_error: true,
+                    image_data: None,
+                    image_media_type: None,
+                });
+                continue;
+            }
+
             self.event_emitter.emit(
                 EventKind::ToolCallStart,
                 self.id.clone(),
@@ -496,6 +517,7 @@ impl Session {
                 self.provider_profile.tool_registry(),
                 self.execution_env.clone(),
                 self.config.tool_approval.as_ref(),
+                self.cancel_token.child_token(),
             )
             .await;
 
@@ -533,6 +555,7 @@ impl Session {
         let profile = self.provider_profile.clone();
         let session_id = self.id.clone();
         let config = self.config.clone();
+        let cancel_token = self.cancel_token.clone();
 
         let futures: Vec<_> = tool_calls
             .iter()
@@ -542,6 +565,7 @@ impl Session {
                 let profile = profile.clone();
                 let session_id = session_id.clone();
                 let config = config.clone();
+                let cancel_token = cancel_token.clone();
                 let tc = tc.clone();
                 async move {
                     emitter.emit(
@@ -561,6 +585,7 @@ impl Session {
                         profile.tool_registry(),
                         env,
                         config.tool_approval.as_ref(),
+                        cancel_token.child_token(),
                     )
                     .await;
 
@@ -654,6 +679,7 @@ async fn execute_one_tool(
     registry: &ToolRegistry,
     env: Arc<dyn ExecutionEnvironment>,
     tool_approval: Option<&ToolApprovalFn>,
+    cancel_token: CancellationToken,
 ) -> ToolResult {
     if let Some(approval_fn) = tool_approval {
         if let Err(denial_message) = approval_fn(tool_name, arguments) {
@@ -681,7 +707,7 @@ async fn execute_one_tool(
                 };
             }
 
-            match (registered_tool.executor)(arguments.clone(), env).await {
+            match (registered_tool.executor)(arguments.clone(), env, cancel_token).await {
                 Ok(output) => ToolResult {
                     tool_call_id: tool_call_id.to_string(),
                     content: serde_json::json!(output),
@@ -1090,20 +1116,20 @@ mod tests {
 
     #[tokio::test]
     async fn abort_transitions_to_closed() {
-        let abort_flag = Arc::new(AtomicBool::new(false));
-        let abort_flag_for_tool = abort_flag.clone();
+        let cancel_token = CancellationToken::new();
+        let cancel_token_for_tool = cancel_token.clone();
 
-        // Tool that sets the abort flag when executed
+        // Tool that cancels the token when executed
         let abort_tool = RegisteredTool {
             definition: ToolDefinition {
                 name: "set_abort".into(),
                 description: "Sets abort flag".into(),
                 parameters: serde_json::json!({"type": "object"}),
             },
-            executor: Arc::new(move |_args, _env| {
-                let flag = abort_flag_for_tool.clone();
+            executor: Arc::new(move |_args, _env, _cancel| {
+                let token = cancel_token_for_tool.clone();
                 Box::pin(async move {
-                    flag.store(true, Ordering::SeqCst);
+                    token.cancel();
                     Ok("done".to_string())
                 })
             }),
@@ -1127,8 +1153,8 @@ mod tests {
         };
         let mut session = Session::new(client, profile, env, config);
 
-        // Wire the session's abort_flag to our shared one
-        session.abort_flag = abort_flag;
+        // Wire the session's cancel_token to our shared one
+        session.cancel_token = cancel_token;
 
         let result = session.process_input("Do something").await;
 
@@ -1137,7 +1163,7 @@ mod tests {
         assert_eq!(session.state(), SessionState::Closed);
 
         // Should have processed: User + Assistant(tool_call) + ToolResults = 3 turns
-        // The tool set the abort flag, so the loop breaks before the next LLM call
+        // The tool cancelled the token, so the loop breaks before the next LLM call
         let turns = session.history().turns();
         assert_eq!(turns.len(), 3);
         assert!(matches!(&turns[0], Turn::User { .. }));
@@ -1371,7 +1397,7 @@ mod tests {
                     "required": ["text"]
                 }),
             },
-            executor: Arc::new(|_args, _env| {
+            executor: Arc::new(|_args, _env, _cancel| {
                 Box::pin(async move { Ok("should not reach".to_string()) })
             }),
         });
@@ -1412,7 +1438,7 @@ mod tests {
                     "required": ["text"]
                 }),
             },
-            executor: Arc::new(|_args, _env| {
+            executor: Arc::new(|_args, _env, _cancel| {
                 Box::pin(async move { Ok("tool executed".to_string()) })
             }),
         });

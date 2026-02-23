@@ -402,7 +402,7 @@ fn make_apply_patch_tool() -> RegisteredTool {
                 "required": ["patch"]
             }),
         },
-        executor: Arc::new(|args, env| {
+        executor: Arc::new(|args, env, _cancel| {
             Box::pin(async move {
                 let patch_text = args
                     .get("patch")

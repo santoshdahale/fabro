@@ -1,5 +1,6 @@
 use crate::execution_env::{format_lines_numbered, DirEntry, ExecResult, ExecutionEnvironment, GrepOptions};
 use async_trait::async_trait;
+use tokio_util::sync::CancellationToken;
 use bollard::container::{
     Config, CreateContainerOptions, RemoveContainerOptions, StartContainerOptions,
     StopContainerOptions, UploadToContainerOptions,
@@ -153,13 +154,14 @@ impl DockerExecutionEnvironment {
         Ok((stdout, stderr, exit_code))
     }
 
-    /// Runs a shell command inside the container with timeout support.
+    /// Runs a shell command inside the container with timeout and cancellation support.
     async fn docker_exec_shell(
         &self,
         command: &str,
         timeout_ms: u64,
         working_dir: Option<&str>,
         env_vars: Option<&HashMap<String, String>>,
+        cancel_token: Option<CancellationToken>,
     ) -> Result<ExecResult, String> {
         let start = Instant::now();
 
@@ -180,10 +182,10 @@ impl DockerExecutionEnvironment {
         ];
 
         let timeout_duration = std::time::Duration::from_millis(timeout_ms);
-        let exec_future = self.docker_exec(cmd, Some(&effective_dir), env);
+        let token = cancel_token.unwrap_or_default();
 
-        match tokio::time::timeout(timeout_duration, exec_future).await {
-            Ok(result) => {
+        tokio::select! {
+            result = self.docker_exec(cmd, Some(&effective_dir), env) => {
                 let (stdout, stderr, exit_code) = result?;
                 let duration_ms = u64::try_from(start.elapsed().as_millis()).unwrap_or(u64::MAX);
                 Ok(ExecResult {
@@ -194,11 +196,21 @@ impl DockerExecutionEnvironment {
                     duration_ms,
                 })
             }
-            Err(_) => {
+            () = tokio::time::sleep(timeout_duration) => {
                 let duration_ms = u64::try_from(start.elapsed().as_millis()).unwrap_or(u64::MAX);
                 Ok(ExecResult {
                     stdout: String::new(),
                     stderr: "Command timed out".to_string(),
+                    exit_code: -1,
+                    timed_out: true,
+                    duration_ms,
+                })
+            }
+            () = token.cancelled() => {
+                let duration_ms = u64::try_from(start.elapsed().as_millis()).unwrap_or(u64::MAX);
+                Ok(ExecResult {
+                    stdout: String::new(),
+                    stderr: "Command cancelled".to_string(),
                     exit_code: -1,
                     timed_out: true,
                     duration_ms,
@@ -350,9 +362,10 @@ impl ExecutionEnvironment for DockerExecutionEnvironment {
         timeout_ms: u64,
         working_dir: Option<&str>,
         env_vars: Option<&HashMap<String, String>>,
+        cancel_token: Option<CancellationToken>,
     ) -> Result<ExecResult, String> {
         let dir = working_dir.map(|d| self.resolve_container_path(d));
-        self.docker_exec_shell(command, timeout_ms, dir.as_deref(), env_vars)
+        self.docker_exec_shell(command, timeout_ms, dir.as_deref(), env_vars, cancel_token)
             .await
     }
 
@@ -583,7 +596,7 @@ impl ExecutionEnvironment for DockerExecutionEnvironment {
 
         // Run through shell so that quoting works correctly
         let result = self
-            .docker_exec_shell(&command, 30_000, None, None)
+            .docker_exec_shell(&command, 30_000, None, None, None)
             .await?;
 
         let results: Vec<String> = result
@@ -613,7 +626,7 @@ impl ExecutionEnvironment for DockerExecutionEnvironment {
         );
 
         let result = self
-            .docker_exec_shell(&script, 30_000, None, None)
+            .docker_exec_shell(&script, 30_000, None, None, None)
             .await?;
 
         let results: Vec<String> = result
@@ -679,7 +692,7 @@ mod tests {
         assert!(env.os_version().starts_with("linux "));
 
         // exec_command
-        let result = env.exec_command("echo hello", 5000, None, None).await.unwrap();
+        let result = env.exec_command("echo hello", 5000, None, None, None).await.unwrap();
         assert_eq!(result.stdout.trim(), "hello");
         assert_eq!(result.exit_code, 0);
         assert!(!result.timed_out);
@@ -728,7 +741,7 @@ mod tests {
         let env = DockerExecutionEnvironment::new(config).unwrap();
         env.initialize().await.unwrap();
 
-        let result = env.exec_command("sleep 60", 1000, None, None).await.unwrap();
+        let result = env.exec_command("sleep 60", 1000, None, None, None).await.unwrap();
         assert!(result.timed_out);
         assert_eq!(result.exit_code, -1);
 
@@ -751,7 +764,7 @@ mod tests {
         env.write_file("special.txt", content).await.unwrap();
 
         // Read raw content back via cat to verify exact match
-        let result = env.exec_command("cat /workspace/special.txt", 5000, None, None).await.unwrap();
+        let result = env.exec_command("cat /workspace/special.txt", 5000, None, None, None).await.unwrap();
         assert_eq!(result.stdout, content);
 
         env.cleanup().await.unwrap();

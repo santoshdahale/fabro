@@ -4,11 +4,13 @@ use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
 use llm::types::ToolDefinition;
+use tokio_util::sync::CancellationToken;
 
 pub type ToolExecutor = Arc<
     dyn Fn(
             serde_json::Value,
             Arc<dyn ExecutionEnvironment>,
+            CancellationToken,
         ) -> Pin<Box<dyn Future<Output = Result<String, String>> + Send>>
         + Send
         + Sync,
@@ -72,7 +74,7 @@ mod tests {
                 description: format!("Tool {name}"),
                 parameters: serde_json::json!({"type": "object"}),
             },
-            executor: Arc::new(|_args, _env| Box::pin(async { Ok("ok".into()) })),
+            executor: Arc::new(|_args, _env, _cancel| Box::pin(async { Ok("ok".into()) })),
         }
     }
 
@@ -116,7 +118,7 @@ mod tests {
                 description: "version 1".into(),
                 parameters: serde_json::json!({}),
             },
-            executor: Arc::new(|_args, _env| Box::pin(async { Ok("v1".into()) })),
+            executor: Arc::new(|_args, _env, _cancel| Box::pin(async { Ok("v1".into()) })),
         });
         registry.register(RegisteredTool {
             definition: ToolDefinition {
@@ -124,7 +126,7 @@ mod tests {
                 description: "version 2".into(),
                 parameters: serde_json::json!({}),
             },
-            executor: Arc::new(|_args, _env| Box::pin(async { Ok("v2".into()) })),
+            executor: Arc::new(|_args, _env, _cancel| Box::pin(async { Ok("v2".into()) })),
         });
 
         let tool = registry.get("tool_a").unwrap();
@@ -167,7 +169,7 @@ mod tests {
         use crate::test_support::MockExecutionEnvironment;
 
         let env: Arc<dyn ExecutionEnvironment> = Arc::new(MockExecutionEnvironment::default());
-        let result = (tool.executor)(serde_json::json!({}), env).await;
+        let result = (tool.executor)(serde_json::json!({}), env, CancellationToken::new()).await;
         assert_eq!(result.unwrap(), "ok");
     }
 

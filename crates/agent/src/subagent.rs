@@ -4,9 +4,9 @@ use crate::tool_registry::RegisteredTool;
 use crate::tools::required_str;
 use crate::types::Turn;
 use std::collections::{HashMap, VecDeque};
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use llm::types::ToolDefinition;
+use tokio_util::sync::CancellationToken;
 
 pub type SessionFactory = Arc<dyn Fn() -> Session + Send + Sync>;
 
@@ -24,7 +24,7 @@ pub struct SubAgent {
     depth: usize,
     task: Option<tokio::task::JoinHandle<Result<SubAgentResult, AgentError>>>,
     followup_queue: Arc<Mutex<VecDeque<String>>>,
-    abort_flag: Arc<AtomicBool>,
+    cancel_token: CancellationToken,
 }
 
 #[cfg(test)]
@@ -62,7 +62,7 @@ impl SubAgentManager {
 
         let agent_id = uuid::Uuid::new_v4().to_string();
         let followup_queue = session.followup_queue_handle();
-        let abort_flag = session.abort_flag_handle();
+        let cancel_token = session.cancel_token();
 
         let task = tokio::spawn(async move {
             session.process_input(&task_prompt).await?;
@@ -85,7 +85,7 @@ impl SubAgentManager {
                 depth,
                 task: Some(task),
                 followup_queue,
-                abort_flag,
+                cancel_token,
             },
         );
 
@@ -138,7 +138,7 @@ impl SubAgentManager {
                 AgentError::InvalidState(format!("No agent found with id: {agent_id}"))
             })?;
 
-        agent.abort_flag.store(true, Ordering::SeqCst);
+        agent.cancel_token.cancel();
 
         if let Some(join_handle) = agent.task {
             join_handle.abort();
@@ -185,7 +185,7 @@ pub fn make_spawn_agent_tool(
                 "required": ["task"]
             }),
         },
-        executor: Arc::new(move |args, _env| {
+        executor: Arc::new(move |args, _env, _cancel| {
             let manager = manager.clone();
             let session_factory = session_factory.clone();
             Box::pin(async move {
@@ -232,7 +232,7 @@ pub fn make_send_input_tool(
                 "required": ["agent_id", "message"]
             }),
         },
-        executor: Arc::new(move |args, _env| {
+        executor: Arc::new(move |args, _env, _cancel| {
             let manager = manager.clone();
             Box::pin(async move {
                 let agent_id = required_str(&args, "agent_id")?;
@@ -265,7 +265,7 @@ pub fn make_wait_tool(
                 "required": ["agent_id"]
             }),
         },
-        executor: Arc::new(move |args, _env| {
+        executor: Arc::new(move |args, _env, _cancel| {
             let manager = manager.clone();
             Box::pin(async move {
                 let agent_id = required_str(&args, "agent_id")?;
@@ -300,7 +300,7 @@ pub fn make_close_agent_tool(
                 "required": ["agent_id"]
             }),
         },
-        executor: Arc::new(move |args, _env| {
+        executor: Arc::new(move |args, _env, _cancel| {
             let manager = manager.clone();
             Box::pin(async move {
                 let agent_id = required_str(&args, "agent_id")?;

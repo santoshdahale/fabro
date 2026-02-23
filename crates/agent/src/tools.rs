@@ -27,7 +27,7 @@ pub fn make_read_file_tool() -> RegisteredTool {
                 "required": ["file_path"]
             }),
         },
-        executor: Arc::new(|args, env| {
+        executor: Arc::new(|args, env, _cancel| {
             Box::pin(async move {
                 let file_path = required_str(&args, "file_path")?;
                 let offset = args.get("offset").and_then(serde_json::Value::as_u64);
@@ -60,7 +60,7 @@ pub fn make_write_file_tool() -> RegisteredTool {
                 "required": ["file_path", "content"]
             }),
         },
-        executor: Arc::new(|args, env| {
+        executor: Arc::new(|args, env, _cancel| {
             Box::pin(async move {
                 let file_path = required_str(&args, "file_path")?;
                 let content = required_str(&args, "content")?;
@@ -89,7 +89,7 @@ pub fn make_edit_file_tool() -> RegisteredTool {
                 "required": ["file_path", "old_string", "new_string"]
             }),
         },
-        executor: Arc::new(|args, env| {
+        executor: Arc::new(|args, env, _cancel| {
             Box::pin(async move {
                 let file_path = required_str(&args, "file_path")?;
                 let old_string = required_str(&args, "old_string")?;
@@ -157,7 +157,7 @@ pub fn make_shell_tool_with_config(config: &SessionConfig) -> RegisteredTool {
                 "required": ["command"]
             }),
         },
-        executor: Arc::new(move |args, env| {
+        executor: Arc::new(move |args, env, cancel| {
             Box::pin(async move {
                 let command = required_str(&args, "command")?;
                 let timeout_ms = args
@@ -167,7 +167,7 @@ pub fn make_shell_tool_with_config(config: &SessionConfig) -> RegisteredTool {
                     .min(max_timeout);
 
                 let result = env
-                    .exec_command(command, timeout_ms, None, None)
+                    .exec_command(command, timeout_ms, None, None, Some(cancel))
                     .await?;
 
                 let mut output = String::new();
@@ -203,7 +203,7 @@ pub fn make_grep_tool() -> RegisteredTool {
                 "required": ["pattern"]
             }),
         },
-        executor: Arc::new(|args, env| {
+        executor: Arc::new(|args, env, _cancel| {
             Box::pin(async move {
                 let pattern = required_str(&args, "pattern")?;
                 let path = args
@@ -249,7 +249,7 @@ pub fn make_glob_tool() -> RegisteredTool {
                 "required": ["pattern"]
             }),
         },
-        executor: Arc::new(|args, env| {
+        executor: Arc::new(|args, env, _cancel| {
             Box::pin(async move {
                 let pattern = required_str(&args, "pattern")?;
                 let path = args
@@ -281,7 +281,7 @@ pub(crate) fn make_read_many_files_tool() -> RegisteredTool {
                 "required": ["paths"]
             }),
         },
-        executor: Arc::new(|args, env| {
+        executor: Arc::new(|args, env, _cancel| {
             Box::pin(async move {
                 let paths = args["paths"]
                     .as_array()
@@ -322,7 +322,7 @@ pub(crate) fn make_list_dir_tool() -> RegisteredTool {
                 "required": ["path"]
             }),
         },
-        executor: Arc::new(|args, env| {
+        executor: Arc::new(|args, env, _cancel| {
             Box::pin(async move {
                 let path = required_str(&args, "path")?;
                 #[allow(clippy::cast_possible_truncation)]
@@ -363,7 +363,7 @@ pub(crate) fn make_web_search_tool() -> RegisteredTool {
                 "required": ["query"]
             }),
         },
-        executor: Arc::new(|_args, _env| {
+        executor: Arc::new(|_args, _env, _cancel| {
             Box::pin(async move {
                 Ok("Web search is not configured. This is a placeholder tool.".to_string())
             })
@@ -385,7 +385,7 @@ pub(crate) fn make_web_fetch_tool() -> RegisteredTool {
                 "required": ["url"]
             }),
         },
-        executor: Arc::new(|_args, _env| {
+        executor: Arc::new(|_args, _env, _cancel| {
             Box::pin(async move {
                 Ok("Web fetch is not configured. This is a placeholder tool.".to_string())
             })
@@ -399,6 +399,7 @@ mod tests {
     use crate::execution_env::*;
     use crate::test_support::MockExecutionEnvironment;
     use std::collections::HashMap;
+    use tokio_util::sync::CancellationToken;
 
     #[tokio::test]
     async fn read_file_returns_content() {
@@ -410,7 +411,7 @@ mod tests {
             apply_read_offset_limit: true,
             ..Default::default()
         });
-        let result = (tool.executor)(serde_json::json!({"file_path": "/test.txt"}), env).await;
+        let result = (tool.executor)(serde_json::json!({"file_path": "/test.txt"}), env, CancellationToken::new()).await;
         assert_eq!(result.unwrap(), "  1 | hello\n  2 | world");
     }
 
@@ -430,6 +431,7 @@ mod tests {
         let result = (tool.executor)(
             serde_json::json!({"file_path": "/test.txt", "offset": 2, "limit": 2}),
             env,
+            CancellationToken::new(),
         )
         .await;
         assert_eq!(result.unwrap(), "  2 | line2\n  3 | line3");
@@ -443,6 +445,7 @@ mod tests {
         let result = (tool.executor)(
             serde_json::json!({"file_path": "/out.txt", "content": "hello"}),
             env_clone,
+            CancellationToken::new(),
         )
         .await;
         assert_eq!(result.unwrap(), "Successfully wrote to /out.txt");
@@ -469,6 +472,7 @@ mod tests {
                 "new_string": "goodbye"
             }),
             env_clone,
+            CancellationToken::new(),
         )
         .await;
         assert_eq!(result.unwrap(), "Successfully edited /f.txt");
@@ -493,6 +497,7 @@ mod tests {
                 "new_string": "replacement"
             }),
             env,
+            CancellationToken::new(),
         )
         .await;
         assert_eq!(result.unwrap_err(), "old_string not found in file");
@@ -514,6 +519,7 @@ mod tests {
                 "new_string": "cc"
             }),
             env,
+            CancellationToken::new(),
         )
         .await;
         let err = result.unwrap_err();
@@ -539,6 +545,7 @@ mod tests {
                 "replace_all": true
             }),
             env_clone,
+            CancellationToken::new(),
         )
         .await;
         assert_eq!(result.unwrap(), "Successfully edited /f.txt");
@@ -560,7 +567,7 @@ mod tests {
             },
             ..Default::default()
         });
-        let result = (tool.executor)(serde_json::json!({"command": "echo hello"}), env).await;
+        let result = (tool.executor)(serde_json::json!({"command": "echo hello"}), env, CancellationToken::new()).await;
         let output = result.unwrap();
         assert!(output.contains("Exit code: 0"));
         assert!(output.contains("hello"));
@@ -574,6 +581,7 @@ mod tests {
         let _result = (tool.executor)(
             serde_json::json!({"command": "sleep 1", "timeout_ms": 5000}),
             env_clone,
+            CancellationToken::new(),
         )
         .await;
         assert_eq!(*env.captured_timeout.lock().unwrap(), Some(5000));
@@ -592,7 +600,7 @@ mod tests {
             },
             ..Default::default()
         });
-        let result = (tool.executor)(serde_json::json!({"command": "false"}), env).await;
+        let result = (tool.executor)(serde_json::json!({"command": "false"}), env, CancellationToken::new()).await;
         let output = result.unwrap();
         assert!(output.contains("Exit code: 1"));
         assert!(output.contains("error"));
@@ -611,7 +619,7 @@ mod tests {
             },
             ..Default::default()
         });
-        let result = (tool.executor)(serde_json::json!({"command": "sleep 100"}), env).await;
+        let result = (tool.executor)(serde_json::json!({"command": "sleep 100"}), env, CancellationToken::new()).await;
         let output = result.unwrap();
         assert!(output.starts_with("Command timed out.\n"));
     }
@@ -623,7 +631,7 @@ mod tests {
             grep_results: vec!["src/main.rs:10:fn main()".into(), "src/lib.rs:5:pub fn".into()],
             ..Default::default()
         });
-        let result = (tool.executor)(serde_json::json!({"pattern": "fn"}), env).await;
+        let result = (tool.executor)(serde_json::json!({"pattern": "fn"}), env, CancellationToken::new()).await;
         let output = result.unwrap();
         assert!(output.contains("src/main.rs:10:fn main()"));
         assert!(output.contains("src/lib.rs:5:pub fn"));
@@ -636,7 +644,7 @@ mod tests {
             glob_results: vec!["src/main.rs".into(), "src/lib.rs".into()],
             ..Default::default()
         });
-        let result = (tool.executor)(serde_json::json!({"pattern": "src/**/*.rs"}), env).await;
+        let result = (tool.executor)(serde_json::json!({"pattern": "src/**/*.rs"}), env, CancellationToken::new()).await;
         let output = result.unwrap();
         assert!(output.contains("src/main.rs"));
         assert!(output.contains("src/lib.rs"));

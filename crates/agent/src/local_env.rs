@@ -4,6 +4,7 @@ use std::path::{Path, PathBuf};
 use std::time::Instant;
 use tokio::io::AsyncReadExt;
 use tokio::process::Command;
+use tokio_util::sync::CancellationToken;
 
 pub struct LocalExecutionEnvironment {
     working_directory: PathBuf,
@@ -131,6 +132,7 @@ impl ExecutionEnvironment for LocalExecutionEnvironment {
         timeout_ms: u64,
         working_dir: Option<&str>,
         env_vars: Option<&std::collections::HashMap<String, String>>,
+        cancel_token: Option<CancellationToken>,
     ) -> Result<ExecResult, String> {
         let start = Instant::now();
 
@@ -171,43 +173,22 @@ impl ExecutionEnvironment for LocalExecutionEnvironment {
             .map_err(|e| format!("Failed to spawn command: {e}"))?;
 
         let timeout_duration = std::time::Duration::from_millis(timeout_ms);
+        let token = cancel_token.unwrap_or_default();
 
-        let (timed_out, exit_code) =
-            if let Ok(status_result) = tokio::time::timeout(timeout_duration, child.wait()).await {
-                let status =
-                    status_result.map_err(|e| format!("Failed to wait for process: {e}"))?;
+        let (timed_out, exit_code) = tokio::select! {
+            status_result = child.wait() => {
+                let status = status_result.map_err(|e| format!("Failed to wait for process: {e}"))?;
                 (false, status.code().unwrap_or(-1))
-            } else {
-                // SIGTERM the process group first, then SIGKILL after 2 seconds
-                #[cfg(unix)]
-                if let Some(pid) = child.id() {
-                    #[allow(clippy::cast_possible_wrap)]
-                    unsafe {
-                        // Negative pid sends signal to the entire process group
-                        libc::kill(-(pid as i32), libc::SIGTERM);
-                    }
-                    // Wait 2 seconds for graceful shutdown
-                    if tokio::time::timeout(
-                        std::time::Duration::from_secs(2),
-                        child.wait(),
-                    )
-                    .await
-                    .is_err()
-                    {
-                        let _ = child.kill().await;
-                        let _ = child.wait().await;
-                    }
-                } else {
-                    let _ = child.kill().await;
-                    let _ = child.wait().await;
-                }
-                #[cfg(not(unix))]
-                {
-                    let _ = child.kill().await;
-                    let _ = child.wait().await;
-                }
+            }
+            () = tokio::time::sleep(timeout_duration) => {
+                sigterm_then_kill(&mut child).await;
                 (true, -1)
-            };
+            }
+            () = token.cancelled() => {
+                sigterm_then_kill(&mut child).await;
+                (true, -1)
+            }
+        };
 
         let duration_ms = u64::try_from(start.elapsed().as_millis()).unwrap_or(u64::MAX);
 
@@ -372,6 +353,32 @@ impl ExecutionEnvironment for LocalExecutionEnvironment {
     }
 }
 
+/// Send SIGTERM to the process group, wait 2s for graceful shutdown, then SIGKILL.
+async fn sigterm_then_kill(child: &mut tokio::process::Child) {
+    #[cfg(unix)]
+    if let Some(pid) = child.id() {
+        #[allow(clippy::cast_possible_wrap)]
+        unsafe {
+            libc::kill(-(pid as i32), libc::SIGTERM);
+        }
+        if tokio::time::timeout(std::time::Duration::from_secs(2), child.wait())
+            .await
+            .is_err()
+        {
+            let _ = child.kill().await;
+            let _ = child.wait().await;
+        }
+    } else {
+        let _ = child.kill().await;
+        let _ = child.wait().await;
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = child.kill().await;
+        let _ = child.wait().await;
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -473,7 +480,7 @@ mod tests {
         let dir = temp_dir();
         let env = LocalExecutionEnvironment::new(dir.clone());
         let result = env
-            .exec_command("echo hello", 5000, None, None)
+            .exec_command("echo hello", 5000, None, None, None)
             .await
             .unwrap();
 
@@ -489,7 +496,7 @@ mod tests {
         let dir = temp_dir();
         let env = LocalExecutionEnvironment::new(dir.clone());
         let result = env
-            .exec_command("exit 42", 5000, None, None)
+            .exec_command("exit 42", 5000, None, None, None)
             .await
             .unwrap();
 
@@ -503,7 +510,7 @@ mod tests {
         let dir = temp_dir();
         let env = LocalExecutionEnvironment::new(dir.clone());
         let result = env
-            .exec_command("sleep 10", 200, None, None)
+            .exec_command("sleep 10", 200, None, None, None)
             .await
             .unwrap();
 
@@ -517,7 +524,7 @@ mod tests {
         let dir = temp_dir();
         let env = LocalExecutionEnvironment::new(dir.clone());
         let result = env
-            .exec_command("echo err >&2", 5000, None, None)
+            .exec_command("echo err >&2", 5000, None, None, None)
             .await
             .unwrap();
 

@@ -173,9 +173,9 @@ session.follow_up("Now run the test suite to verify".into());
 Cancel a running session from another thread:
 
 ```rust
-let abort_flag = session.abort_flag_handle();
+let cancel_token = session.cancel_token();
 // From another task:
-abort_flag.store(true, std::sync::atomic::Ordering::SeqCst);
+cancel_token.cancel();
 ```
 
 ### Custom Tools

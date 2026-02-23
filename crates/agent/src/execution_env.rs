@@ -1,5 +1,6 @@
 use async_trait::async_trait;
 use std::fmt::Write;
+use tokio_util::sync::CancellationToken;
 
 /// Formats file content with line numbers for display.
 ///
@@ -55,6 +56,7 @@ pub trait ExecutionEnvironment: Send + Sync {
         timeout_ms: u64,
         working_dir: Option<&str>,
         env_vars: Option<&std::collections::HashMap<String, String>>,
+        cancel_token: Option<CancellationToken>,
     ) -> Result<ExecResult, String>;
     async fn grep(
         &self,
@@ -92,7 +94,7 @@ mod tests {
     #[tokio::test]
     async fn mock_env_exec_command() {
         let env: Arc<dyn ExecutionEnvironment> = Arc::new(MockExecutionEnvironment::default());
-        let result = env.exec_command("echo", 5000, None, None).await.unwrap();
+        let result = env.exec_command("echo", 5000, None, None, None).await.unwrap();
         assert_eq!(result.exit_code, 0);
         assert!(!result.timed_out);
     }

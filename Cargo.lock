@@ -23,6 +23,7 @@ dependencies = [
  "terminal",
  "thiserror 2.0.18",
  "tokio",
+ "tokio-util",
  "uuid",
 ]
 
