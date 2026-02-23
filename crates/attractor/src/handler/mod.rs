@@ -17,9 +17,16 @@ use async_trait::async_trait;
 
 use crate::context::Context;
 use crate::error::AttractorError;
+use crate::event::EventEmitter;
 use crate::graph::{shape_to_handler_type, Graph, Node};
 use crate::interviewer::Interviewer;
 use crate::outcome::Outcome;
+
+/// Shared services available to all handlers during execution.
+pub struct EngineServices {
+    pub registry: Arc<HandlerRegistry>,
+    pub emitter: Arc<EventEmitter>,
+}
 
 /// The handler interface for node execution.
 #[async_trait]
@@ -30,6 +37,7 @@ pub trait Handler: Send + Sync {
         context: &Context,
         graph: &Graph,
         logs_root: &Path,
+        services: &EngineServices,
     ) -> Result<Outcome, AttractorError>;
 
     /// Determines whether an error should be retried.
@@ -105,10 +113,12 @@ pub fn default_registry(
         Box::new(wait_human::WaitHumanHandler::new(interviewer)),
     );
     registry.register("tool", Box::new(tool::ToolHandler));
+    registry.register("parallel", Box::new(parallel::ParallelHandler));
     registry.register(
         "parallel.fan_in",
         Box::new(fan_in::FanInHandler::new(make_backend())),
     );
+    registry.register("sub_pipeline", Box::new(sub_pipeline::SubPipelineHandler));
     registry.register(
         "stack.manager_loop",
         Box::new(manager_loop::ManagerLoopHandler::new(None)),
@@ -133,6 +143,7 @@ mod tests {
             _context: &Context,
             _graph: &Graph,
             _logs_root: &Path,
+            _services: &EngineServices,
         ) -> Result<Outcome, AttractorError> {
             Ok(Outcome::success())
         }
@@ -211,6 +222,7 @@ mod tests {
             _context: &Context,
             _graph: &Graph,
             _logs_root: &Path,
+            _services: &EngineServices,
         ) -> Result<Outcome, AttractorError> {
             Ok(Outcome::success())
         }

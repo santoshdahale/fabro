@@ -8,7 +8,7 @@ use crate::graph::{Graph, Node};
 use crate::outcome::Outcome;
 
 use super::codergen::{CodergenBackend, CodergenResult};
-use super::Handler;
+use super::{EngineServices, Handler};
 
 /// Consolidates results from a preceding parallel node and selects the best candidate.
 pub struct FanInHandler {
@@ -30,6 +30,7 @@ impl Handler for FanInHandler {
         context: &Context,
         _graph: &Graph,
         logs_root: &Path,
+        _services: &EngineServices,
     ) -> Result<Outcome, AttractorError> {
         let results = context.get("parallel.results");
         let Some(results) = results else {
@@ -233,7 +234,17 @@ async fn llm_evaluate(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::event::EventEmitter;
+    use crate::handler::start::StartHandler;
+    use crate::handler::HandlerRegistry;
     use crate::outcome::StageStatus;
+
+    fn make_services() -> EngineServices {
+        EngineServices {
+            registry: std::sync::Arc::new(HandlerRegistry::new(Box::new(StartHandler))),
+            emitter: std::sync::Arc::new(EventEmitter::new()),
+        }
+    }
 
     #[tokio::test]
     async fn fan_in_no_results() {
@@ -244,7 +255,7 @@ mod tests {
         let logs_root = Path::new("/tmp/test");
 
         let outcome = handler
-            .execute(&node, &context, &graph, logs_root)
+            .execute(&node, &context, &graph, logs_root, &make_services())
             .await
             .unwrap();
         assert_eq!(outcome.status, StageStatus::Fail);
@@ -266,7 +277,7 @@ mod tests {
         let logs_root = Path::new("/tmp/test");
 
         let outcome = handler
-            .execute(&node, &context, &graph, logs_root)
+            .execute(&node, &context, &graph, logs_root, &make_services())
             .await
             .unwrap();
         assert_eq!(outcome.status, StageStatus::Success);
@@ -293,7 +304,7 @@ mod tests {
         let logs_root = Path::new("/tmp/test");
 
         let outcome = handler
-            .execute(&node, &context, &graph, logs_root)
+            .execute(&node, &context, &graph, logs_root, &make_services())
             .await
             .unwrap();
         assert_eq!(
@@ -330,7 +341,7 @@ mod tests {
         let logs_root = Path::new("/tmp/test");
 
         let outcome = handler
-            .execute(&node, &context, &graph, logs_root)
+            .execute(&node, &context, &graph, logs_root, &make_services())
             .await
             .unwrap();
         assert_eq!(outcome.status, StageStatus::Success);
@@ -380,7 +391,7 @@ mod tests {
         let tmp = TempDir::new().unwrap();
 
         let outcome = handler
-            .execute(&node, &context, &graph, tmp.path())
+            .execute(&node, &context, &graph, tmp.path(), &make_services())
             .await
             .unwrap();
         assert_eq!(outcome.status, StageStatus::Success);
@@ -419,7 +430,7 @@ mod tests {
         let logs_root = Path::new("/tmp/test");
 
         let outcome = handler
-            .execute(&node, &context, &graph, logs_root)
+            .execute(&node, &context, &graph, logs_root, &make_services())
             .await
             .unwrap();
         assert_eq!(outcome.status, StageStatus::Fail);
@@ -447,7 +458,7 @@ mod tests {
         let logs_root = Path::new("/tmp/test");
 
         let outcome = handler
-            .execute(&node, &context, &graph, logs_root)
+            .execute(&node, &context, &graph, logs_root, &make_services())
             .await
             .unwrap();
         assert_eq!(outcome.status, StageStatus::Success);

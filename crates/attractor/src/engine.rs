@@ -15,8 +15,7 @@ use crate::context::Context;
 use crate::error::{AttractorError, Result};
 use crate::event::{EventEmitter, PipelineEvent};
 use crate::graph::{Edge, Graph, Node};
-use crate::handler::parallel::ParallelHandler;
-use crate::handler::HandlerRegistry;
+use crate::handler::{EngineServices, HandlerRegistry};
 use crate::interviewer::Interviewer;
 use crate::outcome::{Outcome, StageStatus};
 use crate::preamble::build_preamble;
@@ -452,23 +451,18 @@ pub struct RunConfig {
 
 /// The pipeline execution engine.
 pub struct PipelineEngine {
-    registry: Arc<HandlerRegistry>,
-    emitter: Arc<EventEmitter>,
-    parallel_handler: ParallelHandler,
+    services: EngineServices,
     pub interviewer: Option<Arc<dyn Interviewer>>,
 }
 
 impl PipelineEngine {
     #[must_use]
     pub fn new(registry: HandlerRegistry, emitter: EventEmitter) -> Self {
-        let registry = Arc::new(registry);
-        let emitter = Arc::new(emitter);
-        let parallel_handler =
-            ParallelHandler::new(Arc::clone(&registry), Arc::clone(&emitter));
         Self {
-            registry,
-            emitter,
-            parallel_handler,
+            services: EngineServices {
+                registry: Arc::new(registry),
+                emitter: Arc::new(emitter),
+            },
             interviewer: None,
         }
     }
@@ -480,25 +474,13 @@ impl PipelineEngine {
         emitter: EventEmitter,
         interviewer: Arc<dyn Interviewer>,
     ) -> Self {
-        let registry = Arc::new(registry);
-        let emitter = Arc::new(emitter);
-        let parallel_handler =
-            ParallelHandler::new(Arc::clone(&registry), Arc::clone(&emitter));
         Self {
-            registry,
-            emitter,
-            parallel_handler,
+            services: EngineServices {
+                registry: Arc::new(registry),
+                emitter: Arc::new(emitter),
+            },
             interviewer: Some(interviewer),
         }
-    }
-
-    /// Resolve the handler for a node, returning the parallel handler for
-    /// parallel nodes and delegating to the registry for everything else.
-    fn resolve_handler(&self, node: &Node) -> &dyn crate::handler::Handler {
-        if node.handler_type() == Some("parallel") {
-            return &self.parallel_handler;
-        }
-        self.registry.resolve(node)
     }
 
     /// Call inform on the interviewer, if one is configured.
@@ -538,14 +520,14 @@ impl PipelineEngine {
         policy: &RetryPolicy,
         stage_index: usize,
     ) -> Result<(Outcome, u32)> {
-        let handler = self.resolve_handler(node);
+        let handler = self.services.registry.resolve(node);
 
         let node_timeout = node.timeout();
 
         for attempt in 1..=policy.max_attempts {
             // Gap #11: Panic safety -- catch panics from handler execution
             let result = {
-                let future = handler.execute(node, context, graph, logs_root);
+                let future = handler.execute(node, context, graph, logs_root, &self.services);
                 let panic_safe = AssertUnwindSafe(future).catch_unwind();
                 // Gap #2: Timeout enforcement -- wrap with tokio::time::timeout
                 let timed_result = if let Some(duration) = node_timeout {
@@ -582,13 +564,13 @@ impl PipelineEngine {
                     // Gap #7: Check should_retry predicate before retrying
                     if attempt < policy.max_attempts && handler.should_retry(&e) {
                         let delay = policy.backoff.delay_for_attempt(attempt);
-                        self.emitter.emit(&PipelineEvent::StageFailed {
+                        self.services.emitter.emit(&PipelineEvent::StageFailed {
                             name: node.label().to_string(),
                             index: stage_index,
                             error: e.to_string(),
                             will_retry: true,
                         });
-                        self.emitter.emit(&PipelineEvent::StageRetrying {
+                        self.services.emitter.emit(&PipelineEvent::StageRetrying {
                             name: node.label().to_string(),
                             index: stage_index,
                             attempt: usize::try_from(attempt).unwrap_or(usize::MAX),
@@ -611,7 +593,7 @@ impl PipelineEngine {
                 StageStatus::Retry => {
                     if attempt < policy.max_attempts {
                         let delay = policy.backoff.delay_for_attempt(attempt);
-                        self.emitter.emit(&PipelineEvent::StageRetrying {
+                        self.services.emitter.emit(&PipelineEvent::StageRetrying {
                             name: node.label().to_string(),
                             index: stage_index,
                             attempt: usize::try_from(attempt).unwrap_or(usize::MAX),
@@ -677,7 +659,7 @@ impl PipelineEngine {
         let run_start = Instant::now();
         let run_id = uuid::Uuid::new_v4().to_string();
 
-        self.emitter.emit(&PipelineEvent::PipelineStarted {
+        self.services.emitter.emit(&PipelineEvent::PipelineStarted {
             name: graph.name.clone(),
             id: run_id,
         });
@@ -774,7 +756,7 @@ impl PipelineEngine {
                         let duration_ms = millis_u64(run_start.elapsed());
                         let error_msg =
                             format!("goal gate unsatisfied for node {failed_node_id} and no retry target");
-                        self.emitter.emit(&PipelineEvent::PipelineFailed {
+                        self.services.emitter.emit(&PipelineEvent::PipelineFailed {
                             error: error_msg.clone(),
                             duration_ms,
                         });
@@ -828,7 +810,7 @@ impl PipelineEngine {
             context.set("current_node", serde_json::json!(&node.id));
             let retry_policy = build_retry_policy(node, graph);
 
-            self.emitter.emit(&PipelineEvent::StageStarted {
+            self.services.emitter.emit(&PipelineEvent::StageStarted {
                 name: node.label().to_string(),
                 index: stage_index,
             });
@@ -861,7 +843,7 @@ impl PipelineEngine {
             let stage_duration_ms = millis_u64(stage_start.elapsed());
 
             if outcome.status == StageStatus::Fail {
-                self.emitter.emit(&PipelineEvent::StageFailed {
+                self.services.emitter.emit(&PipelineEvent::StageFailed {
                     name: node.label().to_string(),
                     index: stage_index,
                     error: outcome
@@ -872,10 +854,13 @@ impl PipelineEngine {
                     will_retry: false,
                 });
             } else {
-                self.emitter.emit(&PipelineEvent::StageCompleted {
+                self.services.emitter.emit(&PipelineEvent::StageCompleted {
                     name: node.label().to_string(),
                     index: stage_index,
                     duration_ms: stage_duration_ms,
+                    status: outcome.status.to_string(),
+                    preferred_label: outcome.preferred_label.clone(),
+                    suggested_next_ids: outcome.suggested_next_ids.clone(),
                 });
                 self.inform(
                     &format!("Stage completed: {}", node.label()),
@@ -916,7 +901,7 @@ impl PipelineEngine {
             if let Err(e) = checkpoint.save(&checkpoint_path) {
                 context.append_log(format!("checkpoint save failed: {e}"));
             } else {
-                self.emitter.emit(&PipelineEvent::CheckpointSaved {
+                self.services.emitter.emit(&PipelineEvent::CheckpointSaved {
                     node_id: node.id.clone(),
                 });
             }
@@ -936,7 +921,7 @@ impl PipelineEngine {
                             "stage {} failed with no outgoing fail edge",
                             node.id
                         );
-                        self.emitter.emit(&PipelineEvent::PipelineFailed {
+                        self.services.emitter.emit(&PipelineEvent::PipelineFailed {
                             error: error_msg.clone(),
                             duration_ms,
                         });
@@ -962,7 +947,7 @@ impl PipelineEngine {
         }
 
         let duration_ms = millis_u64(run_start.elapsed());
-        self.emitter.emit(&PipelineEvent::PipelineCompleted {
+        self.services.emitter.emit(&PipelineEvent::PipelineCompleted {
             duration_ms,
             artifact_count: 0,
         });
@@ -998,6 +983,7 @@ mod tests {
             _context: &Context,
             _graph: &Graph,
             _logs_root: &Path,
+            _services: &crate::handler::EngineServices,
         ) -> std::result::Result<Outcome, AttractorError> {
             Ok(Outcome::fail("always fails"))
         }
@@ -1016,6 +1002,7 @@ mod tests {
             _context: &Context,
             _graph: &Graph,
             _logs_root: &Path,
+            _services: &crate::handler::EngineServices,
         ) -> std::result::Result<Outcome, AttractorError> {
             tokio::time::sleep(Duration::from_millis(self.sleep_ms)).await;
             Ok(Outcome::success())

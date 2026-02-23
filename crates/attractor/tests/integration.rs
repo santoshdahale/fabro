@@ -431,6 +431,7 @@ impl Handler for AlwaysFailHandler {
         _context: &attractor::context::Context,
         _graph: &Graph,
         _logs_root: &Path,
+        _services: &attractor::handler::EngineServices,
     ) -> Result<Outcome, attractor::error::AttractorError> {
         Ok(Outcome::fail(format!("forced failure for {}", node.id)))
     }
@@ -533,6 +534,7 @@ async fn goal_gate_routes_to_retry_target_when_present() {
             _context: &attractor::context::Context,
             _graph: &Graph,
             _logs_root: &Path,
+            _services: &attractor::handler::EngineServices,
         ) -> Result<Outcome, attractor::error::AttractorError> {
             let count = self
                 .call_count
@@ -849,6 +851,7 @@ async fn retry_on_failure_then_succeed() {
             _context: &Context,
             _graph: &Graph,
             _logs_root: &Path,
+            _services: &attractor::handler::EngineServices,
         ) -> Result<Outcome, AttractorError> {
             let count = self
                 .call_count
@@ -1071,6 +1074,7 @@ impl Handler for CounterHandler {
         _context: &Context,
         _graph: &Graph,
         _logs_root: &Path,
+        _services: &attractor::handler::EngineServices,
     ) -> Result<Outcome, AttractorError> {
         let count = self
             .call_count
@@ -1094,6 +1098,7 @@ impl Handler for ContextSetterHandler {
         _context: &Context,
         _graph: &Graph,
         _logs_root: &Path,
+        _services: &attractor::handler::EngineServices,
     ) -> Result<Outcome, AttractorError> {
         let mut outcome = Outcome::success();
         outcome
@@ -1295,7 +1300,6 @@ async fn smoke_test_with_mock_codergen_backend() {
 async fn end_to_end_parallel_fan_out_fan_in() {
     use attractor::handler::fan_in::FanInHandler;
     use attractor::handler::parallel::ParallelHandler;
-    use std::sync::Arc;
 
     let input = r#"digraph parallel_test {
         start [shape=Mdiamond]
@@ -1327,27 +1331,13 @@ async fn end_to_end_parallel_fan_out_fan_in() {
         "codergen",
         Box::new(CodergenHandler::new(Some(Box::new(MockCodergenBackend)))),
     );
-
-    let registry = Arc::new(registry);
-
-    let emitter = Arc::new(EventEmitter::new());
-    let parallel_handler = ParallelHandler::new(Arc::clone(&registry), Arc::clone(&emitter));
-    let fan_in_handler = FanInHandler::new(Some(Box::new(MockCodergenBackend)));
-
-    // Build a new registry with parallel and fan_in registered
-    let mut full_registry = HandlerRegistry::new(
-        Box::new(CodergenHandler::new(Some(Box::new(MockCodergenBackend)))),
+    registry.register("parallel", Box::new(ParallelHandler));
+    registry.register(
+        "parallel.fan_in",
+        Box::new(FanInHandler::new(Some(Box::new(MockCodergenBackend)))),
     );
-    full_registry.register("start", Box::new(StartHandler));
-    full_registry.register("exit", Box::new(ExitHandler));
-    full_registry.register(
-        "codergen",
-        Box::new(CodergenHandler::new(Some(Box::new(MockCodergenBackend)))),
-    );
-    full_registry.register("parallel", Box::new(parallel_handler));
-    full_registry.register("parallel.fan_in", Box::new(fan_in_handler));
 
-    let engine = PipelineEngine::new(full_registry, EventEmitter::new());
+    let engine = PipelineEngine::new(registry, EventEmitter::new());
     let config = RunConfig {
         logs_root: dir.path().to_path_buf(),
         cancel_token: None,
@@ -1818,6 +1808,7 @@ async fn branching_loop_back_on_failure() {
             _context: &Context,
             _graph: &Graph,
             _logs_root: &Path,
+            _services: &attractor::handler::EngineServices,
         ) -> Result<Outcome, AttractorError> {
             let count = self
                 .call_count
@@ -2059,39 +2050,27 @@ async fn scenario_parallel_expert_review() {
     let recorder = Arc::new(RecordingInterviewer::new(Box::new(AutoApproveInterviewer)));
     let dir = tempfile::tempdir().unwrap();
 
-    let mut base_registry = HandlerRegistry::new(Box::new(CodergenHandler::new(Some(
-        Box::new(MockCodergenBackend),
-    ))));
-    base_registry.register("start", Box::new(StartHandler));
-    base_registry.register("exit", Box::new(ExitHandler));
-    base_registry.register(
-        "codergen",
-        Box::new(CodergenHandler::new(Some(Box::new(MockCodergenBackend)))),
-    );
-    let base_registry = Arc::new(base_registry);
-    let emitter = Arc::new(EventEmitter::new());
-    let parallel_handler =
-        ParallelHandler::new(Arc::clone(&base_registry), Arc::clone(&emitter));
-    let fan_in_handler = FanInHandler::new(Some(Box::new(MockCodergenBackend)));
-
     let interviewer: Arc<dyn Interviewer> = recorder.clone();
-    let mut full_registry = HandlerRegistry::new(Box::new(CodergenHandler::new(Some(
+    let mut registry = HandlerRegistry::new(Box::new(CodergenHandler::new(Some(
         Box::new(MockCodergenBackend),
     ))));
-    full_registry.register("start", Box::new(StartHandler));
-    full_registry.register("exit", Box::new(ExitHandler));
-    full_registry.register(
+    registry.register("start", Box::new(StartHandler));
+    registry.register("exit", Box::new(ExitHandler));
+    registry.register(
         "codergen",
         Box::new(CodergenHandler::new(Some(Box::new(MockCodergenBackend)))),
     );
-    full_registry.register("parallel", Box::new(parallel_handler));
-    full_registry.register("parallel.fan_in", Box::new(fan_in_handler));
-    full_registry.register(
+    registry.register("parallel", Box::new(ParallelHandler));
+    registry.register(
+        "parallel.fan_in",
+        Box::new(FanInHandler::new(Some(Box::new(MockCodergenBackend)))),
+    );
+    registry.register(
         "wait.human",
         Box::new(WaitHumanHandler::new(interviewer)),
     );
 
-    let engine = PipelineEngine::new(full_registry, EventEmitter::new());
+    let engine = PipelineEngine::new(registry, EventEmitter::new());
     let config = RunConfig {
         logs_root: dir.path().to_path_buf(),
         cancel_token: None,
@@ -2125,6 +2104,7 @@ async fn scenario_node_retries_on_retry_status() {
             _context: &Context,
             _graph: &Graph,
             _logs_root: &Path,
+            _services: &attractor::handler::EngineServices,
         ) -> Result<Outcome, AttractorError> {
             let count = self
                 .call_count
@@ -2349,6 +2329,7 @@ async fn manager_loop_stop_condition_satisfied_e2e() {
             _context: &Context,
             _graph: &Graph,
             _logs_root: &Path,
+            _services: &attractor::handler::EngineServices,
         ) -> Result<Outcome, AttractorError> {
             let mut outcome = Outcome::success();
             outcome
@@ -2780,6 +2761,7 @@ async fn custom_handler_registration_and_execution() {
             _context: &Context,
             _graph: &Graph,
             _logs_root: &Path,
+            _services: &attractor::handler::EngineServices,
         ) -> Result<Outcome, AttractorError> {
             let mut outcome = Outcome::success();
             outcome
@@ -3344,24 +3326,11 @@ async fn sub_pipeline_e2e_through_engine() {
 
     let dir = tempfile::tempdir().unwrap();
 
-    // Build a registry that includes SubPipelineHandler
-    let child_registry = {
-        let mut r = HandlerRegistry::new(Box::new(CodergenHandler::new(None)));
-        r.register("start", Box::new(StartHandler));
-        r.register("exit", Box::new(ExitHandler));
-        r.register("codergen", Box::new(CodergenHandler::new(None)));
-        Arc::new(r)
-    };
-    let emitter = Arc::new(EventEmitter::new());
-
     let mut registry = HandlerRegistry::new(Box::new(CodergenHandler::new(None)));
     registry.register("start", Box::new(StartHandler));
     registry.register("exit", Box::new(ExitHandler));
     registry.register("codergen", Box::new(CodergenHandler::new(None)));
-    registry.register(
-        "sub_pipeline",
-        Box::new(SubPipelineHandler::new(child_registry, emitter)),
-    );
+    registry.register("sub_pipeline", Box::new(SubPipelineHandler));
 
     let engine = PipelineEngine::new(registry, EventEmitter::new());
     let config = RunConfig {

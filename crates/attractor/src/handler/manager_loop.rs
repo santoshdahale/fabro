@@ -9,7 +9,7 @@ use crate::error::AttractorError;
 use crate::graph::{Graph, Node};
 use crate::outcome::{Outcome, StageStatus};
 
-use super::Handler;
+use super::{EngineServices, Handler};
 
 /// Trait for observing child pipeline state during the manager loop.
 #[async_trait]
@@ -73,6 +73,7 @@ impl Handler for ManagerLoopHandler {
         context: &Context,
         _graph: &Graph,
         _logs_root: &Path,
+        _services: &EngineServices,
     ) -> Result<Outcome, AttractorError> {
         let poll_interval = node
             .attrs
@@ -209,7 +210,17 @@ impl Handler for ManagerLoopHandler {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::event::EventEmitter;
     use crate::graph::AttrValue;
+    use crate::handler::start::StartHandler;
+    use crate::handler::HandlerRegistry;
+
+    fn make_services() -> EngineServices {
+        EngineServices {
+            registry: std::sync::Arc::new(HandlerRegistry::new(Box::new(StartHandler))),
+            emitter: std::sync::Arc::new(EventEmitter::new()),
+        }
+    }
 
     #[tokio::test]
     async fn manager_loop_max_cycles_exceeded() {
@@ -228,7 +239,7 @@ mod tests {
         let logs_root = Path::new("/tmp/test");
 
         let outcome = handler
-            .execute(&node, &context, &graph, logs_root)
+            .execute(&node, &context, &graph, logs_root, &make_services())
             .await
             .unwrap();
         assert_eq!(outcome.status, StageStatus::Fail);
@@ -265,7 +276,7 @@ mod tests {
         let logs_root = Path::new("/tmp/test");
 
         let outcome = handler
-            .execute(&node, &context, &graph, logs_root)
+            .execute(&node, &context, &graph, logs_root, &make_services())
             .await
             .unwrap();
         assert_eq!(outcome.status, StageStatus::Success);
@@ -293,7 +304,7 @@ mod tests {
         let logs_root = Path::new("/tmp/test");
 
         let outcome = handler
-            .execute(&node, &context, &graph, logs_root)
+            .execute(&node, &context, &graph, logs_root, &make_services())
             .await
             .unwrap();
         assert_eq!(outcome.status, StageStatus::Fail);
@@ -326,7 +337,7 @@ mod tests {
         let logs_root = Path::new("/tmp/test");
 
         let outcome = handler
-            .execute(&node, &context, &graph, logs_root)
+            .execute(&node, &context, &graph, logs_root, &make_services())
             .await
             .unwrap();
         assert_eq!(outcome.status, StageStatus::Success);

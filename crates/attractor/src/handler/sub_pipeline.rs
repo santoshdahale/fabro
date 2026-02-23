@@ -1,34 +1,19 @@
 use std::path::Path;
-use std::sync::Arc;
 
 use async_trait::async_trait;
 
 use crate::context::Context;
 use crate::engine::select_edge;
 use crate::error::AttractorError;
-use crate::event::EventEmitter;
 use crate::graph::{Graph, Node};
 use crate::outcome::Outcome;
 use crate::pipeline::prepare_pipeline;
 
-use super::{Handler, HandlerRegistry};
+use super::{EngineServices, Handler};
 
 /// Executes a sub-pipeline defined by inline DOT source in a node attribute.
 /// The sub-pipeline runs with a cloned context; context updates propagate back.
-pub struct SubPipelineHandler {
-    registry: Arc<HandlerRegistry>,
-    _emitter: Arc<EventEmitter>,
-}
-
-impl SubPipelineHandler {
-    #[must_use]
-    pub fn new(registry: Arc<HandlerRegistry>, emitter: Arc<EventEmitter>) -> Self {
-        Self {
-            registry,
-            _emitter: emitter,
-        }
-    }
-}
+pub struct SubPipelineHandler;
 
 /// Check whether a node is a terminal (exit) node.
 fn is_terminal(node: &Node) -> bool {
@@ -43,6 +28,7 @@ impl Handler for SubPipelineHandler {
         context: &Context,
         _graph: &Graph,
         logs_root: &Path,
+        services: &EngineServices,
     ) -> Result<Outcome, AttractorError> {
         // 1. Get DOT source from node attribute
         let dot_source = match node.attrs.get("sub_pipeline.dot_source").and_then(|v| v.as_str()) {
@@ -92,9 +78,9 @@ impl Handler for SubPipelineHandler {
             }
 
             // Execute the node handler
-            let handler = self.registry.resolve(sub_node);
+            let handler = services.registry.resolve(sub_node);
             last_outcome = handler
-                .execute(sub_node, &sub_context, &sub_graph, &sub_logs_root)
+                .execute(sub_node, &sub_context, &sub_graph, &sub_logs_root, services)
                 .await?;
 
             // Apply context updates from the outcome
@@ -132,26 +118,34 @@ impl Handler for SubPipelineHandler {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Arc;
+    use crate::event::EventEmitter;
     use crate::graph::AttrValue;
     use crate::handler::exit::ExitHandler;
     use crate::handler::start::StartHandler;
+    use crate::handler::HandlerRegistry;
     use crate::outcome::StageStatus;
 
-    fn make_registry() -> Arc<HandlerRegistry> {
+    fn make_services() -> EngineServices {
         let mut registry = HandlerRegistry::new(Box::new(StartHandler));
         registry.register("start", Box::new(StartHandler));
         registry.register("exit", Box::new(ExitHandler));
-        Arc::new(registry)
+        EngineServices {
+            registry: Arc::new(registry),
+            emitter: Arc::new(EventEmitter::new()),
+        }
     }
 
-    fn make_emitter() -> Arc<EventEmitter> {
-        Arc::new(EventEmitter::new())
+    fn make_services_with_registry(registry: HandlerRegistry) -> EngineServices {
+        EngineServices {
+            registry: Arc::new(registry),
+            emitter: Arc::new(EventEmitter::new()),
+        }
     }
 
     #[tokio::test]
     async fn executes_simple_sub_pipeline() {
-        let registry = make_registry();
-        let handler = SubPipelineHandler::new(registry, make_emitter());
+        let services = make_services();
 
         let mut node = Node::new("sub");
         node.attrs.insert(
@@ -170,8 +164,8 @@ mod tests {
         let graph = Graph::new("parent");
         let tmp = tempfile::tempdir().unwrap();
 
-        let outcome = handler
-            .execute(&node, &context, &graph, tmp.path())
+        let outcome = SubPipelineHandler
+            .execute(&node, &context, &graph, tmp.path(), &services)
             .await
             .unwrap();
         assert_eq!(outcome.status, StageStatus::Success);
@@ -179,8 +173,7 @@ mod tests {
 
     #[tokio::test]
     async fn parent_context_available_in_sub_pipeline() {
-        let registry = make_registry();
-        let handler = SubPipelineHandler::new(registry, make_emitter());
+        let services = make_services();
 
         let mut node = Node::new("sub");
         node.attrs.insert(
@@ -200,8 +193,8 @@ mod tests {
         let graph = Graph::new("parent");
         let tmp = tempfile::tempdir().unwrap();
 
-        let outcome = handler
-            .execute(&node, &context, &graph, tmp.path())
+        let outcome = SubPipelineHandler
+            .execute(&node, &context, &graph, tmp.path(), &services)
             .await
             .unwrap();
         assert_eq!(outcome.status, StageStatus::Success);
@@ -223,6 +216,7 @@ mod tests {
                 context: &Context,
                 _graph: &Graph,
                 _logs_root: &Path,
+                _services: &EngineServices,
             ) -> Result<Outcome, AttractorError> {
                 context.set("sub.result", serde_json::json!("from_sub"));
                 Ok(Outcome::success())
@@ -232,9 +226,7 @@ mod tests {
         let mut registry = HandlerRegistry::new(Box::new(ContextSettingHandler));
         registry.register("start", Box::new(StartHandler));
         registry.register("exit", Box::new(ExitHandler));
-        let registry = Arc::new(registry);
-
-        let handler = SubPipelineHandler::new(registry, make_emitter());
+        let services = make_services_with_registry(registry);
 
         let mut node = Node::new("sub");
         node.attrs.insert(
@@ -254,8 +246,8 @@ mod tests {
         let graph = Graph::new("parent");
         let tmp = tempfile::tempdir().unwrap();
 
-        let outcome = handler
-            .execute(&node, &context, &graph, tmp.path())
+        let outcome = SubPipelineHandler
+            .execute(&node, &context, &graph, tmp.path(), &services)
             .await
             .unwrap();
         assert_eq!(outcome.status, StageStatus::Success);
@@ -283,6 +275,7 @@ mod tests {
                 _context: &Context,
                 _graph: &Graph,
                 _logs_root: &Path,
+                _services: &EngineServices,
             ) -> Result<Outcome, AttractorError> {
                 Ok(Outcome::fail("sub-pipeline failure"))
             }
@@ -291,9 +284,7 @@ mod tests {
         let mut registry = HandlerRegistry::new(Box::new(AlwaysFailHandler));
         registry.register("start", Box::new(StartHandler));
         registry.register("exit", Box::new(ExitHandler));
-        let registry = Arc::new(registry);
-
-        let handler = SubPipelineHandler::new(registry, make_emitter());
+        let services = make_services_with_registry(registry);
 
         let mut node = Node::new("sub");
         // Sub-pipeline where the work node fails and there's a fail edge to exit
@@ -315,8 +306,8 @@ mod tests {
         let graph = Graph::new("parent");
         let tmp = tempfile::tempdir().unwrap();
 
-        let outcome = handler
-            .execute(&node, &context, &graph, tmp.path())
+        let outcome = SubPipelineHandler
+            .execute(&node, &context, &graph, tmp.path(), &services)
             .await
             .unwrap();
         assert_eq!(outcome.status, StageStatus::Fail);
@@ -324,16 +315,15 @@ mod tests {
 
     #[tokio::test]
     async fn missing_dot_source_returns_fail() {
-        let registry = make_registry();
-        let handler = SubPipelineHandler::new(registry, make_emitter());
+        let services = make_services();
 
         let node = Node::new("sub");
         let context = Context::new();
         let graph = Graph::new("parent");
         let tmp = tempfile::tempdir().unwrap();
 
-        let outcome = handler
-            .execute(&node, &context, &graph, tmp.path())
+        let outcome = SubPipelineHandler
+            .execute(&node, &context, &graph, tmp.path(), &services)
             .await
             .unwrap();
         assert_eq!(outcome.status, StageStatus::Fail);
@@ -349,8 +339,7 @@ mod tests {
 
     #[tokio::test]
     async fn invalid_dot_source_returns_fail() {
-        let registry = make_registry();
-        let handler = SubPipelineHandler::new(registry, make_emitter());
+        let services = make_services();
 
         let mut node = Node::new("sub");
         node.attrs.insert(
@@ -362,8 +351,8 @@ mod tests {
         let graph = Graph::new("parent");
         let tmp = tempfile::tempdir().unwrap();
 
-        let outcome = handler
-            .execute(&node, &context, &graph, tmp.path())
+        let outcome = SubPipelineHandler
+            .execute(&node, &context, &graph, tmp.path(), &services)
             .await
             .unwrap();
         assert_eq!(outcome.status, StageStatus::Fail);

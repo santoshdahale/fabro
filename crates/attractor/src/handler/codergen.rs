@@ -7,7 +7,7 @@ use crate::error::AttractorError;
 use crate::graph::{Graph, Node};
 use crate::outcome::Outcome;
 
-use super::Handler;
+use super::{EngineServices, Handler};
 
 /// Result from a `CodergenBackend` invocation.
 pub enum CodergenResult {
@@ -172,6 +172,7 @@ impl Handler for CodergenHandler {
         context: &Context,
         graph: &Graph,
         logs_root: &Path,
+        _services: &EngineServices,
     ) -> Result<Outcome, AttractorError> {
         // 1. Build prompt
         let raw_prompt = node
@@ -257,8 +258,18 @@ impl Handler for CodergenHandler {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::event::EventEmitter;
     use crate::graph::AttrValue;
+    use crate::handler::start::StartHandler;
+    use crate::handler::HandlerRegistry;
     use tempfile::TempDir;
+
+    fn make_services() -> EngineServices {
+        EngineServices {
+            registry: std::sync::Arc::new(HandlerRegistry::new(Box::new(StartHandler))),
+            emitter: std::sync::Arc::new(EventEmitter::new()),
+        }
+    }
 
     #[tokio::test]
     async fn codergen_handler_simulation_mode() {
@@ -273,7 +284,7 @@ mod tests {
         let tmp = TempDir::new().unwrap();
 
         let outcome = handler
-            .execute(&node, &context, &graph, tmp.path())
+            .execute(&node, &context, &graph, tmp.path(), &make_services())
             .await
             .unwrap();
         assert_eq!(outcome.status, crate::outcome::StageStatus::Success);
@@ -311,7 +322,7 @@ mod tests {
         let tmp = TempDir::new().unwrap();
 
         handler
-            .execute(&node, &context, &graph, tmp.path())
+            .execute(&node, &context, &graph, tmp.path(), &make_services())
             .await
             .unwrap();
 
@@ -333,7 +344,7 @@ mod tests {
         let tmp = TempDir::new().unwrap();
 
         handler
-            .execute(&node, &context, &graph, tmp.path())
+            .execute(&node, &context, &graph, tmp.path(), &make_services())
             .await
             .unwrap();
 
@@ -351,7 +362,7 @@ mod tests {
         let tmp = TempDir::new().unwrap();
 
         let outcome = handler
-            .execute(&node, &context, &graph, tmp.path())
+            .execute(&node, &context, &graph, tmp.path(), &make_services())
             .await
             .unwrap();
 
@@ -397,7 +408,7 @@ mod tests {
         let tmp = TempDir::new().unwrap();
 
         let outcome = handler
-            .execute(&node, &context, &graph, tmp.path())
+            .execute(&node, &context, &graph, tmp.path(), &make_services())
             .await
             .unwrap();
         assert_eq!(outcome.status, crate::outcome::StageStatus::Skipped);
@@ -421,7 +432,7 @@ mod tests {
         let tmp = TempDir::new().unwrap();
 
         let outcome = handler
-            .execute(&node, &context, &graph, tmp.path())
+            .execute(&node, &context, &graph, tmp.path(), &make_services())
             .await
             .unwrap();
         assert_eq!(outcome.status, crate::outcome::StageStatus::Success);
@@ -440,7 +451,7 @@ mod tests {
         let tmp = TempDir::new().unwrap();
 
         let outcome = handler
-            .execute(&node, &context, &graph, tmp.path())
+            .execute(&node, &context, &graph, tmp.path(), &make_services())
             .await
             .unwrap();
         // Post-hook failure should not fail the node
@@ -519,7 +530,7 @@ mod tests {
         let tmp = TempDir::new().unwrap();
 
         handler
-            .execute(&node, &context, &graph, tmp.path())
+            .execute(&node, &context, &graph, tmp.path(), &make_services())
             .await
             .unwrap();
 
@@ -563,7 +574,7 @@ mod tests {
         let tmp = TempDir::new().unwrap();
 
         handler
-            .execute(&node, &context, &graph, tmp.path())
+            .execute(&node, &context, &graph, tmp.path(), &make_services())
             .await
             .unwrap();
 
@@ -594,7 +605,7 @@ mod tests {
         let graph = Graph::new("test");
         let tmp = TempDir::new().unwrap();
 
-        let result = handler.execute(&node, &context, &graph, tmp.path()).await;
+        let result = handler.execute(&node, &context, &graph, tmp.path(), &make_services()).await;
         let err = result.unwrap_err();
         assert!(err.is_retryable());
         assert!(err.to_string().contains("Request timed out"));
@@ -706,7 +717,7 @@ Some text in between.
         let tmp = TempDir::new().unwrap();
 
         let outcome = handler
-            .execute(&node, &context, &graph, tmp.path())
+            .execute(&node, &context, &graph, tmp.path(), &make_services())
             .await
             .unwrap();
         assert_eq!(outcome.status, crate::outcome::StageStatus::Fail);

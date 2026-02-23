@@ -7,7 +7,7 @@ use crate::error::AttractorError;
 use crate::graph::{Graph, Node};
 use crate::outcome::Outcome;
 
-use super::Handler;
+use super::{EngineServices, Handler};
 
 /// Executes an external tool (shell command) configured via node attributes.
 pub struct ToolHandler;
@@ -47,6 +47,7 @@ impl Handler for ToolHandler {
         _context: &Context,
         _graph: &Graph,
         _logs_root: &Path,
+        _services: &EngineServices,
     ) -> Result<Outcome, AttractorError> {
         let command = node
             .attrs
@@ -87,9 +88,19 @@ impl Handler for ToolHandler {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::event::EventEmitter;
     use crate::graph::AttrValue;
+    use crate::handler::start::StartHandler;
+    use crate::handler::HandlerRegistry;
     use crate::outcome::StageStatus;
     use std::time::Duration;
+
+    fn make_services() -> EngineServices {
+        EngineServices {
+            registry: std::sync::Arc::new(HandlerRegistry::new(Box::new(StartHandler))),
+            emitter: std::sync::Arc::new(EventEmitter::new()),
+        }
+    }
 
     #[tokio::test]
     async fn tool_handler_no_command() {
@@ -100,7 +111,7 @@ mod tests {
         let logs_root = Path::new("/tmp/test");
 
         let outcome = handler
-            .execute(&node, &context, &graph, logs_root)
+            .execute(&node, &context, &graph, logs_root, &make_services())
             .await
             .unwrap();
         assert_eq!(outcome.status, StageStatus::Fail);
@@ -123,7 +134,7 @@ mod tests {
         let logs_root = Path::new("/tmp/test");
 
         let outcome = handler
-            .execute(&node, &context, &graph, logs_root)
+            .execute(&node, &context, &graph, logs_root, &make_services())
             .await
             .unwrap();
         assert_eq!(outcome.status, StageStatus::Success);
@@ -145,7 +156,7 @@ mod tests {
         let logs_root = Path::new("/tmp/test");
 
         let outcome = handler
-            .execute(&node, &context, &graph, logs_root)
+            .execute(&node, &context, &graph, logs_root, &make_services())
             .await
             .unwrap();
         assert_eq!(outcome.status, StageStatus::Fail);
@@ -168,7 +179,7 @@ mod tests {
         let logs_root = Path::new("/tmp/test");
 
         let outcome = handler
-            .execute(&node, &context, &graph, logs_root)
+            .execute(&node, &context, &graph, logs_root, &make_services())
             .await
             .unwrap();
         assert_eq!(outcome.status, StageStatus::Fail);

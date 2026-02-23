@@ -13,7 +13,7 @@ use crate::interviewer::{
 };
 use crate::outcome::Outcome;
 
-use super::Handler;
+use super::{EngineServices, Handler};
 
 /// Convert a Duration's milliseconds to u64, saturating on overflow.
 fn millis_u64(d: std::time::Duration) -> u64 {
@@ -105,6 +105,7 @@ impl Handler for WaitHumanHandler {
         _context: &Context,
         graph: &Graph,
         _logs_root: &Path,
+        _services: &EngineServices,
     ) -> Result<Outcome, AttractorError> {
         // 1. Derive choices from outgoing edges
         let edges = graph.outgoing_edges(&node.id);
@@ -276,8 +277,18 @@ fn answer_text(answer: &Answer) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::event::EventEmitter;
     use crate::graph::{AttrValue, Edge};
+    use crate::handler::start::StartHandler;
+    use crate::handler::HandlerRegistry;
     use crate::interviewer::auto_approve::AutoApproveInterviewer;
+
+    fn make_services() -> EngineServices {
+        EngineServices {
+            registry: std::sync::Arc::new(HandlerRegistry::new(Box::new(StartHandler))),
+            emitter: std::sync::Arc::new(EventEmitter::new()),
+        }
+    }
 
     fn build_graph_with_human_gate() -> Graph {
         let mut graph = Graph::new("test");
@@ -345,7 +356,7 @@ mod tests {
         let logs_root = Path::new("/tmp/test");
 
         let outcome = handler
-            .execute(node, &context, &graph, logs_root)
+            .execute(node, &context, &graph, logs_root, &make_services())
             .await
             .unwrap();
         assert_eq!(outcome.status, crate::outcome::StageStatus::Success);
@@ -369,7 +380,7 @@ mod tests {
         let logs_root = Path::new("/tmp/test");
 
         let outcome = handler
-            .execute(node, &context, &graph, logs_root)
+            .execute(node, &context, &graph, logs_root, &make_services())
             .await
             .unwrap();
         assert_eq!(outcome.status, crate::outcome::StageStatus::Fail);
@@ -401,7 +412,7 @@ mod tests {
         let logs_root = Path::new("/tmp/test");
 
         let outcome = handler
-            .execute(node, &context, &graph, logs_root)
+            .execute(node, &context, &graph, logs_root, &make_services())
             .await
             .unwrap();
         assert_eq!(outcome.status, crate::outcome::StageStatus::Success);

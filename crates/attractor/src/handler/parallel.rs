@@ -7,11 +7,11 @@ use tokio::sync::Semaphore;
 
 use crate::context::Context;
 use crate::error::AttractorError;
-use crate::event::{EventEmitter, PipelineEvent};
+use crate::event::PipelineEvent;
 use crate::graph::{Graph, Node};
 use crate::outcome::{Outcome, StageStatus};
 
-use super::{Handler, HandlerRegistry};
+use super::{EngineServices, Handler};
 
 /// Convert a Duration's milliseconds to u64, saturating on overflow.
 fn millis_u64(d: std::time::Duration) -> u64 {
@@ -20,17 +20,7 @@ fn millis_u64(d: std::time::Duration) -> u64 {
 
 /// Fans out execution to multiple branches concurrently.
 /// Each branch gets an isolated context clone and runs independently.
-pub struct ParallelHandler {
-    registry: Arc<HandlerRegistry>,
-    emitter: Arc<EventEmitter>,
-}
-
-impl ParallelHandler {
-    #[must_use]
-    pub fn new(registry: Arc<HandlerRegistry>, emitter: Arc<EventEmitter>) -> Self {
-        Self { registry, emitter }
-    }
-}
+pub struct ParallelHandler;
 
 /// Parse join policy from node attributes.
 #[derive(Debug, Clone)]
@@ -87,6 +77,7 @@ impl Handler for ParallelHandler {
         context: &Context,
         graph: &Graph,
         logs_root: &Path,
+        services: &EngineServices,
     ) -> Result<Outcome, AttractorError> {
         let parallel_start = Instant::now();
         let branches = graph.outgoing_edges(&node.id);
@@ -94,7 +85,7 @@ impl Handler for ParallelHandler {
             return Ok(Outcome::fail("No branches for parallel node"));
         }
 
-        self.emitter.emit(&PipelineEvent::ParallelStarted {
+        services.emitter.emit(&PipelineEvent::ParallelStarted {
             branch_count: branches.len(),
         });
 
@@ -124,8 +115,8 @@ impl Handler for ParallelHandler {
         for (branch_index, edge) in branches.iter().enumerate() {
             let target_id = edge.to.clone();
             let branch_context = context.clone_context();
-            let registry = Arc::clone(&self.registry);
-            let emitter = Arc::clone(&self.emitter);
+            let registry = Arc::clone(&services.registry);
+            let emitter = Arc::clone(&services.emitter);
             let graph = graph.clone();
             let logs_root = logs_root.to_path_buf();
             let sem = Arc::clone(&semaphore);
@@ -155,9 +146,13 @@ impl Handler for ParallelHandler {
                     });
                 };
 
+                let branch_services = EngineServices {
+                    registry: Arc::clone(&registry),
+                    emitter: Arc::clone(&emitter),
+                };
                 let handler = registry.resolve(target_node);
                 let outcome = handler
-                    .execute(target_node, &branch_context, &graph, &logs_root)
+                    .execute(target_node, &branch_context, &graph, &logs_root, &branch_services)
                     .await?;
 
                 let success = outcome.status == StageStatus::Success
@@ -239,7 +234,7 @@ impl Handler for ParallelHandler {
         context.set("parallel.results", serde_json::json!(results_json));
         context.set("parallel.branch_count", serde_json::json!(total));
 
-        self.emitter.emit(&PipelineEvent::ParallelCompleted {
+        services.emitter.emit(&PipelineEvent::ParallelCompleted {
             duration_ms: millis_u64(parallel_start.elapsed()),
             success_count,
             failure_count: fail_count,
@@ -315,29 +310,29 @@ impl Handler for ParallelHandler {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::event::EventEmitter;
     use crate::graph::{AttrValue, Edge};
     use crate::handler::start::StartHandler;
+    use crate::handler::HandlerRegistry;
 
-    fn make_registry() -> Arc<HandlerRegistry> {
+    fn make_services() -> EngineServices {
         let registry = HandlerRegistry::new(Box::new(StartHandler));
-        Arc::new(registry)
-    }
-
-    fn make_emitter() -> Arc<EventEmitter> {
-        Arc::new(EventEmitter::new())
+        EngineServices {
+            registry: Arc::new(registry),
+            emitter: Arc::new(EventEmitter::new()),
+        }
     }
 
     #[tokio::test]
     async fn parallel_handler_no_branches() {
-        let registry = make_registry();
-        let handler = ParallelHandler::new(registry, make_emitter());
+        let services = make_services();
         let node = Node::new("par");
         let context = Context::new();
         let graph = Graph::new("test");
         let logs_root = Path::new("/tmp/test");
 
-        let outcome = handler
-            .execute(&node, &context, &graph, logs_root)
+        let outcome = ParallelHandler
+            .execute(&node, &context, &graph, logs_root, &services)
             .await
             .unwrap();
         assert_eq!(outcome.status, StageStatus::Fail);
@@ -345,8 +340,7 @@ mod tests {
 
     #[tokio::test]
     async fn parallel_handler_with_branches() {
-        let registry = make_registry();
-        let handler = ParallelHandler::new(registry, make_emitter());
+        let services = make_services();
         let mut node = Node::new("par");
         node.attrs.insert(
             "shape".to_string(),
@@ -365,8 +359,8 @@ mod tests {
         graph.edges.push(Edge::new("par", "branch_b"));
 
         let logs_root = Path::new("/tmp/test");
-        let outcome = handler
-            .execute(&node, &context, &graph, logs_root)
+        let outcome = ParallelHandler
+            .execute(&node, &context, &graph, logs_root, &services)
             .await
             .unwrap();
 
@@ -380,8 +374,7 @@ mod tests {
 
     #[tokio::test]
     async fn parallel_handler_first_success_policy() {
-        let registry = make_registry();
-        let handler = ParallelHandler::new(registry, make_emitter());
+        let services = make_services();
         let mut node = Node::new("par");
         node.attrs.insert(
             "join_policy".to_string(),
@@ -396,8 +389,8 @@ mod tests {
         graph.edges.push(Edge::new("par", "branch_a"));
 
         let logs_root = Path::new("/tmp/test");
-        let outcome = handler
-            .execute(&node, &context, &graph, logs_root)
+        let outcome = ParallelHandler
+            .execute(&node, &context, &graph, logs_root, &services)
             .await
             .unwrap();
 
@@ -406,8 +399,7 @@ mod tests {
 
     #[tokio::test]
     async fn parallel_handler_k_of_n_policy() {
-        let registry = make_registry();
-        let handler = ParallelHandler::new(registry, make_emitter());
+        let services = make_services();
         let mut node = Node::new("par");
         node.attrs.insert(
             "join_policy".to_string(),
@@ -430,8 +422,8 @@ mod tests {
         graph.edges.push(Edge::new("par", "branch_c"));
 
         let logs_root = Path::new("/tmp/test");
-        let outcome = handler
-            .execute(&node, &context, &graph, logs_root)
+        let outcome = ParallelHandler
+            .execute(&node, &context, &graph, logs_root, &services)
             .await
             .unwrap();
 
