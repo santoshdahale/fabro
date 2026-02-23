@@ -527,7 +527,12 @@ async fn process_next_sse_events(
     loop {
         let messages = extract_sse_messages(&mut state.buffer);
         if !messages.is_empty() {
-            return Ok(dispatch_sse_messages(state, messages));
+            let events = dispatch_sse_messages(state, messages);
+            if !events.is_empty() {
+                return Ok(events);
+            }
+            // All SSE messages were unhandled event types; continue reading.
+            continue;
         }
 
         match tokio::time::timeout(state.stream_read_timeout, state.byte_stream.next()).await {
