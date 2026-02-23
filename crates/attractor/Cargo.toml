@@ -9,6 +9,9 @@ keywords = ["llm", "ai", "pipeline", "workflow", "dot"]
 categories = ["development-tools"]
 readme = "README.md"
 
+[lib]
+doctest = false
+
 [[bin]]
 name = "attractor"
 path = "src/main.rs"

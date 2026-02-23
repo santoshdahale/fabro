@@ -9,6 +9,9 @@ readme = "README.md"
 keywords = ["llm", "ai", "agent", "coding"]
 categories = ["api-bindings"]
 
+[lib]
+doctest = false
+
 [dependencies]
 llm = { path = "../llm" }
 thiserror.workspace = true

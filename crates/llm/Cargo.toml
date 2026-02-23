@@ -9,6 +9,9 @@ readme = "README.md"
 keywords = ["llm", "ai", "openai", "anthropic"]
 categories = ["api-bindings"]
 
+[lib]
+doctest = false
+
 [[bin]]
 name = "ullm"
 path = "src/bin/ullm.rs"
