@@ -1,4 +1,4 @@
-use crate::config::SessionConfig;
+use crate::config::{SessionConfig, ToolApprovalFn};
 use crate::error::AgentError;
 use crate::event::EventEmitter;
 use crate::execution_env::ExecutionEnvironment;
@@ -428,6 +428,7 @@ impl Session {
                 &tc.arguments,
                 self.provider_profile.tool_registry(),
                 self.execution_env.clone(),
+                self.config.tool_approval.as_ref(),
             )
             .await;
 
@@ -483,6 +484,7 @@ impl Session {
                         &tc.arguments,
                         profile.tool_registry(),
                         env,
+                        config.tool_approval.as_ref(),
                     )
                     .await;
 
@@ -567,7 +569,20 @@ async fn execute_one_tool(
     arguments: &serde_json::Value,
     registry: &ToolRegistry,
     env: Arc<dyn ExecutionEnvironment>,
+    tool_approval: Option<&ToolApprovalFn>,
 ) -> ToolResult {
+    if let Some(approval_fn) = tool_approval {
+        if let Err(denial_message) = approval_fn(tool_name, arguments) {
+            return ToolResult {
+                tool_call_id: tool_call_id.to_string(),
+                content: serde_json::json!(denial_message),
+                is_error: true,
+                image_data: None,
+                image_media_type: None,
+            };
+        }
+    }
+
     match registry.get(tool_name) {
         Some(registered_tool) => {
             if let Err(validation_error) =

@@ -15,7 +15,7 @@ pub mod tools;
 pub mod truncation;
 pub mod types;
 
-pub use config::SessionConfig;
+pub use config::{SessionConfig, ToolApprovalFn};
 pub use error::AgentError;
 pub use event::EventEmitter;
 pub use execution_env::{DirEntry, ExecResult, ExecutionEnvironment, GrepOptions};
