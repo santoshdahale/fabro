@@ -16,6 +16,7 @@ use serde::{Deserialize, Serialize};
 pub enum QuestionType {
     YesNo,
     MultipleChoice,
+    MultiSelect,
     Freeform,
     Confirmation,
 }
@@ -254,6 +255,12 @@ mod tests {
             AnswerValue::Text("hello".to_string()),
             AnswerValue::Text("hello".to_string())
         );
+    }
+
+    #[test]
+    fn question_type_multi_select_exists() {
+        let q = Question::new("Pick many:", QuestionType::MultiSelect);
+        assert_eq!(q.question_type, QuestionType::MultiSelect);
     }
 
     /// A slow interviewer that waits before answering -- for testing timeouts.

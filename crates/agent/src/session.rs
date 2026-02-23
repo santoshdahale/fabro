@@ -64,6 +64,9 @@ impl Session {
     /// Initialize session by discovering project docs and capturing environment context.
     /// Call before `process_input`.
     pub async fn initialize(&mut self) {
+        self.event_emitter
+            .emit(EventKind::SessionStart, self.id.clone(), EventData::Empty);
+
         let doc_root = self
             .config
             .git_root
@@ -166,7 +169,11 @@ impl Session {
     }
 
     pub fn close(&mut self) {
-        self.state = SessionState::Closed;
+        if self.state != SessionState::Closed {
+            self.state = SessionState::Closed;
+            self.event_emitter
+                .emit(EventKind::SessionEnd, self.id.clone(), EventData::Empty);
+        }
     }
 
     pub fn set_reasoning_effort(&mut self, effort: Option<String>) {
@@ -186,9 +193,6 @@ impl Session {
             return Err(AgentError::SessionClosed);
         }
 
-        self.event_emitter
-            .emit(EventKind::SessionStart, self.id.clone(), EventData::Empty);
-
         // Process the initial input, then drain any followups
         self.run_single_input(input).await?;
         loop {
@@ -202,8 +206,6 @@ impl Session {
         }
 
         self.state = SessionState::Idle;
-        self.event_emitter
-            .emit(EventKind::SessionEnd, self.id.clone(), EventData::Empty);
 
         Ok(())
     }
@@ -253,9 +255,7 @@ impl Session {
 
             // Check abort flag
             if self.abort_flag.load(Ordering::SeqCst) {
-                self.state = SessionState::Closed;
-                self.event_emitter
-                    .emit(EventKind::SessionEnd, self.id.clone(), EventData::Empty);
+                self.close();
                 return Err(AgentError::Aborted);
             }
 
@@ -322,12 +322,10 @@ impl Session {
             }
 
             // If aborted during streaming, drop the stream to cancel the HTTP
-            // connection, then emit SessionEnd before returning.
+            // connection, then close the session before returning.
             if self.abort_flag.load(Ordering::SeqCst) {
                 drop(event_stream);
-                self.state = SessionState::Closed;
-                self.event_emitter
-                    .emit(EventKind::SessionEnd, self.id.clone(), EventData::Empty);
+                self.close();
                 return Err(AgentError::Aborted);
             }
 
@@ -923,7 +921,9 @@ mod tests {
         let mut session = make_session(vec![text_response("Hello")]).await;
         let mut rx = session.subscribe();
 
+        session.initialize().await;
         session.process_input("Hi").await.unwrap();
+        session.close();
 
         // Collect events
         let mut events = Vec::new();
@@ -931,6 +931,7 @@ mod tests {
             events.push(event.kind.clone());
         }
 
+        assert!(events.contains(&EventKind::SessionStart));
         assert!(events.contains(&EventKind::UserInput));
         assert!(events.contains(&EventKind::AssistantTextEnd));
         assert!(events.contains(&EventKind::SessionEnd));
@@ -1446,19 +1447,24 @@ mod tests {
         let mut session = make_session(responses).await;
         let mut rx = session.subscribe();
 
+        session.initialize().await;
         session.process_input("one").await.unwrap();
         session.process_input("two").await.unwrap();
+        session.close();
 
         let mut session_start_count = 0;
+        let mut session_end_count = 0;
         while let Ok(event) = rx.try_recv() {
             if event.kind == EventKind::SessionStart {
                 session_start_count += 1;
             }
+            if event.kind == EventKind::SessionEnd {
+                session_end_count += 1;
+            }
         }
-        // Each process_input emits SESSION_START currently -- this should be 1 per input call
-        // The spec says SESSION_START is "session created", but since our Session doesn't
-        // emit at creation, we accept one per process_input call as the session boundary.
-        assert_eq!(session_start_count, 2);
+        // SESSION_START is emitted once during initialize(), SESSION_END once during close()
+        assert_eq!(session_start_count, 1);
+        assert_eq!(session_end_count, 1);
     }
 
     #[tokio::test]

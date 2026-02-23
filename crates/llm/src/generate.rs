@@ -794,9 +794,21 @@ async fn stream_generate_raw(
     tool_definitions: Option<&[ToolDefinition]>,
 ) -> Result<StreamEventStream, SdkError> {
     let request = build_request(params, messages, tool_definitions);
-    let inner_stream = client.stream(&request).await?;
 
-    if let Some(ref token) = params.abort_signal {
+    // Apply per_step timeout to the initial connection (Section 4.7)
+    let inner_stream = if let Some(per_step) = params.timeout.as_ref().and_then(|t| t.per_step) {
+        let duration = std::time::Duration::from_secs_f64(per_step);
+        tokio::time::timeout(duration, client.stream(&request))
+            .await
+            .map_err(|_| SdkError::RequestTimeout {
+                message: format!("Per-step timeout of {per_step}s exceeded"),
+            })??
+    } else {
+        client.stream(&request).await?
+    };
+
+    // Apply abort signal if present
+    let stream: StreamEventStream = if let Some(ref token) = params.abort_signal {
         let token = token.clone();
         let mapped = inner_stream.map(move |item| {
             if token.is_cancelled() {
@@ -806,9 +818,39 @@ async fn stream_generate_raw(
             }
             item
         });
-        Ok(Box::pin(mapped))
+        Box::pin(mapped)
     } else {
-        Ok(inner_stream)
+        inner_stream
+    };
+
+    // Apply total timeout to the stream (Section 4.7)
+    if let Some(total) = params.timeout.as_ref().and_then(|t| t.total) {
+        let duration = std::time::Duration::from_secs_f64(total);
+        let deadline = tokio::time::Instant::now() + duration;
+        let total_copy = total;
+        let timed_stream = futures::stream::unfold(
+            (stream, false),
+            move |(mut stream, done)| async move {
+                if done {
+                    return None;
+                }
+                match tokio::time::timeout_at(deadline, stream.next()).await {
+                    Ok(Some(item)) => Some((item, (stream, false))),
+                    Ok(None) => None, // stream completed naturally
+                    Err(_) => {
+                        Some((
+                            Err(SdkError::RequestTimeout {
+                                message: format!("Total timeout of {total_copy}s exceeded"),
+                            }),
+                            (stream, true),
+                        ))
+                    }
+                }
+            },
+        );
+        Ok(Box::pin(timed_stream))
+    } else {
+        Ok(stream)
     }
 }
 

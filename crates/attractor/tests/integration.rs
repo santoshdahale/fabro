@@ -498,11 +498,17 @@ async fn goal_gate_routes_to_retry_target_on_failure() {
     };
 
     let result = engine.run(&graph, &config).await;
-    assert!(result.is_err(), "should fail when goal gate unsatisfied and no retry_target");
-    let err_msg = result.unwrap_err().to_string();
+    assert!(result.is_ok(), "goal gate unsatisfied with no retry_target should return Ok(fail outcome)");
+    let outcome = result.unwrap();
+    assert_eq!(
+        outcome.status,
+        StageStatus::Fail,
+        "pipeline outcome should be 'fail' when goal gate unsatisfied"
+    );
+    let failure_reason = outcome.failure_reason.unwrap_or_default();
     assert!(
-        err_msg.contains("goal gate unsatisfied"),
-        "error should mention goal gate, got: {err_msg}"
+        failure_reason.contains("goal gate unsatisfied"),
+        "failure_reason should mention goal gate, got: {failure_reason}"
     );
 }
 
@@ -4579,14 +4585,12 @@ async fn fidelity_compact_preamble_includes_completed_stages_and_context() {
 }
 
 #[tokio::test]
-async fn fidelity_summary_detail_increases_with_level() {
-    // Run three separate pipelines with summary:low, summary:medium, and summary:high.
-    // Verify that higher detail levels produce longer preambles.
-    let mut preamble_lengths: Vec<(String, usize)> = Vec::new();
-
-    // -- summary:low --
-    let mut graph_low = make_graph_with_start_exit("SummaryLenLow");
-    graph_low.attrs.insert("goal".to_string(), AttrValue::String("Detail test".to_string()));
+async fn fidelity_summary_low_excludes_context_values_in_pipeline() {
+    // summary:low should NOT include context values (only goal, run ID, stage count, recent stages).
+    // summary:medium should include context values.
+    // This verifies a behavioral difference between detail levels.
+    let mut graph_low = make_graph_with_start_exit("SummaryLowExcludesContext");
+    graph_low.attrs.insert("goal".to_string(), AttrValue::String("Context exclusion test".to_string()));
     graph_low.attrs.insert("default_fidelity".to_string(), AttrValue::String("summary:low".to_string()));
     let mut step_a_low = Node::new("step_a");
     step_a_low.attrs.insert("type".to_string(), AttrValue::String("fidelity_capture".to_string()));
@@ -4607,12 +4611,18 @@ async fn fidelity_summary_detail_increases_with_level() {
     let engine_low = PipelineEngine::new(registry_low, EventEmitter::new());
     let config_low = RunConfig { logs_root: dir_low.path().to_path_buf(), cancel_token: None };
     engine_low.run(&graph_low, &config_low).await.expect("run low");
-    let preambles_low = captures_low.preambles.lock().unwrap();
-    preamble_lengths.push(("summary:low".to_string(), preambles_low[1].1.len()));
 
-    // -- summary:medium --
-    let mut graph_med = make_graph_with_start_exit("SummaryLenMed");
-    graph_med.attrs.insert("goal".to_string(), AttrValue::String("Detail test".to_string()));
+    let preambles_low = captures_low.preambles.lock().unwrap();
+    let low_preamble = &preambles_low[1].1;
+    // summary:low should not include "Context values:" section
+    assert!(
+        !low_preamble.contains("Context values:"),
+        "summary:low preamble should not include context values section"
+    );
+
+    // Now run summary:medium and verify it DOES include context values
+    let mut graph_med = make_graph_with_start_exit("SummaryMedIncludesContext");
+    graph_med.attrs.insert("goal".to_string(), AttrValue::String("Context exclusion test".to_string()));
     graph_med.attrs.insert("default_fidelity".to_string(), AttrValue::String("summary:medium".to_string()));
     let mut step_a_med = Node::new("step_a");
     step_a_med.attrs.insert("type".to_string(), AttrValue::String("fidelity_capture".to_string()));
@@ -4633,47 +4643,13 @@ async fn fidelity_summary_detail_increases_with_level() {
     let engine_med = PipelineEngine::new(registry_med, EventEmitter::new());
     let config_med = RunConfig { logs_root: dir_med.path().to_path_buf(), cancel_token: None };
     engine_med.run(&graph_med, &config_med).await.expect("run med");
+
     let preambles_med = captures_med.preambles.lock().unwrap();
-    preamble_lengths.push(("summary:medium".to_string(), preambles_med[1].1.len()));
-
-    // -- summary:high --
-    let mut graph_high = make_graph_with_start_exit("SummaryLenHigh");
-    graph_high.attrs.insert("goal".to_string(), AttrValue::String("Detail test".to_string()));
-    graph_high.attrs.insert("default_fidelity".to_string(), AttrValue::String("summary:high".to_string()));
-    let mut step_a_high = Node::new("step_a");
-    step_a_high.attrs.insert("type".to_string(), AttrValue::String("fidelity_capture".to_string()));
-    graph_high.nodes.insert("step_a".to_string(), step_a_high);
-    let mut step_b_high = Node::new("step_b");
-    step_b_high.attrs.insert("type".to_string(), AttrValue::String("fidelity_capture".to_string()));
-    graph_high.nodes.insert("step_b".to_string(), step_b_high);
-    graph_high.edges.push(Edge::new("start", "step_a"));
-    graph_high.edges.push(Edge::new("step_a", "step_b"));
-    graph_high.edges.push(Edge::new("step_b", "exit"));
-
-    let captures_high = FidelityCaptures::new();
-    let dir_high = tempfile::tempdir().unwrap();
-    let mut registry_high = HandlerRegistry::new(Box::new(StartHandler));
-    registry_high.register("start", Box::new(StartHandler));
-    registry_high.register("exit", Box::new(ExitHandler));
-    registry_high.register("fidelity_capture", Box::new(FidelityCapturingHandler { captures: captures_high.clone() }));
-    let engine_high = PipelineEngine::new(registry_high, EventEmitter::new());
-    let config_high = RunConfig { logs_root: dir_high.path().to_path_buf(), cancel_token: None };
-    engine_high.run(&graph_high, &config_high).await.expect("run high");
-    let preambles_high = captures_high.preambles.lock().unwrap();
-    preamble_lengths.push(("summary:high".to_string(), preambles_high[1].1.len()));
-
-    // Higher summary levels should produce more detailed (longer) preambles
+    let med_preamble = &preambles_med[1].1;
+    // summary:medium should include "Context values:" section (graph.goal is always set)
     assert!(
-        preamble_lengths[0].1 <= preamble_lengths[1].1,
-        "summary:low ({}) should be no longer than summary:medium ({})",
-        preamble_lengths[0].1,
-        preamble_lengths[1].1,
-    );
-    assert!(
-        preamble_lengths[1].1 <= preamble_lengths[2].1,
-        "summary:medium ({}) should be no longer than summary:high ({})",
-        preamble_lengths[1].1,
-        preamble_lengths[2].1,
+        med_preamble.contains("Context values:"),
+        "summary:medium preamble should include context values section"
     );
 }
 

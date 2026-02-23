@@ -760,7 +760,7 @@ impl PipelineEngine {
                             error: error_msg.clone(),
                             duration_ms,
                         });
-                        return Err(AttractorError::Engine(error_msg));
+                        return Ok(Outcome::fail(error_msg));
                     }
                 }
             }

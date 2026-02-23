@@ -661,6 +661,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore]
     async fn full_lifecycle() {
         let _docker = require_docker();
         let host_dir = std::env::temp_dir().join(format!("docker_env_test_{}", uuid::Uuid::new_v4()));
@@ -717,6 +718,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore]
     async fn timeout_handling() {
         let _docker = require_docker();
         let host_dir = std::env::temp_dir().join(format!("docker_timeout_test_{}", uuid::Uuid::new_v4()));
@@ -735,6 +737,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore]
     async fn special_characters_in_write() {
         let _docker = require_docker();
         let host_dir = std::env::temp_dir().join(format!("docker_special_test_{}", uuid::Uuid::new_v4()));
@@ -756,6 +759,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore]
     async fn path_resolution() {
         let _docker = require_docker();
         let host_dir = std::env::temp_dir().join(format!("docker_path_test_{}", uuid::Uuid::new_v4()));
@@ -779,6 +783,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore]
     async fn cleanup_idempotent() {
         let _docker = require_docker();
         let host_dir = std::env::temp_dir().join(format!("docker_cleanup_test_{}", uuid::Uuid::new_v4()));

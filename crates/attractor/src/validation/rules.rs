@@ -1234,4 +1234,933 @@ mod tests {
         assert_eq!(d.len(), 1);
         assert_eq!(d[0].severity, Severity::Error);
     }
+
+    // --- Additional coverage: condition_syntax invalid case ---
+
+    #[test]
+    fn condition_syntax_rule_invalid_clause() {
+        let mut g = minimal_graph();
+        let mut edge = Edge::new("start", "exit");
+        edge.attrs.insert(
+            "condition".to_string(),
+            AttrValue::String("bad clause here".to_string()),
+        );
+        g.edges = vec![edge];
+        let rule = ConditionSyntaxRule;
+        let d = rule.apply(&g);
+        assert_eq!(d.len(), 1);
+        assert_eq!(d[0].severity, Severity::Error);
+    }
+
+    #[test]
+    fn condition_syntax_rule_not_equals() {
+        let mut g = minimal_graph();
+        let mut edge = Edge::new("start", "exit");
+        edge.attrs.insert(
+            "condition".to_string(),
+            AttrValue::String("outcome!=failure".to_string()),
+        );
+        g.edges = vec![edge];
+        let rule = ConditionSyntaxRule;
+        let d = rule.apply(&g);
+        assert!(d.is_empty());
+    }
+
+    #[test]
+    fn condition_syntax_rule_empty_condition() {
+        let mut g = minimal_graph();
+        let mut edge = Edge::new("start", "exit");
+        edge.attrs.insert(
+            "condition".to_string(),
+            AttrValue::String(String::new()),
+        );
+        g.edges = vec![edge];
+        let rule = ConditionSyntaxRule;
+        let d = rule.apply(&g);
+        assert!(d.is_empty());
+    }
+
+    #[test]
+    fn condition_syntax_rule_compound_and() {
+        let mut g = minimal_graph();
+        let mut edge = Edge::new("start", "exit");
+        edge.attrs.insert(
+            "condition".to_string(),
+            AttrValue::String("outcome=success && retries=0".to_string()),
+        );
+        g.edges = vec![edge];
+        let rule = ConditionSyntaxRule;
+        let d = rule.apply(&g);
+        assert!(d.is_empty());
+    }
+
+    // --- Additional coverage: terminal_node two terminals ---
+
+    #[test]
+    fn terminal_node_rule_two_terminals() {
+        let mut g = Graph::new("test");
+        let mut e1 = Node::new("e1");
+        e1.attrs
+            .insert("shape".to_string(), AttrValue::String("Msquare".to_string()));
+        let mut e2 = Node::new("e2");
+        e2.attrs
+            .insert("shape".to_string(), AttrValue::String("Msquare".to_string()));
+        g.nodes.insert("e1".to_string(), e1);
+        g.nodes.insert("e2".to_string(), e2);
+        let rule = TerminalNodeRule;
+        let d = rule.apply(&g);
+        assert_eq!(d.len(), 1);
+        assert_eq!(d[0].severity, Severity::Error);
+        assert!(d[0].message.contains("exactly one"));
+    }
+
+    // --- Additional coverage: edge_target_exists missing source ---
+
+    #[test]
+    fn edge_target_exists_rule_missing_source() {
+        let mut g = minimal_graph();
+        g.edges.push(Edge::new("nonexistent_source", "exit"));
+        let rule = EdgeTargetExistsRule;
+        let d = rule.apply(&g);
+        assert_eq!(d.len(), 1);
+        assert_eq!(d[0].severity, Severity::Error);
+        assert!(d[0].message.contains("nonexistent_source"));
+    }
+
+    // --- Additional coverage: reachability no start node ---
+
+    #[test]
+    fn reachability_rule_no_start_node() {
+        let mut g = Graph::new("test");
+        g.nodes.insert("orphan".to_string(), Node::new("orphan"));
+        let rule = ReachabilityRule;
+        let d = rule.apply(&g);
+        // No start node found, rule returns empty
+        assert!(d.is_empty());
+    }
+
+    // --- Additional coverage: retry_target_exists fallback and graph-level ---
+
+    #[test]
+    fn retry_target_exists_rule_fallback_missing() {
+        let mut g = minimal_graph();
+        let mut node = Node::new("work");
+        node.attrs.insert(
+            "fallback_retry_target".to_string(),
+            AttrValue::String("nonexistent".to_string()),
+        );
+        g.nodes.insert("work".to_string(), node);
+        let rule = RetryTargetExistsRule;
+        let d = rule.apply(&g);
+        assert_eq!(d.len(), 1);
+        assert_eq!(d[0].severity, Severity::Warning);
+        assert!(d[0].message.contains("fallback_retry_target"));
+    }
+
+    #[test]
+    fn retry_target_exists_rule_fallback_valid() {
+        let mut g = minimal_graph();
+        let mut node = Node::new("work");
+        node.attrs.insert(
+            "fallback_retry_target".to_string(),
+            AttrValue::String("start".to_string()),
+        );
+        g.nodes.insert("work".to_string(), node);
+        let rule = RetryTargetExistsRule;
+        let d = rule.apply(&g);
+        assert!(d.is_empty());
+    }
+
+    #[test]
+    fn retry_target_exists_rule_graph_level_missing() {
+        let mut g = minimal_graph();
+        g.attrs.insert(
+            "retry_target".to_string(),
+            AttrValue::String("nonexistent".to_string()),
+        );
+        let rule = RetryTargetExistsRule;
+        let d = rule.apply(&g);
+        assert_eq!(d.len(), 1);
+        assert_eq!(d[0].severity, Severity::Warning);
+        assert!(d[0].message.contains("Graph"));
+    }
+
+    #[test]
+    fn retry_target_exists_rule_graph_level_valid() {
+        let mut g = minimal_graph();
+        g.attrs.insert(
+            "retry_target".to_string(),
+            AttrValue::String("start".to_string()),
+        );
+        let rule = RetryTargetExistsRule;
+        let d = rule.apply(&g);
+        assert!(d.is_empty());
+    }
+
+    #[test]
+    fn retry_target_exists_rule_graph_fallback_missing() {
+        let mut g = minimal_graph();
+        g.attrs.insert(
+            "fallback_retry_target".to_string(),
+            AttrValue::String("nonexistent".to_string()),
+        );
+        let rule = RetryTargetExistsRule;
+        let d = rule.apply(&g);
+        assert_eq!(d.len(), 1);
+        assert_eq!(d[0].severity, Severity::Warning);
+        assert!(d[0].message.contains("fallback_retry_target"));
+    }
+
+    #[test]
+    fn retry_target_exists_rule_graph_fallback_valid() {
+        let mut g = minimal_graph();
+        g.attrs.insert(
+            "fallback_retry_target".to_string(),
+            AttrValue::String("exit".to_string()),
+        );
+        let rule = RetryTargetExistsRule;
+        let d = rule.apply(&g);
+        assert!(d.is_empty());
+    }
+
+    // --- Additional coverage: goal_gate_has_retry with graph-level retry ---
+
+    #[test]
+    fn goal_gate_has_retry_rule_with_graph_retry_target() {
+        let mut g = minimal_graph();
+        let mut node = Node::new("work");
+        node.attrs
+            .insert("goal_gate".to_string(), AttrValue::Boolean(true));
+        g.nodes.insert("work".to_string(), node);
+        g.attrs.insert(
+            "retry_target".to_string(),
+            AttrValue::String("start".to_string()),
+        );
+        let rule = GoalGateHasRetryRule;
+        let d = rule.apply(&g);
+        assert!(d.is_empty());
+    }
+
+    #[test]
+    fn goal_gate_has_retry_rule_with_fallback_retry_target() {
+        let mut g = minimal_graph();
+        let mut node = Node::new("work");
+        node.attrs
+            .insert("goal_gate".to_string(), AttrValue::Boolean(true));
+        node.attrs.insert(
+            "fallback_retry_target".to_string(),
+            AttrValue::String("start".to_string()),
+        );
+        g.nodes.insert("work".to_string(), node);
+        let rule = GoalGateHasRetryRule;
+        let d = rule.apply(&g);
+        assert!(d.is_empty());
+    }
+
+    #[test]
+    fn goal_gate_has_retry_rule_not_goal_gate() {
+        let mut g = minimal_graph();
+        let node = Node::new("work");
+        g.nodes.insert("work".to_string(), node);
+        let rule = GoalGateHasRetryRule;
+        let d = rule.apply(&g);
+        assert!(d.is_empty());
+    }
+
+    // --- Additional coverage: prompt_on_llm_nodes with label ---
+
+    #[test]
+    fn prompt_on_llm_nodes_rule_with_label() {
+        let mut g = minimal_graph();
+        let mut node = Node::new("work");
+        node.attrs.insert(
+            "label".to_string(),
+            AttrValue::String("Do something".to_string()),
+        );
+        g.nodes.insert("work".to_string(), node);
+        let rule = PromptOnLlmNodesRule;
+        let d = rule.apply(&g);
+        assert!(d.is_empty());
+    }
+
+    #[test]
+    fn prompt_on_llm_nodes_rule_non_codergen_no_warning() {
+        let mut g = minimal_graph();
+        let mut node = Node::new("gate");
+        node.attrs.insert(
+            "shape".to_string(),
+            AttrValue::String("hexagon".to_string()),
+        );
+        g.nodes.insert("gate".to_string(), node);
+        let rule = PromptOnLlmNodesRule;
+        let d = rule.apply(&g);
+        assert!(d.is_empty());
+    }
+
+    // --- Additional coverage: fidelity_valid edge and graph-level ---
+
+    #[test]
+    fn fidelity_valid_rule_invalid_edge_fidelity() {
+        let mut g = minimal_graph();
+        let mut edge = Edge::new("start", "exit");
+        edge.attrs.insert(
+            "fidelity".to_string(),
+            AttrValue::String("bogus".to_string()),
+        );
+        g.edges = vec![edge];
+        let rule = FidelityValidRule;
+        let d = rule.apply(&g);
+        assert_eq!(d.len(), 1);
+        assert_eq!(d[0].severity, Severity::Warning);
+        assert!(d[0].edge.is_some());
+    }
+
+    #[test]
+    fn fidelity_valid_rule_valid_edge_fidelity() {
+        let mut g = minimal_graph();
+        let mut edge = Edge::new("start", "exit");
+        edge.attrs.insert(
+            "fidelity".to_string(),
+            AttrValue::String("compact".to_string()),
+        );
+        g.edges = vec![edge];
+        let rule = FidelityValidRule;
+        let d = rule.apply(&g);
+        assert!(d.is_empty());
+    }
+
+    #[test]
+    fn fidelity_valid_rule_invalid_graph_default() {
+        let mut g = minimal_graph();
+        g.attrs.insert(
+            "default_fidelity".to_string(),
+            AttrValue::String("wrong".to_string()),
+        );
+        let rule = FidelityValidRule;
+        let d = rule.apply(&g);
+        assert_eq!(d.len(), 1);
+        assert_eq!(d[0].severity, Severity::Warning);
+        assert!(d[0].message.contains("default_fidelity"));
+    }
+
+    #[test]
+    fn fidelity_valid_rule_valid_graph_default() {
+        let mut g = minimal_graph();
+        g.attrs.insert(
+            "default_fidelity".to_string(),
+            AttrValue::String("summary:high".to_string()),
+        );
+        let rule = FidelityValidRule;
+        let d = rule.apply(&g);
+        assert!(d.is_empty());
+    }
+
+    #[test]
+    fn fidelity_valid_rule_all_summary_modes() {
+        let rule = FidelityValidRule;
+
+        let mut g = minimal_graph();
+        let mut node = Node::new("w1");
+        node.attrs.insert(
+            "fidelity".to_string(),
+            AttrValue::String("summary:low".to_string()),
+        );
+        g.nodes.insert("w1".to_string(), node);
+        assert!(rule.apply(&g).is_empty());
+
+        let mut g = minimal_graph();
+        let mut node = Node::new("w2");
+        node.attrs.insert(
+            "fidelity".to_string(),
+            AttrValue::String("summary:medium".to_string()),
+        );
+        g.nodes.insert("w2".to_string(), node);
+        assert!(rule.apply(&g).is_empty());
+
+        let mut g = minimal_graph();
+        let mut node = Node::new("w3");
+        node.attrs.insert(
+            "fidelity".to_string(),
+            AttrValue::String("truncate".to_string()),
+        );
+        g.nodes.insert("w3".to_string(), node);
+        assert!(rule.apply(&g).is_empty());
+    }
+
+    // --- Additional coverage: freeform_edge_count non-wait.human ---
+
+    #[test]
+    fn freeform_edge_count_rule_non_wait_human_ignored() {
+        let mut g = minimal_graph();
+        // Regular codergen node (box shape) with multiple freeform edges should not trigger
+        g.nodes.insert("a".to_string(), Node::new("a"));
+        g.nodes.insert("b".to_string(), Node::new("b"));
+        g.nodes.insert("work".to_string(), Node::new("work"));
+
+        let mut e1 = Edge::new("work", "a");
+        e1.attrs
+            .insert("freeform".to_string(), AttrValue::Boolean(true));
+        let mut e2 = Edge::new("work", "b");
+        e2.attrs
+            .insert("freeform".to_string(), AttrValue::Boolean(true));
+        g.edges.push(e1);
+        g.edges.push(e2);
+
+        let rule = FreeformEdgeCountRule;
+        let d = rule.apply(&g);
+        assert!(d.is_empty());
+    }
+
+    #[test]
+    fn freeform_edge_count_rule_zero_freeform() {
+        let mut g = minimal_graph();
+        let mut gate = Node::new("gate");
+        gate.attrs.insert(
+            "type".to_string(),
+            AttrValue::String("wait.human".to_string()),
+        );
+        g.nodes.insert("gate".to_string(), gate);
+        g.nodes.insert("a".to_string(), Node::new("a"));
+        g.edges.push(Edge::new("gate", "a"));
+
+        let rule = FreeformEdgeCountRule;
+        let d = rule.apply(&g);
+        assert!(d.is_empty());
+    }
+
+    // --- Additional coverage: stylesheet_syntax no stylesheet ---
+
+    #[test]
+    fn stylesheet_syntax_rule_no_stylesheet() {
+        let g = minimal_graph();
+        let rule = StylesheetSyntaxRule;
+        let d = rule.apply(&g);
+        assert!(d.is_empty());
+    }
+
+    // --- Additional coverage: type_known no type attr ---
+
+    #[test]
+    fn type_known_rule_no_type_attr() {
+        let g = minimal_graph();
+        let rule = TypeKnownRule;
+        let d = rule.apply(&g);
+        // Nodes without explicit type attr should not trigger warning
+        assert!(d.is_empty());
+    }
+
+    // --- Additional coverage: start_no_incoming no start node ---
+
+    #[test]
+    fn start_no_incoming_rule_no_start_node() {
+        let g = Graph::new("test");
+        let rule = StartNoIncomingRule;
+        let d = rule.apply(&g);
+        assert!(d.is_empty());
+    }
+
+    // --- Additional coverage: exit_no_outgoing by id variants ---
+
+    #[test]
+    fn exit_no_outgoing_rule_end_id_with_outgoing() {
+        let mut g = Graph::new("test");
+        let mut start = Node::new("start");
+        start
+            .attrs
+            .insert("shape".to_string(), AttrValue::String("Mdiamond".to_string()));
+        g.nodes.insert("start".to_string(), start);
+        let end_node = Node::new("end");
+        g.nodes.insert("end".to_string(), end_node);
+        g.edges.push(Edge::new("start", "end"));
+        g.edges.push(Edge::new("end", "start"));
+        let rule = ExitNoOutgoingRule;
+        let d = rule.apply(&g);
+        assert_eq!(d.len(), 1);
+        assert_eq!(d[0].severity, Severity::Error);
+        assert_eq!(d[0].node_id, Some("end".to_string()));
+    }
+
+    // --- condition_syntax: bare key (truthy check) is valid ---
+
+    #[test]
+    fn condition_syntax_rule_bare_key_truthy() {
+        let mut g = minimal_graph();
+        let mut edge = Edge::new("start", "exit");
+        edge.attrs.insert(
+            "condition".to_string(),
+            AttrValue::String("context.passed".to_string()),
+        );
+        g.edges = vec![edge];
+        let rule = ConditionSyntaxRule;
+        let d = rule.apply(&g);
+        assert!(d.is_empty());
+    }
+
+    // --- condition_syntax: context-prefixed clause with spaces is valid ---
+
+    #[test]
+    fn condition_syntax_rule_context_prefix_with_space() {
+        let mut g = minimal_graph();
+        let mut edge = Edge::new("start", "exit");
+        edge.attrs.insert(
+            "condition".to_string(),
+            AttrValue::String("context.foo bar".to_string()),
+        );
+        g.edges = vec![edge];
+        let rule = ConditionSyntaxRule;
+        let d = rule.apply(&g);
+        // context.-prefixed clauses are allowed even with spaces
+        assert!(d.is_empty());
+    }
+
+    // --- terminal_node: by "Exit" capitalized id ---
+
+    #[test]
+    fn terminal_node_rule_by_exit_capitalized_id() {
+        let mut g = Graph::new("test");
+        let node = Node::new("Exit");
+        g.nodes.insert("Exit".to_string(), node);
+        let rule = TerminalNodeRule;
+        let d = rule.apply(&g);
+        assert!(d.is_empty());
+    }
+
+    // --- edge_target_exists: both source and target missing ---
+
+    #[test]
+    fn edge_target_exists_rule_both_missing() {
+        let mut g = minimal_graph();
+        g.edges
+            .push(Edge::new("nonexistent_source", "nonexistent_target"));
+        let rule = EdgeTargetExistsRule;
+        let d = rule.apply(&g);
+        assert_eq!(d.len(), 2);
+        assert_eq!(d[0].severity, Severity::Error);
+        assert_eq!(d[1].severity, Severity::Error);
+    }
+
+    // --- reachability: multiple unreachable nodes ---
+
+    #[test]
+    fn reachability_rule_multiple_unreachable() {
+        let mut g = minimal_graph();
+        g.nodes
+            .insert("orphan_a".to_string(), Node::new("orphan_a"));
+        g.nodes
+            .insert("orphan_b".to_string(), Node::new("orphan_b"));
+        let rule = ReachabilityRule;
+        let d = rule.apply(&g);
+        assert_eq!(d.len(), 2);
+        assert_eq!(d[0].severity, Severity::Warning);
+        assert_eq!(d[1].severity, Severity::Warning);
+    }
+
+    // --- type_known: all known handler types are accepted ---
+
+    #[test]
+    fn type_known_rule_all_known_types_accepted() {
+        let mut g = minimal_graph();
+
+        let mut n1 = Node::new("n1");
+        n1.attrs.insert(
+            "type".to_string(),
+            AttrValue::String("codergen".to_string()),
+        );
+        g.nodes.insert("n1".to_string(), n1);
+
+        let mut n2 = Node::new("n2");
+        n2.attrs.insert(
+            "type".to_string(),
+            AttrValue::String("conditional".to_string()),
+        );
+        g.nodes.insert("n2".to_string(), n2);
+
+        let mut n3 = Node::new("n3");
+        n3.attrs.insert(
+            "type".to_string(),
+            AttrValue::String("parallel".to_string()),
+        );
+        g.nodes.insert("n3".to_string(), n3);
+
+        let mut n4 = Node::new("n4");
+        n4.attrs.insert(
+            "type".to_string(),
+            AttrValue::String("parallel.fan_in".to_string()),
+        );
+        g.nodes.insert("n4".to_string(), n4);
+
+        let mut n5 = Node::new("n5");
+        n5.attrs.insert(
+            "type".to_string(),
+            AttrValue::String("tool".to_string()),
+        );
+        g.nodes.insert("n5".to_string(), n5);
+
+        let mut n6 = Node::new("n6");
+        n6.attrs.insert(
+            "type".to_string(),
+            AttrValue::String("stack.manager_loop".to_string()),
+        );
+        g.nodes.insert("n6".to_string(), n6);
+
+        let rule = TypeKnownRule;
+        let d = rule.apply(&g);
+        assert!(d.is_empty());
+    }
+
+    // --- prompt_on_llm_nodes: explicit type=codergen without prompt/label ---
+
+    #[test]
+    fn prompt_on_llm_nodes_rule_explicit_codergen_type_no_prompt() {
+        let mut g = minimal_graph();
+        let mut node = Node::new("work");
+        node.attrs.insert(
+            "type".to_string(),
+            AttrValue::String("codergen".to_string()),
+        );
+        // No shape=box, but explicit type=codergen
+        node.attrs.insert(
+            "shape".to_string(),
+            AttrValue::String("diamond".to_string()),
+        );
+        g.nodes.insert("work".to_string(), node);
+        let rule = PromptOnLlmNodesRule;
+        let d = rule.apply(&g);
+        assert_eq!(d.len(), 1);
+        assert_eq!(d[0].severity, Severity::Warning);
+    }
+
+    // --- goal_gate_has_retry: satisfied by graph-level fallback_retry_target ---
+
+    #[test]
+    fn goal_gate_has_retry_rule_with_graph_fallback_retry_target() {
+        let mut g = minimal_graph();
+        let mut node = Node::new("work");
+        node.attrs
+            .insert("goal_gate".to_string(), AttrValue::Boolean(true));
+        g.nodes.insert("work".to_string(), node);
+        g.attrs.insert(
+            "fallback_retry_target".to_string(),
+            AttrValue::String("start".to_string()),
+        );
+        let rule = GoalGateHasRetryRule;
+        let d = rule.apply(&g);
+        assert!(d.is_empty());
+    }
+
+    // --- freeform_edge_count: with explicit type=wait.human ---
+
+    #[test]
+    fn freeform_edge_count_rule_explicit_type_two_freeform() {
+        let mut g = minimal_graph();
+        let mut gate = Node::new("gate");
+        gate.attrs.insert(
+            "type".to_string(),
+            AttrValue::String("wait.human".to_string()),
+        );
+        g.nodes.insert("gate".to_string(), gate);
+        g.nodes.insert("a".to_string(), Node::new("a"));
+        g.nodes.insert("b".to_string(), Node::new("b"));
+
+        let mut e1 = Edge::new("gate", "a");
+        e1.attrs
+            .insert("freeform".to_string(), AttrValue::Boolean(true));
+        let mut e2 = Edge::new("gate", "b");
+        e2.attrs
+            .insert("freeform".to_string(), AttrValue::Boolean(true));
+        g.edges.push(e1);
+        g.edges.push(e2);
+
+        let rule = FreeformEdgeCountRule;
+        let d = rule.apply(&g);
+        assert_eq!(d.len(), 1);
+        assert_eq!(d[0].severity, Severity::Error);
+    }
+
+    // --- exit_no_outgoing: by "Exit" capitalized id ---
+
+    #[test]
+    fn exit_no_outgoing_rule_exit_capitalized_with_outgoing() {
+        let mut g = Graph::new("test");
+        let mut start = Node::new("start");
+        start
+            .attrs
+            .insert("shape".to_string(), AttrValue::String("Mdiamond".to_string()));
+        g.nodes.insert("start".to_string(), start);
+        let exit_node = Node::new("Exit");
+        g.nodes.insert("Exit".to_string(), exit_node);
+        g.edges.push(Edge::new("start", "Exit"));
+        g.edges.push(Edge::new("Exit", "start"));
+        let rule = ExitNoOutgoingRule;
+        let d = rule.apply(&g);
+        assert_eq!(d.len(), 1);
+        assert_eq!(d[0].severity, Severity::Error);
+        assert_eq!(d[0].node_id, Some("Exit".to_string()));
+    }
+
+    // --- exit_no_outgoing: by "End" capitalized id ---
+
+    #[test]
+    fn exit_no_outgoing_rule_end_capitalized_with_outgoing() {
+        let mut g = Graph::new("test");
+        let mut start = Node::new("start");
+        start
+            .attrs
+            .insert("shape".to_string(), AttrValue::String("Mdiamond".to_string()));
+        g.nodes.insert("start".to_string(), start);
+        let end_node = Node::new("End");
+        g.nodes.insert("End".to_string(), end_node);
+        g.edges.push(Edge::new("start", "End"));
+        g.edges.push(Edge::new("End", "start"));
+        let rule = ExitNoOutgoingRule;
+        let d = rule.apply(&g);
+        assert_eq!(d.len(), 1);
+        assert_eq!(d[0].severity, Severity::Error);
+        assert_eq!(d[0].node_id, Some("End".to_string()));
+    }
+
+    // --- stylesheet_syntax: valid multi-rule stylesheet ---
+
+    #[test]
+    fn stylesheet_syntax_rule_multi_rule_valid() {
+        let mut g = minimal_graph();
+        g.attrs.insert(
+            "model_stylesheet".to_string(),
+            AttrValue::String(
+                "* { llm_model: gpt-4; } .fast { llm_model: gpt-3.5; reasoning_effort: low; }"
+                    .to_string(),
+            ),
+        );
+        let rule = StylesheetSyntaxRule;
+        let d = rule.apply(&g);
+        assert!(d.is_empty());
+    }
+
+    // --- fidelity_valid: multiple simultaneous violations ---
+
+    #[test]
+    fn fidelity_valid_rule_node_and_edge_and_graph_all_invalid() {
+        let mut g = minimal_graph();
+
+        let mut node = Node::new("work");
+        node.attrs.insert(
+            "fidelity".to_string(),
+            AttrValue::String("invalid_node".to_string()),
+        );
+        g.nodes.insert("work".to_string(), node);
+
+        let mut edge = Edge::new("start", "exit");
+        edge.attrs.insert(
+            "fidelity".to_string(),
+            AttrValue::String("invalid_edge".to_string()),
+        );
+        g.edges = vec![edge];
+
+        g.attrs.insert(
+            "default_fidelity".to_string(),
+            AttrValue::String("invalid_graph".to_string()),
+        );
+
+        let rule = FidelityValidRule;
+        let d = rule.apply(&g);
+        assert_eq!(d.len(), 3);
+    }
+
+    // --- retry_target_exists: both retry_target and fallback on same node, both invalid ---
+
+    #[test]
+    fn retry_target_exists_rule_both_node_targets_invalid() {
+        let mut g = minimal_graph();
+        let mut node = Node::new("work");
+        node.attrs.insert(
+            "retry_target".to_string(),
+            AttrValue::String("missing_a".to_string()),
+        );
+        node.attrs.insert(
+            "fallback_retry_target".to_string(),
+            AttrValue::String("missing_b".to_string()),
+        );
+        g.nodes.insert("work".to_string(), node);
+        let rule = RetryTargetExistsRule;
+        let d = rule.apply(&g);
+        assert_eq!(d.len(), 2);
+        assert_eq!(d[0].severity, Severity::Warning);
+        assert_eq!(d[1].severity, Severity::Warning);
+    }
+
+    // --- retry_target_exists: both graph-level targets invalid ---
+
+    #[test]
+    fn retry_target_exists_rule_both_graph_targets_invalid() {
+        let mut g = minimal_graph();
+        g.attrs.insert(
+            "retry_target".to_string(),
+            AttrValue::String("missing_a".to_string()),
+        );
+        g.attrs.insert(
+            "fallback_retry_target".to_string(),
+            AttrValue::String("missing_b".to_string()),
+        );
+        let rule = RetryTargetExistsRule;
+        let d = rule.apply(&g);
+        assert_eq!(d.len(), 2);
+        assert_eq!(d[0].severity, Severity::Warning);
+        assert_eq!(d[1].severity, Severity::Warning);
+    }
+
+    // --- start_no_incoming: multiple incoming edges ---
+
+    #[test]
+    fn start_no_incoming_rule_multiple_incoming() {
+        let mut g = minimal_graph();
+        g.nodes.insert("a".to_string(), Node::new("a"));
+        g.edges.push(Edge::new("exit", "start"));
+        g.edges.push(Edge::new("a", "start"));
+        let rule = StartNoIncomingRule;
+        let d = rule.apply(&g);
+        assert_eq!(d.len(), 1);
+        assert_eq!(d[0].severity, Severity::Error);
+        assert!(d[0].message.contains("2"));
+    }
+
+    // --- prompt_on_llm_nodes: empty prompt string still triggers ---
+
+    #[test]
+    fn prompt_on_llm_nodes_rule_empty_prompt_no_label() {
+        let mut g = minimal_graph();
+        let mut node = Node::new("work");
+        node.attrs.insert(
+            "prompt".to_string(),
+            AttrValue::String(String::new()),
+        );
+        g.nodes.insert("work".to_string(), node);
+        let rule = PromptOnLlmNodesRule;
+        let d = rule.apply(&g);
+        assert_eq!(d.len(), 1);
+        assert_eq!(d[0].severity, Severity::Warning);
+    }
+
+    // --- prompt_on_llm_nodes: empty label string still triggers ---
+
+    #[test]
+    fn prompt_on_llm_nodes_rule_empty_label_no_prompt() {
+        let mut g = minimal_graph();
+        let mut node = Node::new("work");
+        node.attrs.insert(
+            "label".to_string(),
+            AttrValue::String(String::new()),
+        );
+        g.nodes.insert("work".to_string(), node);
+        let rule = PromptOnLlmNodesRule;
+        let d = rule.apply(&g);
+        assert_eq!(d.len(), 1);
+        assert_eq!(d[0].severity, Severity::Warning);
+    }
+
+    // --- condition_syntax: no condition attribute at all ---
+
+    #[test]
+    fn condition_syntax_rule_no_condition_attr() {
+        let g = minimal_graph();
+        let rule = ConditionSyntaxRule;
+        let d = rule.apply(&g);
+        assert!(d.is_empty());
+    }
+
+    // --- freeform_edge_count: freeform=false does not count ---
+
+    #[test]
+    fn freeform_edge_count_rule_freeform_false_ignored() {
+        let mut g = minimal_graph();
+        let mut gate = Node::new("gate");
+        gate.attrs.insert(
+            "shape".to_string(),
+            AttrValue::String("hexagon".to_string()),
+        );
+        g.nodes.insert("gate".to_string(), gate);
+        g.nodes.insert("a".to_string(), Node::new("a"));
+        g.nodes.insert("b".to_string(), Node::new("b"));
+
+        let mut e1 = Edge::new("gate", "a");
+        e1.attrs
+            .insert("freeform".to_string(), AttrValue::Boolean(false));
+        let mut e2 = Edge::new("gate", "b");
+        e2.attrs
+            .insert("freeform".to_string(), AttrValue::Boolean(false));
+        g.edges.push(e1);
+        g.edges.push(e2);
+
+        let rule = FreeformEdgeCountRule;
+        let d = rule.apply(&g);
+        assert!(d.is_empty());
+    }
+
+    // --- reachability: chain of reachable nodes ---
+
+    #[test]
+    fn reachability_rule_chain_all_reachable() {
+        let mut g = minimal_graph();
+        g.nodes.insert("a".to_string(), Node::new("a"));
+        g.nodes.insert("b".to_string(), Node::new("b"));
+        g.edges = vec![
+            Edge::new("start", "a"),
+            Edge::new("a", "b"),
+            Edge::new("b", "exit"),
+        ];
+        let rule = ReachabilityRule;
+        let d = rule.apply(&g);
+        assert!(d.is_empty());
+    }
+
+    // --- edge_target_exists: no edges at all ---
+
+    #[test]
+    fn edge_target_exists_rule_no_edges() {
+        let mut g = minimal_graph();
+        g.edges.clear();
+        let rule = EdgeTargetExistsRule;
+        let d = rule.apply(&g);
+        assert!(d.is_empty());
+    }
+
+    // --- goal_gate_has_retry: goal_gate=false explicitly ---
+
+    #[test]
+    fn goal_gate_has_retry_rule_explicit_false() {
+        let mut g = minimal_graph();
+        let mut node = Node::new("work");
+        node.attrs
+            .insert("goal_gate".to_string(), AttrValue::Boolean(false));
+        g.nodes.insert("work".to_string(), node);
+        let rule = GoalGateHasRetryRule;
+        let d = rule.apply(&g);
+        assert!(d.is_empty());
+    }
+
+    // --- stylesheet_syntax: empty string stylesheet ---
+
+    #[test]
+    fn stylesheet_syntax_rule_empty_string() {
+        let mut g = minimal_graph();
+        g.attrs.insert(
+            "model_stylesheet".to_string(),
+            AttrValue::String(String::new()),
+        );
+        let rule = StylesheetSyntaxRule;
+        let d = rule.apply(&g);
+        assert!(d.is_empty());
+    }
+
+    // --- type_known: start and exit types from shape are not flagged ---
+
+    #[test]
+    fn type_known_rule_start_exit_shapes_no_warning() {
+        // The minimal_graph has start (Mdiamond) and exit (Msquare), which resolve
+        // to known handler types "start" and "exit" via shape mapping, not explicit type.
+        // Since they have no explicit `type` attr, the rule should not flag them.
+        let g = minimal_graph();
+        let rule = TypeKnownRule;
+        let d = rule.apply(&g);
+        assert!(d.is_empty());
+    }
 }

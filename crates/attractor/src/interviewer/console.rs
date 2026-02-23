@@ -66,7 +66,7 @@ impl Interviewer for ConsoleInterviewer {
         );
 
         match question.question_type {
-            QuestionType::MultipleChoice => {
+            QuestionType::MultipleChoice | QuestionType::MultiSelect => {
                 for (i, opt) in question.options.iter().enumerate() {
                     eprintln!(
                         "  {dim}[{reset}{bold}{}{reset}{dim}]{reset} {} - {}",
