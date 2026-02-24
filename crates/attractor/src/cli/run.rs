@@ -1,4 +1,3 @@
-use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
@@ -60,7 +59,11 @@ pub async fn run_command(args: RunArgs, styles: &'static Styles) -> anyhow::Resu
 
     // 2. Create logs directory
     let logs_dir = args.logs_dir.unwrap_or_else(|| {
-        PathBuf::from(format!(
+        let base = dirs::home_dir()
+            .expect("could not determine home directory")
+            .join(".attractor")
+            .join("logs");
+        base.join(format!(
             "attractor-run-{}",
             Local::now().format("%Y%m%d-%H%M%S")
         ))

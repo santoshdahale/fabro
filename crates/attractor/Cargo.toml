@@ -37,6 +37,7 @@ async-trait.workspace = true
 futures.workspace = true
 chrono = { workspace = true, features = ["serde"] }
 nom = "7"
+dirs = "6"
 dialoguer.workspace = true
 axum = { version = "0.8", optional = true }
 tower = { version = "0.5", optional = true }
