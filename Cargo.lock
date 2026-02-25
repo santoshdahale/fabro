@@ -207,6 +207,7 @@ dependencies = [
  "nom",
  "predicates",
  "rand 0.8.5",
+ "redact",
  "serde",
  "serde_json",
  "tempfile",

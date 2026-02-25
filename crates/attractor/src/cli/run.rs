@@ -119,6 +119,7 @@ pub async fn run_command(args: RunArgs, styles: &'static Styles) -> anyhow::Resu
             });
             // Append to progress.ndjson
             if let Ok(line) = serde_json::to_string(&envelope) {
+                let line = redact::redact_jsonl_line(&line);
                 use std::io::Write;
                 if let Ok(mut f) = std::fs::OpenOptions::new()
                     .create(true)
@@ -130,6 +131,7 @@ pub async fn run_command(args: RunArgs, styles: &'static Styles) -> anyhow::Resu
             }
             // Overwrite live.json
             if let Ok(pretty) = serde_json::to_string_pretty(&envelope) {
+                let pretty = redact::redact_jsonl_line(&pretty);
                 let _ = std::fs::write(&live_path, pretty);
             }
         });
@@ -328,5 +330,49 @@ pub async fn run_command(args: RunArgs, styles: &'static Styles) -> anyhow::Resu
         _ => {
             std::process::exit(1);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn redact_removes_aws_key_from_compact_json() {
+        let envelope = serde_json::json!({
+            "timestamp": "2025-01-01T00:00:00.000Z",
+            "run_id": "abc-123",
+            "event": {
+                "type": "agent",
+                "content": "My key is AKIAYRWQG5EJLPZLBYNP and secret is wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"
+            }
+        });
+        let compact = serde_json::to_string(&envelope).unwrap();
+        let redacted = redact::redact_jsonl_line(&compact);
+
+        assert!(!redacted.contains("AKIAYRWQG5EJLPZLBYNP"));
+        assert!(redacted.contains("REDACTED"));
+
+        let parsed: serde_json::Value = serde_json::from_str(&redacted).unwrap();
+        assert_eq!(parsed["run_id"], "abc-123");
+        assert_eq!(parsed["timestamp"], "2025-01-01T00:00:00.000Z");
+    }
+
+    #[test]
+    fn redact_removes_aws_key_from_pretty_json() {
+        let envelope = serde_json::json!({
+            "timestamp": "2025-01-01T00:00:00.000Z",
+            "run_id": "def-456",
+            "event": {
+                "type": "agent",
+                "content": "Credentials: AKIAYRWQG5EJLPZLBYNP"
+            }
+        });
+        let pretty = serde_json::to_string_pretty(&envelope).unwrap();
+        let redacted = redact::redact_jsonl_line(&pretty);
+
+        assert!(!redacted.contains("AKIAYRWQG5EJLPZLBYNP"));
+        assert!(redacted.contains("REDACTED"));
+
+        let parsed: serde_json::Value = serde_json::from_str(&redacted).unwrap();
+        assert_eq!(parsed["run_id"], "def-456");
     }
 }

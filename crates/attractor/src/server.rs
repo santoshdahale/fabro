@@ -366,6 +366,7 @@ async fn get_events(
     let stream = BroadcastStream::new(rx).filter_map(|result| match result {
         Ok(event) => {
             let data = serde_json::to_string(&event).unwrap_or_default();
+            let data = redact::redact_jsonl_line(&data);
             Some(Ok::<Event, std::convert::Infallible>(
                 Event::default().data(data),
             ))

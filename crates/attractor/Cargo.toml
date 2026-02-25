@@ -27,6 +27,7 @@ dotenvy.workspace = true
 agent = { path = "../agent" }
 terminal = { path = "../terminal" }
 llm = { path = "../llm" }
+redact = { path = "../redact" }
 thiserror.workspace = true
 serde.workspace = true
 serde_json.workspace = true
