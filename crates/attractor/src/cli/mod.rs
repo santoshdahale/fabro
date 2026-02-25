@@ -316,6 +316,21 @@ pub fn format_event_summary(event: &PipelineEvent, styles: &Styles) -> String {
         PipelineEvent::TurnLimitReached { stage } => {
             format!("[TURN_LIMIT_REACHED] stage={stage}")
         }
+        PipelineEvent::CompactionStarted {
+            stage,
+            estimated_tokens,
+            context_window_size,
+        } => {
+            format!("[COMPACTION_STARTED] stage={stage} estimated_tokens={estimated_tokens} context_window={context_window_size}")
+        }
+        PipelineEvent::CompactionCompleted {
+            stage,
+            original_turn_count,
+            preserved_turn_count,
+            summary_token_estimate,
+        } => {
+            format!("[COMPACTION_COMPLETED] stage={stage} original_turns={original_turn_count} preserved_turns={preserved_turn_count} summary_tokens={summary_token_estimate}")
+        }
     };
     format!("{dim}{body}{reset}", dim = styles.dim, reset = styles.reset)
 }
@@ -492,6 +507,21 @@ pub fn format_event_detail(event: &PipelineEvent, styles: &Styles) -> String {
         }
         PipelineEvent::TurnLimitReached { stage } => {
             format!("{d}── TURN_LIMIT_REACHED ───────────────────────{r}\n  {d}stage:{r} {stage}\n")
+        }
+        PipelineEvent::CompactionStarted {
+            stage,
+            estimated_tokens,
+            context_window_size,
+        } => {
+            format!("{d}── COMPACTION_STARTED ───────────────────────{r}\n  {d}stage:{r}               {stage}\n  {d}estimated_tokens:{r}    {estimated_tokens}\n  {d}context_window_size:{r} {context_window_size}\n")
+        }
+        PipelineEvent::CompactionCompleted {
+            stage,
+            original_turn_count,
+            preserved_turn_count,
+            summary_token_estimate,
+        } => {
+            format!("{d}── COMPACTION_COMPLETED ─────────────────────{r}\n  {d}stage:{r}                  {stage}\n  {d}original_turn_count:{r}    {original_turn_count}\n  {d}preserved_turn_count:{r}   {preserved_turn_count}\n  {d}summary_token_estimate:{r} {summary_token_estimate}\n")
         }
     }
 }

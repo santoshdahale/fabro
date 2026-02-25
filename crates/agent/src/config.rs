@@ -21,6 +21,9 @@ pub struct SessionConfig {
     pub git_root: Option<String>,
     pub user_instructions: Option<String>,
     pub tool_approval: Option<ToolApprovalFn>,
+    pub enable_context_compaction: bool,
+    pub compaction_threshold_percent: usize,
+    pub compaction_preserve_turns: usize,
 }
 
 impl std::fmt::Debug for SessionConfig {
@@ -48,6 +51,9 @@ impl std::fmt::Debug for SessionConfig {
                 "tool_approval",
                 &self.tool_approval.as_ref().map(|_| "<fn>"),
             )
+            .field("enable_context_compaction", &self.enable_context_compaction)
+            .field("compaction_threshold_percent", &self.compaction_threshold_percent)
+            .field("compaction_preserve_turns", &self.compaction_preserve_turns)
             .finish()
     }
 }
@@ -68,6 +74,9 @@ impl Default for SessionConfig {
             git_root: None,
             user_instructions: None,
             tool_approval: None,
+            enable_context_compaction: true,
+            compaction_threshold_percent: 80,
+            compaction_preserve_turns: 6,
         }
     }
 }
@@ -90,6 +99,14 @@ mod tests {
         assert_eq!(config.loop_detection_window, 10);
         assert_eq!(config.max_subagent_depth, 1);
         assert!(config.user_instructions.is_none());
+    }
+
+    #[test]
+    fn default_config_has_compaction_enabled() {
+        let config = SessionConfig::default();
+        assert!(config.enable_context_compaction);
+        assert_eq!(config.compaction_threshold_percent, 80);
+        assert_eq!(config.compaction_preserve_turns, 6);
     }
 
     #[test]

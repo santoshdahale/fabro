@@ -376,8 +376,18 @@ impl Session {
                 },
             );
 
-            // Check context window usage
-            self.check_context_usage(&system_prompt);
+            // Check context window usage and compact if needed
+            let over_threshold = self.check_context_usage(&system_prompt);
+            if over_threshold && self.config.enable_context_compaction {
+                if let Err(e) = self.compact_context(&system_prompt).await {
+                    self.event_emitter.emit(
+                        self.id.clone(),
+                        AgentEvent::Error {
+                            error: format!("Context compaction failed: {e}"),
+                        },
+                    );
+                }
+            }
 
             // If no tool calls, natural completion
             if tool_calls.is_empty() {
@@ -420,6 +430,69 @@ impl Session {
                     .emit(self.id.clone(), AgentEvent::LoopDetected);
             }
         }
+
+        Ok(())
+    }
+
+    async fn compact_context(&mut self, system_prompt: &str) -> Result<(), AgentError> {
+        let estimated_tokens = self.estimate_token_count(system_prompt);
+        let context_window = self.provider_profile.context_window_size();
+        let original_turn_count = self.history.turns().len();
+
+        self.event_emitter.emit(
+            self.id.clone(),
+            AgentEvent::CompactionStarted {
+                estimated_tokens,
+                context_window_size: context_window,
+            },
+        );
+
+        let preserve_count = self.config.compaction_preserve_turns;
+
+        // Determine turns to summarize
+        if original_turn_count <= preserve_count {
+            return Ok(());
+        }
+        let turns_to_summarize = &self.history.turns()[..original_turn_count - preserve_count];
+        let rendered = render_turns_for_summary(turns_to_summarize);
+
+        // Build summarization request
+        let summary_request = Request {
+            model: self.provider_profile.model().to_string(),
+            messages: vec![
+                Message::system("You are a conversation summarizer. Produce a concise summary of the conversation below. Preserve key decisions, findings, file paths, and action items. Be thorough but brief.".to_string()),
+                Message::user(rendered),
+            ],
+            provider: Some(self.provider_profile.id().to_string()),
+            tools: None,
+            tool_choice: None,
+            response_format: None,
+            temperature: Some(0.0),
+            top_p: None,
+            max_tokens: Some(4096),
+            stop_sequences: None,
+            reasoning_effort: None,
+            metadata: None,
+            provider_options: None,
+        };
+
+        let response = self.llm_client.complete(&summary_request).await
+            .map_err(AgentError::Llm)?;
+
+        let summary_text = response.text();
+        let summary_content = format!("[Context Summary]\n{summary_text}");
+        let summary_token_estimate = summary_content.len() / 4;
+
+        self.history.compact(preserve_count, summary_content);
+
+        self.event_emitter.emit(
+            self.id.clone(),
+            AgentEvent::CompactionCompleted {
+                original_turn_count,
+                preserved_turn_count: preserve_count,
+                summary_token_estimate,
+            },
+        );
 
         Ok(())
     }
@@ -643,10 +716,10 @@ impl Session {
         total_chars / 4 // rough estimate: ~4 chars per token
     }
 
-    fn check_context_usage(&self, system_prompt: &str) {
+    fn check_context_usage(&self, system_prompt: &str) -> bool {
         let estimated_tokens = self.estimate_token_count(system_prompt);
         let context_window = self.provider_profile.context_window_size();
-        let threshold = context_window * 80 / 100;
+        let threshold = context_window * self.config.compaction_threshold_percent / 100;
 
         if estimated_tokens > threshold {
             self.event_emitter.emit(
@@ -657,6 +730,9 @@ impl Session {
                     usage_percent: estimated_tokens * 100 / context_window,
                 },
             );
+            true
+        } else {
+            false
         }
     }
 }
@@ -754,6 +830,53 @@ const fn is_auth_error(err: &SdkError) -> bool {
     )
 }
 
+fn render_turns_for_summary(turns: &[Turn]) -> String {
+    let mut out = String::new();
+    for turn in turns {
+        match turn {
+            Turn::User { content, .. } => {
+                out.push_str(&format!("User: {content}\n"));
+            }
+            Turn::Assistant {
+                content,
+                tool_calls,
+                ..
+            } => {
+                if !content.is_empty() {
+                    out.push_str(&format!("Assistant: {content}\n"));
+                }
+                for tc in tool_calls {
+                    let args_str = tc.arguments.to_string();
+                    let truncated = if args_str.len() > 500 {
+                        format!("{}...", &args_str[..500])
+                    } else {
+                        args_str
+                    };
+                    out.push_str(&format!("[Tool call: {}] {truncated}\n", tc.name));
+                }
+            }
+            Turn::ToolResults { results, .. } => {
+                for r in results {
+                    let content_str = r.content.to_string();
+                    let truncated = if content_str.len() > 500 {
+                        format!("{}...", &content_str[..500])
+                    } else {
+                        content_str
+                    };
+                    out.push_str(&format!("[Tool result: {}] {truncated}\n", r.tool_call_id));
+                }
+            }
+            Turn::System { content, .. } => {
+                out.push_str(&format!("System: {content}\n"));
+            }
+            Turn::Steering { content, .. } => {
+                out.push_str(&format!("Steering: {content}\n"));
+            }
+        }
+    }
+    out
+}
+
 fn validate_tool_args(schema: &serde_json::Value, args: &serde_json::Value) -> Result<(), String> {
     // Skip validation for empty/trivial schemas
     if schema.is_null() {
@@ -786,8 +909,9 @@ mod tests {
     use crate::test_support::*;
     use crate::tool_registry::{RegisteredTool, ToolRegistry};
     use llm::error::ProviderErrorDetail;
-    use llm::provider::ProviderAdapter;
-    use llm::types::ToolDefinition;
+    use llm::provider::{ProviderAdapter, StreamEventStream};
+    use llm::types::{Response, ToolDefinition};
+    use std::sync::atomic::{AtomicUsize, Ordering};
 
     // --- Tests ---
 
@@ -1369,6 +1493,88 @@ mod tests {
         assert!(!found_warning);
     }
 
+    #[test]
+    fn render_turns_produces_labeled_text() {
+        use llm::types::{ToolCall, ToolResult, Usage};
+
+        let turns = vec![
+            Turn::User {
+                content: "Hello".into(),
+                timestamp: SystemTime::now(),
+            },
+            Turn::Assistant {
+                content: "Let me check".into(),
+                tool_calls: vec![ToolCall::new("c1", "read_file", serde_json::json!({"path": "foo.rs"}))],
+                reasoning: None,
+                provider_parts: vec![],
+                usage: Usage::default(),
+                response_id: "resp_1".into(),
+                timestamp: SystemTime::now(),
+            },
+            Turn::ToolResults {
+                results: vec![ToolResult {
+                    tool_call_id: "c1".into(),
+                    content: serde_json::json!("file contents here"),
+                    is_error: false,
+                    image_data: None,
+                    image_media_type: None,
+                }],
+                timestamp: SystemTime::now(),
+            },
+        ];
+        let rendered = render_turns_for_summary(&turns);
+        assert!(rendered.contains("User:"));
+        assert!(rendered.contains("Hello"));
+        assert!(rendered.contains("Assistant:"));
+        assert!(rendered.contains("Let me check"));
+        assert!(rendered.contains("[Tool call: read_file]"));
+        assert!(rendered.contains("[Tool result: c1]"));
+    }
+
+    #[test]
+    fn render_turns_truncates_long_tool_output() {
+        use llm::types::{ToolResult, Usage};
+
+        let long_output = "x".repeat(1000);
+        let turns = vec![Turn::ToolResults {
+            results: vec![ToolResult {
+                tool_call_id: "c1".into(),
+                content: serde_json::json!(long_output),
+                is_error: false,
+                image_data: None,
+                image_media_type: None,
+            }],
+            timestamp: SystemTime::now(),
+        }];
+        let rendered = render_turns_for_summary(&turns);
+        // Should be truncated to 500 chars + "..."
+        assert!(rendered.len() < 1000);
+        assert!(rendered.contains("..."));
+    }
+
+    #[tokio::test]
+    async fn check_context_usage_returns_true_over_threshold() {
+        let large_input = "x".repeat(400);
+        let responses = vec![text_response("OK")];
+
+        let provider = Arc::new(MockLlmProvider::new(responses));
+        let client = make_client(provider).await;
+        let registry = ToolRegistry::new();
+        let profile = Arc::new(TestProfile::parallel_with_context_window(registry, 100));
+        let env = Arc::new(MockExecutionEnvironment::default());
+        let config = SessionConfig {
+            enable_context_compaction: false, // disable compaction to isolate check
+            ..Default::default()
+        };
+        let mut session = Session::new(client, profile, env, config);
+
+        // Push a user turn to populate history
+        session.process_input(&large_input).await.unwrap();
+
+        let system_prompt = "You are a test assistant.";
+        assert!(session.check_context_usage(system_prompt));
+    }
+
     #[tokio::test]
     async fn invalid_tool_args_returns_validation_error() {
         let mut registry = ToolRegistry::new();
@@ -1710,5 +1916,160 @@ mod tests {
 
         let result = session.process_input("Hello").await;
         assert!(matches!(result, Err(AgentError::Llm(SdkError::Stream { .. }))));
+    }
+
+    #[tokio::test]
+    async fn compaction_triggered_when_over_threshold() {
+        // Tiny context window to trigger compaction
+        // Responses: [0] conversation response (stream), [1] summarization (complete), [2] unused fallback
+        let responses = vec![
+            text_response("OK"),
+            text_response("Here is the summary of the conversation so far."),
+            text_response("fallback"),
+        ];
+
+        let large_input = "x".repeat(400);
+
+        let provider = Arc::new(MockLlmProvider::new(responses));
+        let client = make_client(provider).await;
+        let registry = ToolRegistry::new();
+        let profile = Arc::new(TestProfile::parallel_with_context_window(registry, 100));
+        let env = Arc::new(MockExecutionEnvironment::default());
+        let config = SessionConfig {
+            enable_context_compaction: true,
+            compaction_preserve_turns: 1,
+            ..Default::default()
+        };
+        let mut session = Session::new(client, profile, env, config);
+        let mut rx = session.subscribe();
+
+        session.process_input(&large_input).await.unwrap();
+
+        let mut found_started = false;
+        let mut found_completed = false;
+        while let Ok(event) = rx.try_recv() {
+            match &event.event {
+                AgentEvent::CompactionStarted { .. } => found_started = true,
+                AgentEvent::CompactionCompleted { .. } => found_completed = true,
+                _ => {}
+            }
+        }
+        assert!(found_started, "CompactionStarted event should be emitted");
+        assert!(found_completed, "CompactionCompleted event should be emitted");
+
+        // History should have been compacted: summary turn + preserved turns
+        let turns = session.history().turns();
+        assert!(
+            turns.iter().any(|t| matches!(t, Turn::System { content, .. } if content.contains("[Context Summary]"))),
+            "Should contain a summary system turn"
+        );
+    }
+
+    #[tokio::test]
+    async fn compaction_not_triggered_when_disabled() {
+        let large_input = "x".repeat(400);
+        let responses = vec![text_response("OK")];
+
+        let provider = Arc::new(MockLlmProvider::new(responses));
+        let client = make_client(provider).await;
+        let registry = ToolRegistry::new();
+        let profile = Arc::new(TestProfile::parallel_with_context_window(registry, 100));
+        let env = Arc::new(MockExecutionEnvironment::default());
+        let config = SessionConfig {
+            enable_context_compaction: false,
+            ..Default::default()
+        };
+        let mut session = Session::new(client, profile, env, config);
+        let mut rx = session.subscribe();
+
+        session.process_input(&large_input).await.unwrap();
+
+        let mut found_compaction = false;
+        while let Ok(event) = rx.try_recv() {
+            if matches!(event.event, AgentEvent::CompactionStarted { .. } | AgentEvent::CompactionCompleted { .. }) {
+                found_compaction = true;
+            }
+        }
+        assert!(!found_compaction, "No compaction events when disabled");
+    }
+
+    #[tokio::test]
+    async fn compaction_failure_is_non_fatal() {
+        // Response [0] = conversation response (stream), [1] will be used for summarization (complete) but we
+        // need it to error. We'll use a special provider that errors on complete() but succeeds on stream().
+
+        struct StreamOnlyProvider {
+            responses: Vec<Response>,
+            call_index: AtomicUsize,
+        }
+
+        #[async_trait::async_trait]
+        impl ProviderAdapter for StreamOnlyProvider {
+            fn name(&self) -> &'static str { "mock" }
+
+            async fn complete(&self, _request: &Request) -> Result<Response, SdkError> {
+                Err(SdkError::Stream { message: "summarization failed".into() })
+            }
+
+            async fn stream(&self, _request: &Request) -> Result<StreamEventStream, SdkError> {
+                let idx = self.call_index.fetch_add(1, Ordering::SeqCst);
+                let response = if idx < self.responses.len() {
+                    self.responses[idx].clone()
+                } else {
+                    self.responses[self.responses.len() - 1].clone()
+                };
+                // Reuse response_to_stream helper from test_support
+                let mut events: Vec<Result<StreamEvent, SdkError>> = Vec::new();
+                let text = response.text();
+                if !text.is_empty() {
+                    events.push(Ok(StreamEvent::text_delta(text, None)));
+                }
+                for part in &response.message.content {
+                    if let llm::types::ContentPart::ToolCall(tc) = part {
+                        events.push(Ok(StreamEvent::ToolCallEnd { tool_call: tc.clone() }));
+                    }
+                }
+                events.push(Ok(StreamEvent::finish(
+                    response.finish_reason.clone(),
+                    response.usage.clone(),
+                    response,
+                )));
+                Ok(Box::pin(futures::stream::iter(events)))
+            }
+        }
+
+        let large_input = "x".repeat(400);
+        let responses = vec![text_response("OK")];
+
+        let provider = Arc::new(StreamOnlyProvider {
+            responses,
+            call_index: AtomicUsize::new(0),
+        });
+        let client = make_client(provider as Arc<dyn ProviderAdapter>).await;
+        let registry = ToolRegistry::new();
+        let profile = Arc::new(TestProfile::parallel_with_context_window(registry, 100));
+        let env = Arc::new(MockExecutionEnvironment::default());
+        let config = SessionConfig {
+            enable_context_compaction: true,
+            compaction_preserve_turns: 1,
+            ..Default::default()
+        };
+        let mut session = Session::new(client, profile, env, config);
+        let mut rx = session.subscribe();
+
+        // Should not return an error even though compaction fails
+        let result = session.process_input(&large_input).await;
+        assert!(result.is_ok(), "Session should continue despite compaction failure");
+
+        // Should emit an Error event for the failed compaction
+        let mut found_error = false;
+        while let Ok(event) = rx.try_recv() {
+            if let AgentEvent::Error { error } = &event.event {
+                if error.contains("compaction") || error.contains("summarization") {
+                    found_error = true;
+                }
+            }
+        }
+        assert!(found_error, "Should emit Error event for failed compaction");
     }
 }

@@ -84,6 +84,15 @@ pub enum AgentEvent {
     LoopDetected,
     TurnLimitReached,
     SteeringInjected,
+    CompactionStarted {
+        estimated_tokens: usize,
+        context_window_size: usize,
+    },
+    CompactionCompleted {
+        original_turn_count: usize,
+        preserved_turn_count: usize,
+        summary_token_estimate: usize,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -106,6 +115,22 @@ mod tests {
         };
         assert!(matches!(event.event, AgentEvent::SessionStarted));
         assert_eq!(event.session_id, "sess_1");
+    }
+
+    #[test]
+    fn compaction_events_constructible() {
+        let started = AgentEvent::CompactionStarted {
+            estimated_tokens: 5000,
+            context_window_size: 8000,
+        };
+        assert!(matches!(started, AgentEvent::CompactionStarted { estimated_tokens: 5000, .. }));
+
+        let completed = AgentEvent::CompactionCompleted {
+            original_turn_count: 20,
+            preserved_turn_count: 6,
+            summary_token_estimate: 500,
+        };
+        assert!(matches!(completed, AgentEvent::CompactionCompleted { original_turn_count: 20, .. }));
     }
 
     #[test]

@@ -172,6 +172,28 @@ impl CodergenBackend for AgentBackend {
                             stage: node_id.clone(),
                         });
                     }
+                    AgentEvent::CompactionStarted {
+                        estimated_tokens,
+                        context_window_size,
+                    } => {
+                        pipeline_emitter.emit(&PipelineEvent::CompactionStarted {
+                            stage: node_id.clone(),
+                            estimated_tokens: *estimated_tokens,
+                            context_window_size: *context_window_size,
+                        });
+                    }
+                    AgentEvent::CompactionCompleted {
+                        original_turn_count,
+                        preserved_turn_count,
+                        summary_token_estimate,
+                    } => {
+                        pipeline_emitter.emit(&PipelineEvent::CompactionCompleted {
+                            stage: node_id.clone(),
+                            original_turn_count: *original_turn_count,
+                            preserved_turn_count: *preserved_turn_count,
+                            summary_token_estimate: *summary_token_estimate,
+                        });
+                    }
                     // Streaming events and session lifecycle not forwarded
                     _ => {}
                 }

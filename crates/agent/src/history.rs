@@ -16,7 +16,20 @@ impl History {
         &self.turns
     }
 
-    #[must_use] 
+    pub fn compact(&mut self, preserve_count: usize, summary: String) {
+        if self.turns.len() <= preserve_count {
+            return;
+        }
+        let preserved = self.turns.split_off(self.turns.len() - preserve_count);
+        self.turns.clear();
+        self.turns.push(Turn::System {
+            content: summary,
+            timestamp: std::time::SystemTime::now(),
+        });
+        self.turns.extend(preserved);
+    }
+
+    #[must_use]
     pub fn convert_to_messages(&self) -> Vec<Message> {
         self.turns
             .iter()
@@ -94,6 +107,65 @@ mod tests {
     use super::*;
     use std::time::SystemTime;
     use llm::types::{ToolCall, ToolResult, Usage};
+
+    #[test]
+    fn compact_replaces_old_turns_with_summary() {
+        let mut history = History::default();
+        for i in 0..8 {
+            history.push(Turn::User {
+                content: format!("msg {i}"),
+                timestamp: SystemTime::now(),
+            });
+        }
+        history.compact(4, "Summary of old conversation".into());
+        assert_eq!(history.turns().len(), 5); // 1 summary + 4 preserved
+    }
+
+    #[test]
+    fn compact_noop_when_fewer_turns_than_preserve() {
+        let mut history = History::default();
+        for i in 0..3 {
+            history.push(Turn::User {
+                content: format!("msg {i}"),
+                timestamp: SystemTime::now(),
+            });
+        }
+        history.compact(6, "Summary".into());
+        assert_eq!(history.turns().len(), 3);
+    }
+
+    #[test]
+    fn compact_preserves_recent_turns() {
+        let mut history = History::default();
+        for i in 0..8 {
+            history.push(Turn::User {
+                content: format!("msg {i}"),
+                timestamp: SystemTime::now(),
+            });
+        }
+        history.compact(4, "Summary".into());
+        let turns = history.turns();
+        // Last 4 turns should be msg 4..7
+        assert!(matches!(&turns[1], Turn::User { content, .. } if content == "msg 4"));
+        assert!(matches!(&turns[2], Turn::User { content, .. } if content == "msg 5"));
+        assert!(matches!(&turns[3], Turn::User { content, .. } if content == "msg 6"));
+        assert!(matches!(&turns[4], Turn::User { content, .. } if content == "msg 7"));
+    }
+
+    #[test]
+    fn compact_summary_maps_to_system_message() {
+        let mut history = History::default();
+        for i in 0..6 {
+            history.push(Turn::User {
+                content: format!("msg {i}"),
+                timestamp: SystemTime::now(),
+            });
+        }
+        history.compact(2, "[Context Summary]\nThis is a summary".into());
+        let messages = history.convert_to_messages();
+        assert_eq!(messages[0].role, Role::System);
+        assert!(messages[0].text().contains("[Context Summary]"));
+    }
 
     #[test]
     fn empty_history_produces_empty_messages() {

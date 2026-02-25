@@ -118,6 +118,17 @@ pub enum PipelineEvent {
     TurnLimitReached {
         stage: String,
     },
+    CompactionStarted {
+        stage: String,
+        estimated_tokens: usize,
+        context_window_size: usize,
+    },
+    CompactionCompleted {
+        stage: String,
+        original_turn_count: usize,
+        preserved_turn_count: usize,
+        summary_token_estimate: usize,
+    },
 }
 
 /// Listener callback type for pipeline events.
@@ -241,5 +252,29 @@ mod tests {
         let json = serde_json::to_string(&event).unwrap();
         assert!(json.contains("AssistantMessage"));
         assert!(json.contains("claude-opus-4-6"));
+    }
+
+    #[test]
+    fn compaction_pipeline_event_serialization() {
+        let started = PipelineEvent::CompactionStarted {
+            stage: "code".to_string(),
+            estimated_tokens: 5000,
+            context_window_size: 8000,
+        };
+        let json = serde_json::to_string(&started).unwrap();
+        assert!(json.contains("CompactionStarted"));
+        let deserialized: PipelineEvent = serde_json::from_str(&json).unwrap();
+        assert!(matches!(deserialized, PipelineEvent::CompactionStarted { stage, .. } if stage == "code"));
+
+        let completed = PipelineEvent::CompactionCompleted {
+            stage: "code".to_string(),
+            original_turn_count: 20,
+            preserved_turn_count: 6,
+            summary_token_estimate: 500,
+        };
+        let json = serde_json::to_string(&completed).unwrap();
+        assert!(json.contains("CompactionCompleted"));
+        let deserialized: PipelineEvent = serde_json::from_str(&json).unwrap();
+        assert!(matches!(deserialized, PipelineEvent::CompactionCompleted { stage, .. } if stage == "code"));
     }
 }
