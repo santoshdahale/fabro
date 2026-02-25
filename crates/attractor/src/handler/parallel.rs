@@ -31,6 +31,17 @@ enum JoinPolicy {
     Quorum(f64),
 }
 
+impl std::fmt::Display for JoinPolicy {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::WaitAll => write!(f, "wait_all"),
+            Self::FirstSuccess => write!(f, "first_success"),
+            Self::KOfN(k) => write!(f, "k_of_n({k})"),
+            Self::Quorum(frac) => write!(f, "quorum({frac})"),
+        }
+    }
+}
+
 fn parse_join_policy(raw: &str) -> JoinPolicy {
     if raw == "first_success" {
         return JoinPolicy::FirstSuccess;
@@ -54,6 +65,16 @@ enum ErrorPolicy {
     Continue,
     FailFast,
     Ignore,
+}
+
+impl std::fmt::Display for ErrorPolicy {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Continue => write!(f, "continue"),
+            Self::FailFast => write!(f, "fail_fast"),
+            Self::Ignore => write!(f, "ignore"),
+        }
+    }
 }
 
 fn parse_error_policy(raw: &str) -> ErrorPolicy {
@@ -85,10 +106,6 @@ impl Handler for ParallelHandler {
             return Ok(Outcome::fail("No branches for parallel node"));
         }
 
-        services.emitter.emit(&PipelineEvent::ParallelStarted {
-            branch_count: branches.len(),
-        });
-
         let join_policy = parse_join_policy(
             node.attrs
                 .get("join_policy")
@@ -101,6 +118,12 @@ impl Handler for ParallelHandler {
                 .and_then(|v| v.as_str())
                 .unwrap_or("continue"),
         );
+
+        services.emitter.emit(&PipelineEvent::ParallelStarted {
+            branch_count: branches.len(),
+            join_policy: join_policy.to_string(),
+            error_policy: error_policy.to_string(),
+        });
         let max_parallel = node
             .attrs
             .get("max_parallel")
@@ -138,7 +161,7 @@ impl Handler for ParallelHandler {
                         branch: target_id.clone(),
                         index: branch_index,
                         duration_ms: millis_u64(branch_start.elapsed()),
-                        success: false,
+                        status: "fail".to_string(),
                     });
                     return Ok(BranchResult {
                         id: target_id.clone(),
@@ -155,13 +178,11 @@ impl Handler for ParallelHandler {
                     .execute(target_node, &branch_context, &graph, &logs_root, &branch_services)
                     .await?;
 
-                let success = outcome.status == StageStatus::Success
-                    || outcome.status == StageStatus::PartialSuccess;
                 emitter.emit(&PipelineEvent::ParallelBranchCompleted {
                     branch: target_id.clone(),
                     index: branch_index,
                     duration_ms: millis_u64(branch_start.elapsed()),
-                    success,
+                    status: outcome.status.to_string(),
                 });
 
                 Ok::<BranchResult, AttractorError>(BranchResult {
@@ -425,6 +446,21 @@ mod tests {
 
         // All 3 succeed (default StartHandler returns success), need 2
         assert_eq!(outcome.status, StageStatus::Success);
+    }
+
+    #[test]
+    fn join_policy_display() {
+        assert_eq!(JoinPolicy::WaitAll.to_string(), "wait_all");
+        assert_eq!(JoinPolicy::FirstSuccess.to_string(), "first_success");
+        assert_eq!(JoinPolicy::KOfN(3).to_string(), "k_of_n(3)");
+        assert_eq!(JoinPolicy::Quorum(0.5).to_string(), "quorum(0.5)");
+    }
+
+    #[test]
+    fn error_policy_display() {
+        assert_eq!(ErrorPolicy::Continue.to_string(), "continue");
+        assert_eq!(ErrorPolicy::FailFast.to_string(), "fail_fast");
+        assert_eq!(ErrorPolicy::Ignore.to_string(), "ignore");
     }
 
     #[test]

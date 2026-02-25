@@ -566,6 +566,7 @@ impl PipelineEngine {
                             index: stage_index,
                             error: e.to_string(),
                             will_retry: true,
+                            failure_reason: None,
                         });
                         self.services.emitter.emit(&PipelineEvent::StageRetrying {
                             name: node.label().to_string(),
@@ -809,6 +810,7 @@ impl PipelineEngine {
             self.services.emitter.emit(&PipelineEvent::StageStarted {
                 name: node.label().to_string(),
                 index: stage_index,
+                handler_type: node.handler_type().map(String::from),
             });
             if node.handler_type() != Some("wait.human") {
                 self.inform(
@@ -850,6 +852,7 @@ impl PipelineEngine {
                         .unwrap_or("unknown")
                         .to_string(),
                     will_retry: false,
+                    failure_reason: outcome.failure_reason.clone(),
                 });
             } else {
                 self.services.emitter.emit(&PipelineEvent::StageCompleted {
@@ -860,6 +863,8 @@ impl PipelineEngine {
                     preferred_label: outcome.preferred_label.clone(),
                     suggested_next_ids: outcome.suggested_next_ids.clone(),
                     usage: outcome.usage.clone(),
+                    failure_reason: outcome.failure_reason.clone(),
+                    notes: outcome.notes.clone(),
                 });
                 self.inform(
                     &format!("Stage completed: {}", node.label()),

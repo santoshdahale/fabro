@@ -21,6 +21,18 @@ pub enum QuestionType {
     Confirmation,
 }
 
+impl std::fmt::Display for QuestionType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::YesNo => write!(f, "yes_no"),
+            Self::MultipleChoice => write!(f, "multiple_choice"),
+            Self::MultiSelect => write!(f, "multi_select"),
+            Self::Freeform => write!(f, "freeform"),
+            Self::Confirmation => write!(f, "confirmation"),
+        }
+    }
+}
+
 /// An option presented to the user for multiple-choice questions.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct QuestionOption {
@@ -172,6 +184,15 @@ pub trait Interviewer: Send + Sync {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn question_type_display() {
+        assert_eq!(QuestionType::YesNo.to_string(), "yes_no");
+        assert_eq!(QuestionType::MultipleChoice.to_string(), "multiple_choice");
+        assert_eq!(QuestionType::MultiSelect.to_string(), "multi_select");
+        assert_eq!(QuestionType::Freeform.to_string(), "freeform");
+        assert_eq!(QuestionType::Confirmation.to_string(), "confirmation");
+    }
 
     #[test]
     fn question_new() {

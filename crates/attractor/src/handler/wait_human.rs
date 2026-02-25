@@ -155,6 +155,7 @@ impl Handler for WaitHumanHandler {
         self.emit(&PipelineEvent::InterviewStarted {
             question: question_text.clone(),
             stage: node.id.clone(),
+            question_type: question.question_type.to_string(),
         });
         let interview_start = Instant::now();
         let answer = self.interviewer.ask(question).await;

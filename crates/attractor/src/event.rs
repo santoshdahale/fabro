@@ -20,6 +20,7 @@ pub enum PipelineEvent {
     StageStarted {
         name: String,
         index: usize,
+        handler_type: Option<String>,
     },
     StageCompleted {
         name: String,
@@ -29,12 +30,15 @@ pub enum PipelineEvent {
         preferred_label: Option<String>,
         suggested_next_ids: Vec<String>,
         usage: Option<StageUsage>,
+        failure_reason: Option<String>,
+        notes: Option<String>,
     },
     StageFailed {
         name: String,
         index: usize,
         error: String,
         will_retry: bool,
+        failure_reason: Option<String>,
     },
     StageRetrying {
         name: String,
@@ -44,6 +48,8 @@ pub enum PipelineEvent {
     },
     ParallelStarted {
         branch_count: usize,
+        join_policy: String,
+        error_policy: String,
     },
     ParallelBranchStarted {
         branch: String,
@@ -53,7 +59,7 @@ pub enum PipelineEvent {
         branch: String,
         index: usize,
         duration_ms: u64,
-        success: bool,
+        status: String,
     },
     ParallelCompleted {
         duration_ms: u64,
@@ -63,6 +69,7 @@ pub enum PipelineEvent {
     InterviewStarted {
         question: String,
         stage: String,
+        question_type: String,
     },
     InterviewCompleted {
         question: String,
@@ -209,10 +216,21 @@ mod tests {
         let event = PipelineEvent::StageStarted {
             name: "plan".to_string(),
             index: 0,
+            handler_type: Some("codergen".to_string()),
         };
         let json = serde_json::to_string(&event).unwrap();
         assert!(json.contains("StageStarted"));
         assert!(json.contains("plan"));
+        assert!(json.contains("\"handler_type\":\"codergen\""));
+
+        // None handler_type serializes as null
+        let event_none = PipelineEvent::StageStarted {
+            name: "plan".to_string(),
+            index: 0,
+            handler_type: None,
+        };
+        let json_none = serde_json::to_string(&event_none).unwrap();
+        assert!(json_none.contains("\"handler_type\":null"));
     }
 
     #[test]
@@ -252,6 +270,107 @@ mod tests {
         let json = serde_json::to_string(&event).unwrap();
         assert!(json.contains("AssistantMessage"));
         assert!(json.contains("claude-opus-4-6"));
+    }
+
+    #[test]
+    fn stage_completed_event_serialization_with_new_fields() {
+        let event = PipelineEvent::StageCompleted {
+            name: "plan".to_string(),
+            index: 0,
+            duration_ms: 1500,
+            status: "partial_success".to_string(),
+            preferred_label: None,
+            suggested_next_ids: vec![],
+            usage: None,
+            failure_reason: Some("lint errors remain".to_string()),
+            notes: Some("fixed 3 of 5 issues".to_string()),
+        };
+        let json = serde_json::to_string(&event).unwrap();
+        assert!(json.contains("\"failure_reason\":\"lint errors remain\""));
+        assert!(json.contains("\"notes\":\"fixed 3 of 5 issues\""));
+
+        let event_none = PipelineEvent::StageCompleted {
+            name: "plan".to_string(),
+            index: 0,
+            duration_ms: 1500,
+            status: "success".to_string(),
+            preferred_label: None,
+            suggested_next_ids: vec![],
+            usage: None,
+            failure_reason: None,
+            notes: None,
+        };
+        let json_none = serde_json::to_string(&event_none).unwrap();
+        assert!(json_none.contains("\"failure_reason\":null"));
+        assert!(json_none.contains("\"notes\":null"));
+    }
+
+    #[test]
+    fn stage_failed_event_serialization() {
+        let event = PipelineEvent::StageFailed {
+            name: "plan".to_string(),
+            index: 0,
+            error: "timeout".to_string(),
+            will_retry: true,
+            failure_reason: Some("LLM request timed out".to_string()),
+        };
+        let json = serde_json::to_string(&event).unwrap();
+        assert!(json.contains("\"failure_reason\":\"LLM request timed out\""));
+
+        let event_none = PipelineEvent::StageFailed {
+            name: "plan".to_string(),
+            index: 0,
+            error: "timeout".to_string(),
+            will_retry: false,
+            failure_reason: None,
+        };
+        let json_none = serde_json::to_string(&event_none).unwrap();
+        assert!(json_none.contains("\"failure_reason\":null"));
+    }
+
+    #[test]
+    fn parallel_branch_completed_event_serialization() {
+        let event = PipelineEvent::ParallelBranchCompleted {
+            branch: "branch_a".to_string(),
+            index: 0,
+            duration_ms: 1500,
+            status: "success".to_string(),
+        };
+        let json = serde_json::to_string(&event).unwrap();
+        assert!(json.contains("\"status\":\"success\""));
+        assert!(!json.contains("\"success\":"));
+
+        let deserialized: PipelineEvent = serde_json::from_str(&json).unwrap();
+        assert!(matches!(deserialized, PipelineEvent::ParallelBranchCompleted { status, .. } if status == "success"));
+    }
+
+    #[test]
+    fn parallel_started_event_serialization() {
+        let event = PipelineEvent::ParallelStarted {
+            branch_count: 3,
+            join_policy: "wait_all".to_string(),
+            error_policy: "continue".to_string(),
+        };
+        let json = serde_json::to_string(&event).unwrap();
+        assert!(json.contains("\"join_policy\":\"wait_all\""));
+        assert!(json.contains("\"error_policy\":\"continue\""));
+
+        let deserialized: PipelineEvent = serde_json::from_str(&json).unwrap();
+        assert!(matches!(deserialized, PipelineEvent::ParallelStarted { join_policy, error_policy, .. } if join_policy == "wait_all" && error_policy == "continue"));
+    }
+
+    #[test]
+    fn interview_started_event_serialization() {
+        let event = PipelineEvent::InterviewStarted {
+            question: "Review changes?".to_string(),
+            stage: "gate".to_string(),
+            question_type: "multiple_choice".to_string(),
+        };
+        let json = serde_json::to_string(&event).unwrap();
+        assert!(json.contains("\"question_type\":\"multiple_choice\""));
+
+        let deserialized: PipelineEvent = serde_json::from_str(&json).unwrap();
+        assert!(matches!(deserialized, PipelineEvent::InterviewStarted { question_type, .. } if question_type == "multiple_choice"));
     }
 
     #[test]

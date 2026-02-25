@@ -178,8 +178,12 @@ pub fn format_event_summary(event: &PipelineEvent, styles: &Styles) -> String {
         PipelineEvent::PipelineFailed { error, duration_ms } => {
             format!("[PIPELINE_FAILED] error=\"{error}\" duration={duration_ms}ms")
         }
-        PipelineEvent::StageStarted { name, index } => {
-            format!("[STAGE_STARTED] name={name} index={index}")
+        PipelineEvent::StageStarted { name, index, handler_type } => {
+            let mut s = format!("[STAGE_STARTED] name={name} index={index}");
+            if let Some(ht) = handler_type {
+                s.push_str(&format!(" handler_type={ht}"));
+            }
+            s
         }
         PipelineEvent::StageCompleted {
             name,
@@ -189,6 +193,8 @@ pub fn format_event_summary(event: &PipelineEvent, styles: &Styles) -> String {
             preferred_label,
             suggested_next_ids,
             usage,
+            failure_reason,
+            notes,
         } => {
             let mut s = format!("[STAGE_COMPLETED] name={name} index={index} duration={duration_ms}ms status={status}");
             if let Some(label) = preferred_label {
@@ -206,6 +212,12 @@ pub fn format_event_summary(event: &PipelineEvent, styles: &Styles) -> String {
                     s.push_str(&format!(" tokens={tokens_str}"));
                 }
             }
+            if let Some(reason) = failure_reason {
+                s.push_str(&format!(" failure_reason=\"{reason}\""));
+            }
+            if let Some(n) = notes {
+                s.push_str(&format!(" notes=\"{n}\""));
+            }
             s
         }
         PipelineEvent::StageFailed {
@@ -213,10 +225,15 @@ pub fn format_event_summary(event: &PipelineEvent, styles: &Styles) -> String {
             index,
             error,
             will_retry,
+            failure_reason,
         } => {
-            format!(
+            let mut s = format!(
                 "[STAGE_FAILED] name={name} index={index} error=\"{error}\" will_retry={will_retry}"
-            )
+            );
+            if let Some(reason) = failure_reason {
+                s.push_str(&format!(" failure_reason=\"{reason}\""));
+            }
+            s
         }
         PipelineEvent::StageRetrying {
             name,
@@ -228,8 +245,8 @@ pub fn format_event_summary(event: &PipelineEvent, styles: &Styles) -> String {
                 "[STAGE_RETRYING] name={name} index={index} attempt={attempt} delay={delay_ms}ms"
             )
         }
-        PipelineEvent::ParallelStarted { branch_count } => {
-            format!("[PARALLEL_STARTED] branches={branch_count}")
+        PipelineEvent::ParallelStarted { branch_count, join_policy, error_policy } => {
+            format!("[PARALLEL_STARTED] branches={branch_count} join_policy={join_policy} error_policy={error_policy}")
         }
         PipelineEvent::ParallelBranchStarted { branch, index } => {
             format!("[PARALLEL_BRANCH_STARTED] branch={branch} index={index}")
@@ -238,9 +255,9 @@ pub fn format_event_summary(event: &PipelineEvent, styles: &Styles) -> String {
             branch,
             index,
             duration_ms,
-            success,
+            status,
         } => {
-            format!("[PARALLEL_BRANCH_COMPLETED] branch={branch} index={index} duration={duration_ms}ms success={success}")
+            format!("[PARALLEL_BRANCH_COMPLETED] branch={branch} index={index} duration={duration_ms}ms status={status}")
         }
         PipelineEvent::ParallelCompleted {
             duration_ms,
@@ -249,8 +266,8 @@ pub fn format_event_summary(event: &PipelineEvent, styles: &Styles) -> String {
         } => {
             format!("[PARALLEL_COMPLETED] duration={duration_ms}ms succeeded={success_count} failed={failure_count}")
         }
-        PipelineEvent::InterviewStarted { question, stage } => {
-            format!("[INTERVIEW_STARTED] stage={stage} question=\"{question}\"")
+        PipelineEvent::InterviewStarted { question, stage, question_type } => {
+            format!("[INTERVIEW_STARTED] stage={stage} question=\"{question}\" question_type={question_type}")
         }
         PipelineEvent::InterviewCompleted {
             question,
@@ -357,10 +374,14 @@ pub fn format_event_detail(event: &PipelineEvent, styles: &Styles) -> String {
         PipelineEvent::PipelineFailed { error, duration_ms } => {
             format!("{d}── PIPELINE_FAILED ──────────────────────────{r}\n  {d}error:{r}       {error}\n  {d}duration_ms:{r} {duration_ms}\n")
         }
-        PipelineEvent::StageStarted { name, index } => {
-            format!(
+        PipelineEvent::StageStarted { name, index, handler_type } => {
+            let mut s = format!(
                 "{d}── STAGE_STARTED ────────────────────────────{r}\n  {d}name:{r}  {name}\n  {d}index:{r} {index}\n"
-            )
+            );
+            if let Some(ht) = handler_type {
+                s.push_str(&format!("  {d}handler_type:{r} {ht}\n"));
+            }
+            s
         }
         PipelineEvent::StageCompleted {
             name,
@@ -370,6 +391,8 @@ pub fn format_event_detail(event: &PipelineEvent, styles: &Styles) -> String {
             preferred_label,
             suggested_next_ids,
             usage,
+            failure_reason,
+            notes,
         } => {
             let mut s = format!("{d}── STAGE_COMPLETED ──────────────────────────{r}\n  {d}name:{r}        {name}\n  {d}index:{r}       {index}\n  {d}duration_ms:{r} {duration_ms}\n  {d}status:{r}      {status}\n");
             if let Some(label) = preferred_label {
@@ -390,6 +413,12 @@ pub fn format_event_detail(event: &PipelineEvent, styles: &Styles) -> String {
                     s.push_str(&format!("  {d}cost:{r}        {}\n", format_cost(cost)));
                 }
             }
+            if let Some(reason) = failure_reason {
+                s.push_str(&format!("  {d}failure_reason:{r} {reason}\n"));
+            }
+            if let Some(n) = notes {
+                s.push_str(&format!("  {d}notes:{r}       {n}\n"));
+            }
             s
         }
         PipelineEvent::StageFailed {
@@ -397,8 +426,13 @@ pub fn format_event_detail(event: &PipelineEvent, styles: &Styles) -> String {
             index,
             error,
             will_retry,
+            failure_reason,
         } => {
-            format!("{d}── STAGE_FAILED ─────────────────────────────{r}\n  {d}name:{r}       {name}\n  {d}index:{r}      {index}\n  {d}error:{r}      {error}\n  {d}will_retry:{r} {will_retry}\n")
+            let mut s = format!("{d}── STAGE_FAILED ─────────────────────────────{r}\n  {d}name:{r}       {name}\n  {d}index:{r}      {index}\n  {d}error:{r}      {error}\n  {d}will_retry:{r} {will_retry}\n");
+            if let Some(reason) = failure_reason {
+                s.push_str(&format!("  {d}failure_reason:{r} {reason}\n"));
+            }
+            s
         }
         PipelineEvent::StageRetrying {
             name,
@@ -408,8 +442,8 @@ pub fn format_event_detail(event: &PipelineEvent, styles: &Styles) -> String {
         } => {
             format!("{d}── STAGE_RETRYING ───────────────────────────{r}\n  {d}name:{r}     {name}\n  {d}index:{r}    {index}\n  {d}attempt:{r}  {attempt}\n  {d}delay_ms:{r} {delay_ms}\n")
         }
-        PipelineEvent::ParallelStarted { branch_count } => {
-            format!("{d}── PARALLEL_STARTED ─────────────────────────{r}\n  {d}branch_count:{r} {branch_count}\n")
+        PipelineEvent::ParallelStarted { branch_count, join_policy, error_policy } => {
+            format!("{d}── PARALLEL_STARTED ─────────────────────────{r}\n  {d}branch_count:{r} {branch_count}\n  {d}join_policy:{r}  {join_policy}\n  {d}error_policy:{r} {error_policy}\n")
         }
         PipelineEvent::ParallelBranchStarted { branch, index } => {
             format!("{d}── PARALLEL_BRANCH_STARTED ──────────────────{r}\n  {d}branch:{r} {branch}\n  {d}index:{r}  {index}\n")
@@ -418,9 +452,9 @@ pub fn format_event_detail(event: &PipelineEvent, styles: &Styles) -> String {
             branch,
             index,
             duration_ms,
-            success,
+            status,
         } => {
-            format!("{d}── PARALLEL_BRANCH_COMPLETED ────────────────{r}\n  {d}branch:{r}      {branch}\n  {d}index:{r}       {index}\n  {d}duration_ms:{r} {duration_ms}\n  {d}success:{r}     {success}\n")
+            format!("{d}── PARALLEL_BRANCH_COMPLETED ────────────────{r}\n  {d}branch:{r}      {branch}\n  {d}index:{r}       {index}\n  {d}duration_ms:{r} {duration_ms}\n  {d}status:{r}      {status}\n")
         }
         PipelineEvent::ParallelCompleted {
             duration_ms,
@@ -429,8 +463,8 @@ pub fn format_event_detail(event: &PipelineEvent, styles: &Styles) -> String {
         } => {
             format!("{d}── PARALLEL_COMPLETED ───────────────────────{r}\n  {d}duration_ms:{r}   {duration_ms}\n  {d}success_count:{r} {success_count}\n  {d}failure_count:{r} {failure_count}\n")
         }
-        PipelineEvent::InterviewStarted { question, stage } => {
-            format!("{d}── INTERVIEW_STARTED ────────────────────────{r}\n  {d}stage:{r}    {stage}\n  {d}question:{r} {question}\n")
+        PipelineEvent::InterviewStarted { question, stage, question_type } => {
+            format!("{d}── INTERVIEW_STARTED ────────────────────────{r}\n  {d}stage:{r}         {stage}\n  {d}question:{r}      {question}\n  {d}question_type:{r} {question_type}\n")
         }
         PipelineEvent::InterviewCompleted {
             question,
