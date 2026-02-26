@@ -14,6 +14,7 @@ pub struct TaskConfig {
     pub directory: Option<String>,
     pub llm: Option<LlmConfig>,
     pub setup: Option<SetupConfig>,
+    pub execution: Option<ExecutionConfig>,
     pub vars: Option<HashMap<String, String>>,
 }
 
@@ -27,6 +28,11 @@ pub struct LlmConfig {
 pub struct SetupConfig {
     pub commands: Vec<String>,
     pub timeout_ms: Option<u64>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ExecutionConfig {
+    pub environment: Option<String>,
 }
 
 /// Load and validate a task config from a TOML file.
@@ -199,6 +205,21 @@ language = "python"
     fn expand_dollar_not_followed_by_ident() {
         let vars = HashMap::new();
         assert_eq!(expand_vars("costs $5", &vars).unwrap(), "costs $5");
+    }
+
+    #[test]
+    fn parse_toml_with_execution() {
+        let toml = r#"
+version = 1
+task = "Run tests"
+graph = "pipeline.dot"
+
+[execution]
+environment = "daytona"
+"#;
+        let config = parse_task_config(toml).unwrap();
+        let execution = config.execution.unwrap();
+        assert_eq!(execution.environment.as_deref(), Some("daytona"));
     }
 
     #[test]

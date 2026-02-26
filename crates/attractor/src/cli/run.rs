@@ -18,7 +18,7 @@ use crate::validation::Severity;
 
 use super::backend::AgentBackend;
 use super::task_config;
-use super::{compute_stage_cost, format_cost, format_duration_human, format_event_detail, format_event_summary, format_tokens_human, print_diagnostics, read_dot_file, RunArgs};
+use super::{compute_stage_cost, format_cost, format_duration_human, format_event_detail, format_event_summary, format_tokens_human, print_diagnostics, read_dot_file, ExecutionEnvKind, RunArgs};
 
 /// Accumulates token usage and cost across all pipeline stages.
 #[derive(Default)]
@@ -218,7 +218,17 @@ pub async fn run_command(args: RunArgs, styles: &'static Styles) -> anyhow::Resu
         Arc::new(ConsoleInterviewer::new(styles))
     };
 
-    // 5. Resolve backend, model, and provider
+    // 5. Resolve execution environment: CLI flag > TOML > default
+    let toml_execution_env = task_cfg
+        .as_ref()
+        .and_then(|c| c.execution.as_ref())
+        .and_then(|e| e.environment.as_deref())
+        .map(|s| s.parse::<ExecutionEnvKind>())
+        .transpose()
+        .map_err(|e| anyhow::anyhow!("Invalid execution environment in TOML: {e}"))?;
+    let execution_env = args.execution_env.or(toml_execution_env).unwrap_or_default();
+
+    // 6. Resolve backend, model, and provider
     let dry_run_mode = if args.dry_run {
         true
     } else {
@@ -294,7 +304,7 @@ pub async fn run_command(args: RunArgs, styles: &'static Styles) -> anyhow::Resu
                 provider.clone(),
                 args.verbose,
                 styles,
-                args.execution_env,
+                execution_env,
                 setup_commands.clone(),
             )))
         }

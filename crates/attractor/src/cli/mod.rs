@@ -105,8 +105,8 @@ pub struct RunArgs {
     pub verbose: u8,
 
     /// Execution environment for agent tools
-    #[arg(long, value_enum, default_value_t)]
-    pub execution_env: ExecutionEnvKind,
+    #[arg(long, value_enum)]
+    pub execution_env: Option<ExecutionEnvKind>,
 }
 
 #[derive(Args)]
@@ -139,8 +139,8 @@ pub struct ServeArgs {
     pub dry_run: bool,
 
     /// Execution environment for agent tools
-    #[arg(long, value_enum, default_value_t)]
-    pub execution_env: ExecutionEnvKind,
+    #[arg(long, value_enum)]
+    pub execution_env: Option<ExecutionEnvKind>,
 }
 
 /// Read a .dot file from disk.
