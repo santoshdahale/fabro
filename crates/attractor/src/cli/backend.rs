@@ -307,9 +307,7 @@ impl CodergenBackend for AgentBackend {
         });
 
         // On error, drop the session (don't cache failed state).
-        if let Err(e) = result {
-            return Err(e);
-        }
+        result?;
 
         // Aggregate token usage only from new turns (prevents double-counting on reuse).
         let (mut turn_count, mut tool_call_count) = (0usize, 0usize);

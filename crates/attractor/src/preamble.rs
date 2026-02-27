@@ -439,18 +439,18 @@ fn build_summary_preamble(
                         parts.push(line);
 
                         // For medium detail, include context updates from the outcome
-                        if matches!(detail, SummaryDetail::Medium) {
-                            if !outcome.context_updates.is_empty() {
-                                let mut update_keys: Vec<&String> =
-                                    outcome.context_updates.keys().collect();
-                                update_keys.sort();
-                                for key in update_keys {
-                                    if let Some(val) = outcome.context_updates.get(key) {
-                                        parts.push(format!(
-                                            "  - set {key} = {}",
-                                            format_value(val)
-                                        ));
-                                    }
+                        if matches!(detail, SummaryDetail::Medium)
+                            && !outcome.context_updates.is_empty()
+                        {
+                            let mut update_keys: Vec<&String> =
+                                outcome.context_updates.keys().collect();
+                            update_keys.sort();
+                            for key in update_keys {
+                                if let Some(val) = outcome.context_updates.get(key) {
+                                    parts.push(format!(
+                                        "  - set {key} = {}",
+                                        format_value(val)
+                                    ));
                                 }
                             }
                         }

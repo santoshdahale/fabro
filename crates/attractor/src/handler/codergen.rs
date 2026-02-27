@@ -23,6 +23,7 @@ pub enum CodergenResult {
 }
 
 /// Backend interface for LLM execution in codergen nodes.
+#[allow(clippy::too_many_arguments)]
 #[async_trait]
 pub trait CodergenBackend: Send + Sync {
     /// Run a multi-turn agent loop (the default codergen mode).
