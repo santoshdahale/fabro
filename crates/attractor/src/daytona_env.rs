@@ -19,10 +19,9 @@ pub struct DaytonaConfig {
     pub snapshot: Option<DaytonaSnapshotConfig>,
 }
 
-/// Sandbox-level settings (name, labels, auto-stop).
+/// Sandbox-level settings (labels, auto-stop).
 #[derive(Clone, Debug, Default, Deserialize)]
 pub struct DaytonaSandboxConfig {
-    pub name: Option<String>,
     pub auto_stop_interval: Option<i32>,
     pub labels: Option<HashMap<String, String>>,
 }
@@ -83,10 +82,14 @@ impl DaytonaExecutionEnvironment {
             .ok_or_else(|| "Daytona sandbox not initialized — call initialize() first".to_string())
     }
 
-    /// Build `SandboxBaseParams` from config.
+    /// Build `SandboxBaseParams` from config, generating a unique sandbox name.
     fn base_params(&self) -> daytona_sdk::SandboxBaseParams {
+        let name = format!(
+            "attractor-{}",
+            chrono::Utc::now().format("%Y%m%d-%H%M%S-%3f")
+        );
         daytona_sdk::SandboxBaseParams {
-            name: self.config.sandbox.name.clone(),
+            name: Some(name),
             auto_stop_interval: self.config.sandbox.auto_stop_interval,
             labels: self.config.sandbox.labels.clone(),
             ephemeral: Some(true),
@@ -189,6 +192,25 @@ impl DaytonaExecutionEnvironment {
     }
 }
 
+/// Convert a Git SSH URL to HTTPS format for token-based authentication.
+///
+/// SSH URLs like `git@github.com:owner/repo.git` become
+/// `https://github.com/owner/repo.git`. URLs that are already HTTPS
+/// (or any other non-SSH format) are returned unchanged.
+fn ssh_url_to_https(url: &str) -> String {
+    // Match `git@<host>:<path>` (standard SSH URL format)
+    if let Some(rest) = url.strip_prefix("git@") {
+        if let Some((host, path)) = rest.split_once(':') {
+            return format!("https://{host}/{path}");
+        }
+    }
+    // Match `ssh://git@<host>/<path>`
+    if let Some(rest) = url.strip_prefix("ssh://git@") {
+        return format!("https://{rest}");
+    }
+    url.to_string()
+}
+
 /// Detect the git remote URL and current branch from a local repository.
 ///
 /// Uses `git2` to discover the repo at `path`, reads the `origin` remote URL
@@ -279,7 +301,9 @@ impl ExecutionEnvironment for DaytonaExecutionEnvironment {
 
         // Clone the repo into the sandbox
         match detect_repo_info(&cwd) {
-            Ok((url, branch)) => {
+            Ok((detected_url, branch)) => {
+                // Daytona clones over HTTPS with token auth, so rewrite SSH URLs.
+                let url = ssh_url_to_https(&detected_url);
                 self.emit(ExecutionEnvEvent::GitCloneStarted { url: url.clone(), branch: branch.clone() });
                 let clone_start = Instant::now();
 
@@ -633,7 +657,6 @@ mod tests {
     fn daytona_config_defaults() {
         let config = DaytonaConfig::default();
         assert!(config.snapshot.is_none());
-        assert!(config.sandbox.name.is_none());
         assert!(config.sandbox.auto_stop_interval.is_none());
         assert!(config.sandbox.labels.is_none());
     }
@@ -656,6 +679,30 @@ mod tests {
         assert_eq!(
             wrap_bash_command("echo 'hello world'"),
             "bash -c 'echo '\\''hello world'\\'''"
+        );
+    }
+
+    #[test]
+    fn ssh_url_to_https_converts_git_at_syntax() {
+        assert_eq!(
+            ssh_url_to_https("git@github.com:brynary/attractor-rust.git"),
+            "https://github.com/brynary/attractor-rust.git"
+        );
+    }
+
+    #[test]
+    fn ssh_url_to_https_converts_ssh_protocol() {
+        assert_eq!(
+            ssh_url_to_https("ssh://git@github.com/brynary/attractor-rust.git"),
+            "https://github.com/brynary/attractor-rust.git"
+        );
+    }
+
+    #[test]
+    fn ssh_url_to_https_passes_through_https() {
+        assert_eq!(
+            ssh_url_to_https("https://github.com/brynary/attractor-rust.git"),
+            "https://github.com/brynary/attractor-rust.git"
         );
     }
 

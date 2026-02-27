@@ -110,7 +110,6 @@ async fn daytona_snapshot_sandbox() {
 
     let config = DaytonaConfig {
         sandbox: DaytonaSandboxConfig {
-            name: Some("attractor-snapshot-test".to_string()),
             auto_stop_interval: Some(60),
             ..Default::default()
         },

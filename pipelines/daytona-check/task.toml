@@ -9,7 +9,6 @@ model = "claude-sonnet"
 environment = "daytona"
 
 [execution.daytona.sandbox]
-name = "attractor-cargo-check"
 auto_stop_interval = 60
 
 [execution.daytona.sandbox.labels]

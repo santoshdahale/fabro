@@ -237,7 +237,6 @@ graph = "pipeline.dot"
 environment = "daytona"
 
 [execution.daytona.sandbox]
-name = "my-sandbox"
 auto_stop_interval = 60
 
 [execution.daytona.sandbox.labels]
@@ -255,7 +254,6 @@ dockerfile = "FROM rust:1.85-slim-bookworm\nRUN apt-get update"
         assert_eq!(execution.environment.as_deref(), Some("daytona"));
 
         let daytona = execution.daytona.unwrap();
-        assert_eq!(daytona.sandbox.name.as_deref(), Some("my-sandbox"));
         assert_eq!(daytona.sandbox.auto_stop_interval, Some(60));
         let labels = daytona.sandbox.labels.unwrap();
         assert_eq!(labels["project"], "attractor");
@@ -282,11 +280,11 @@ graph = "pipeline.dot"
 environment = "daytona"
 
 [execution.daytona.sandbox]
-name = "bare-sandbox"
+auto_stop_interval = 30
 "#;
         let config = parse_task_config(toml).unwrap();
         let daytona = config.execution.unwrap().daytona.unwrap();
-        assert_eq!(daytona.sandbox.name.as_deref(), Some("bare-sandbox"));
+        assert_eq!(daytona.sandbox.auto_stop_interval, Some(30));
         assert!(daytona.snapshot.is_none());
     }
 
