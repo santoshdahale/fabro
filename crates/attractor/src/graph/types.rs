@@ -99,7 +99,7 @@ pub fn shape_to_handler_type(shape: &str) -> Option<&'static str> {
         "diamond" => Some("conditional"),
         "component" => Some("parallel"),
         "tripleoctagon" => Some("parallel.fan_in"),
-        "parallelogram" => Some("tool"),
+        "parallelogram" => Some("script"),
         "house" => Some("stack.manager_loop"),
         _ => None,
     }
@@ -471,7 +471,7 @@ mod tests {
             shape_to_handler_type("tripleoctagon"),
             Some("parallel.fan_in")
         );
-        assert_eq!(shape_to_handler_type("parallelogram"), Some("tool"));
+        assert_eq!(shape_to_handler_type("parallelogram"), Some("script"));
         assert_eq!(
             shape_to_handler_type("house"),
             Some("stack.manager_loop")

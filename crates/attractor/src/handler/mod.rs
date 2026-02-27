@@ -6,7 +6,7 @@ pub mod manager_loop;
 pub mod parallel;
 pub mod start;
 pub mod sub_pipeline;
-pub mod tool;
+pub mod script;
 pub mod wait_human;
 
 use std::collections::HashMap;
@@ -114,7 +114,7 @@ pub fn default_registry(
         "wait.human",
         Box::new(wait_human::WaitHumanHandler::new(interviewer)),
     );
-    registry.register("tool", Box::new(tool::ToolHandler));
+    registry.register("script", Box::new(script::ScriptHandler));
     registry.register("parallel", Box::new(parallel::ParallelHandler));
     registry.register(
         "parallel.fan_in",

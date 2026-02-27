@@ -7,7 +7,7 @@ A DOT-based pipeline runner for multi-stage AI workflows. Define workflows as Gr
 - **Graph** -- A directed graph parsed from DOT syntax containing nodes, edges, and attributes. The graph carries a `goal` describing the pipeline's purpose.
 - **Node** -- A workflow step. Graphviz shapes map to handler types (e.g., `Mdiamond` = start, `Msquare` = exit, `box` = codergen/LLM, `diamond` = conditional, `hexagon` = human gate, `component` = parallel).
 - **Edge** -- A connection between nodes with optional `condition`, `label`, `weight`, and `fidelity` attributes that control routing.
-- **Handler** -- An async trait implementation that executes a node and returns an `Outcome`. Built-in handlers include `StartHandler`, `ExitHandler`, `CodergenHandler`, `ConditionalHandler`, `WaitHumanHandler`, `ParallelHandler`, `FanInHandler`, `ToolHandler`, and `ManagerLoopHandler`.
+- **Handler** -- An async trait implementation that executes a node and returns an `Outcome`. Built-in handlers include `StartHandler`, `ExitHandler`, `CodergenHandler`, `ConditionalHandler`, `WaitHumanHandler`, `ParallelHandler`, `FanInHandler`, `ScriptHandler`, and `ManagerLoopHandler`.
 - **Outcome** -- The result of executing a handler, carrying a `StageStatus` (Success, Fail, PartialSuccess, Retry, Skipped), optional routing hints (`preferred_label`, `suggested_next_ids`), and context updates.
 - **Context** -- A thread-safe key-value store shared across pipeline stages, supporting snapshots and isolated cloning for parallel branches.
 - **Interviewer** -- A trait for human-in-the-loop interactions. Implementations include `AutoApproveInterviewer`, `QueueInterviewer`, `CallbackInterviewer`, `ConsoleInterviewer`, and `RecordingInterviewer`.

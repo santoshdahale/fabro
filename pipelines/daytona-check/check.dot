@@ -5,7 +5,7 @@ digraph DaytonaCheck {
     start [shape=Mdiamond, label="Start"]
     exit  [shape=Msquare, label="Exit"]
 
-    run_tests [label="Run Tests", shape=parallelogram, tool_command="cargo test --workspace 2>&1 || true"]
+    run_tests [label="Run Tests", shape=parallelogram, script="cargo test --workspace 2>&1 || true"]
     report    [label="Report", codergen_mode="one_shot", prompt="Summarize the test results"]
 
     start -> run_tests -> report -> exit

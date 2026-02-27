@@ -13,11 +13,11 @@ fn timeout_ms(node: &Node) -> Option<u64> {
     node.timeout().map(|d| d.as_millis() as u64)
 }
 
-/// Executes an external tool (shell command) configured via node attributes.
-pub struct ToolHandler;
+/// Executes an external script configured via node attributes.
+pub struct ScriptHandler;
 
 #[async_trait]
-impl Handler for ToolHandler {
+impl Handler for ScriptHandler {
     async fn execute(
         &self,
         node: &Node,
@@ -26,33 +26,53 @@ impl Handler for ToolHandler {
         logs_root: &Path,
         _services: &EngineServices,
     ) -> Result<Outcome, AttractorError> {
-        let command = node
+        let script = node
             .attrs
-            .get("tool_command")
+            .get("script")
             .and_then(|v| v.as_str())
             .unwrap_or("");
 
-        if command.is_empty() {
-            return Ok(Outcome::fail("No tool_command specified"));
+        if script.is_empty() {
+            return Ok(Outcome::fail("No script specified"));
+        }
+
+        let language = node
+            .attrs
+            .get("language")
+            .and_then(|v| v.as_str())
+            .unwrap_or("shell");
+
+        if language != "shell" && language != "python" {
+            return Ok(Outcome::fail(format!(
+                "Invalid language: {language:?} (expected \"shell\" or \"python\")"
+            )));
         }
 
         let stage_dir = logs_root.join(&node.id);
         tokio::fs::create_dir_all(&stage_dir).await?;
 
         let invocation = serde_json::json!({
-            "command": command,
+            "command": script,
+            "language": language,
             "timeout_ms": timeout_ms(node),
         });
         tokio::fs::write(
-            stage_dir.join("tool_invocation.json"),
+            stage_dir.join("script_invocation.json"),
             serde_json::to_string_pretty(&invocation).unwrap(),
         )
         .await?;
 
-        let cmd_future = tokio::process::Command::new("sh")
-            .arg("-c")
-            .arg(command)
-            .output();
+        let cmd_future = if language == "python" {
+            tokio::process::Command::new("python3")
+                .arg("-c")
+                .arg(script)
+                .output()
+        } else {
+            tokio::process::Command::new("sh")
+                .arg("-c")
+                .arg(script)
+                .output()
+        };
 
         let started = std::time::Instant::now();
 
@@ -67,13 +87,13 @@ impl Handler for ToolHandler {
                         "timed_out": true,
                     });
                     tokio::fs::write(
-                        stage_dir.join("tool_timing.json"),
+                        stage_dir.join("script_timing.json"),
                         serde_json::to_string_pretty(&timing).unwrap(),
                     )
                     .await?;
 
                     return Ok(Outcome::fail(format!(
-                        "Tool timed out after {}ms: {command}",
+                        "Script timed out after {}ms: {script}",
                         timeout_dur.as_millis()
                     )));
                 }
@@ -98,7 +118,7 @@ impl Handler for ToolHandler {
                     "timed_out": false,
                 });
                 tokio::fs::write(
-                    stage_dir.join("tool_timing.json"),
+                    stage_dir.join("script_timing.json"),
                     serde_json::to_string_pretty(&timing).unwrap(),
                 )
                 .await?;
@@ -107,17 +127,17 @@ impl Handler for ToolHandler {
                     let mut outcome = Outcome::success();
                     outcome
                         .context_updates
-                        .insert("tool.output".to_string(), serde_json::json!(stdout));
-                    outcome.notes = Some(format!("Tool completed: {command}"));
+                        .insert("script.output".to_string(), serde_json::json!(stdout));
+                    outcome.notes = Some(format!("Script completed: {script}"));
                     Ok(outcome)
                 } else {
                     let reason = if stderr.is_empty() {
                         format!(
-                            "Tool failed with exit code: {}",
+                            "Script failed with exit code: {}",
                             output.status.code().unwrap_or(-1)
                         )
                     } else {
-                        format!("Tool failed: {}", stderr.trim())
+                        format!("Script failed: {}", stderr.trim())
                     };
                     Ok(Outcome::fail(reason))
                 }
@@ -148,9 +168,9 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn tool_handler_no_command() {
-        let handler = ToolHandler;
-        let node = Node::new("tool_node");
+    async fn script_handler_no_script() {
+        let handler = ScriptHandler;
+        let node = Node::new("script_node");
         let context = Context::new();
         let graph = Graph::new("test");
         let logs_root = tempfile::tempdir().unwrap();
@@ -162,16 +182,16 @@ mod tests {
         assert_eq!(outcome.status, StageStatus::Fail);
         assert_eq!(
             outcome.failure_reason.as_deref(),
-            Some("No tool_command specified")
+            Some("No script specified")
         );
     }
 
     #[tokio::test]
-    async fn tool_handler_echo_command() {
-        let handler = ToolHandler;
-        let mut node = Node::new("tool_node");
+    async fn script_handler_echo_command() {
+        let handler = ScriptHandler;
+        let mut node = Node::new("script_node");
         node.attrs.insert(
-            "tool_command".to_string(),
+            "script".to_string(),
             AttrValue::String("echo hello".to_string()),
         );
         let context = Context::new();
@@ -184,16 +204,16 @@ mod tests {
             .unwrap();
         assert_eq!(outcome.status, StageStatus::Success);
         assert!(outcome.notes.as_deref().unwrap().contains("echo hello"));
-        let tool_output = outcome.context_updates.get("tool.output").unwrap();
-        assert!(tool_output.as_str().unwrap().contains("hello"));
+        let script_output = outcome.context_updates.get("script.output").unwrap();
+        assert!(script_output.as_str().unwrap().contains("hello"));
     }
 
     #[tokio::test]
-    async fn tool_handler_failing_command() {
-        let handler = ToolHandler;
-        let mut node = Node::new("tool_node");
+    async fn script_handler_failing_command() {
+        let handler = ScriptHandler;
+        let mut node = Node::new("script_node");
         node.attrs.insert(
-            "tool_command".to_string(),
+            "script".to_string(),
             AttrValue::String("false".to_string()),
         );
         let context = Context::new();
@@ -208,11 +228,11 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn tool_handler_timeout() {
-        let handler = ToolHandler;
-        let mut node = Node::new("tool_node");
+    async fn script_handler_timeout() {
+        let handler = ScriptHandler;
+        let mut node = Node::new("script_node");
         node.attrs.insert(
-            "tool_command".to_string(),
+            "script".to_string(),
             AttrValue::String("sleep 60".to_string()),
         );
         node.attrs.insert(
@@ -240,11 +260,11 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn writes_tool_invocation_json() {
-        let handler = ToolHandler;
-        let mut node = Node::new("tool_node");
+    async fn writes_script_invocation_json() {
+        let handler = ScriptHandler;
+        let mut node = Node::new("script_node");
         node.attrs.insert(
-            "tool_command".to_string(),
+            "script".to_string(),
             AttrValue::String("echo hello".to_string()),
         );
         let context = Context::new();
@@ -258,20 +278,21 @@ mod tests {
 
         let invocation_path = logs_root
             .path()
-            .join("tool_node")
-            .join("tool_invocation.json");
+            .join("script_node")
+            .join("script_invocation.json");
         let content = std::fs::read_to_string(&invocation_path).unwrap();
         let json: serde_json::Value = serde_json::from_str(&content).unwrap();
         assert_eq!(json["command"], "echo hello");
+        assert_eq!(json["language"], "shell");
         assert_eq!(json["timeout_ms"], serde_json::Value::Null);
     }
 
     #[tokio::test]
-    async fn writes_tool_invocation_json_with_timeout() {
-        let handler = ToolHandler;
-        let mut node = Node::new("tool_node");
+    async fn writes_script_invocation_json_with_timeout() {
+        let handler = ScriptHandler;
+        let mut node = Node::new("script_node");
         node.attrs.insert(
-            "tool_command".to_string(),
+            "script".to_string(),
             AttrValue::String("echo hello".to_string()),
         );
         node.attrs.insert(
@@ -289,20 +310,21 @@ mod tests {
 
         let invocation_path = logs_root
             .path()
-            .join("tool_node")
-            .join("tool_invocation.json");
+            .join("script_node")
+            .join("script_invocation.json");
         let content = std::fs::read_to_string(&invocation_path).unwrap();
         let json: serde_json::Value = serde_json::from_str(&content).unwrap();
         assert_eq!(json["command"], "echo hello");
+        assert_eq!(json["language"], "shell");
         assert_eq!(json["timeout_ms"], 5000);
     }
 
     #[tokio::test]
     async fn writes_stdout_and_stderr_logs() {
-        let handler = ToolHandler;
-        let mut node = Node::new("tool_node");
+        let handler = ScriptHandler;
+        let mut node = Node::new("script_node");
         node.attrs.insert(
-            "tool_command".to_string(),
+            "script".to_string(),
             AttrValue::String("echo hello".to_string()),
         );
         let context = Context::new();
@@ -314,7 +336,7 @@ mod tests {
             .await
             .unwrap();
 
-        let stage_dir = logs_root.path().join("tool_node");
+        let stage_dir = logs_root.path().join("script_node");
         let stdout = std::fs::read_to_string(stage_dir.join("stdout.log")).unwrap();
         assert_eq!(stdout.trim(), "hello");
         let stderr = std::fs::read_to_string(stage_dir.join("stderr.log")).unwrap();
@@ -323,10 +345,10 @@ mod tests {
 
     #[tokio::test]
     async fn writes_stderr_log_on_failure() {
-        let handler = ToolHandler;
-        let mut node = Node::new("tool_node");
+        let handler = ScriptHandler;
+        let mut node = Node::new("script_node");
         node.attrs.insert(
-            "tool_command".to_string(),
+            "script".to_string(),
             AttrValue::String("echo oops >&2 && false".to_string()),
         );
         let context = Context::new();
@@ -338,17 +360,17 @@ mod tests {
             .await
             .unwrap();
 
-        let stage_dir = logs_root.path().join("tool_node");
+        let stage_dir = logs_root.path().join("script_node");
         let stderr = std::fs::read_to_string(stage_dir.join("stderr.log")).unwrap();
         assert_eq!(stderr.trim(), "oops");
     }
 
     #[tokio::test]
-    async fn writes_tool_timing_json_on_success() {
-        let handler = ToolHandler;
-        let mut node = Node::new("tool_node");
+    async fn writes_script_timing_json_on_success() {
+        let handler = ScriptHandler;
+        let mut node = Node::new("script_node");
         node.attrs.insert(
-            "tool_command".to_string(),
+            "script".to_string(),
             AttrValue::String("echo hello".to_string()),
         );
         let context = Context::new();
@@ -360,7 +382,7 @@ mod tests {
             .await
             .unwrap();
 
-        let timing_path = logs_root.path().join("tool_node").join("tool_timing.json");
+        let timing_path = logs_root.path().join("script_node").join("script_timing.json");
         let content = std::fs::read_to_string(&timing_path).unwrap();
         let json: serde_json::Value = serde_json::from_str(&content).unwrap();
         assert!(json["duration_ms"].as_u64().unwrap() >= 0);
@@ -369,11 +391,11 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn writes_tool_timing_json_on_failure() {
-        let handler = ToolHandler;
-        let mut node = Node::new("tool_node");
+    async fn writes_script_timing_json_on_failure() {
+        let handler = ScriptHandler;
+        let mut node = Node::new("script_node");
         node.attrs.insert(
-            "tool_command".to_string(),
+            "script".to_string(),
             AttrValue::String("false".to_string()),
         );
         let context = Context::new();
@@ -385,7 +407,7 @@ mod tests {
             .await
             .unwrap();
 
-        let timing_path = logs_root.path().join("tool_node").join("tool_timing.json");
+        let timing_path = logs_root.path().join("script_node").join("script_timing.json");
         let content = std::fs::read_to_string(&timing_path).unwrap();
         let json: serde_json::Value = serde_json::from_str(&content).unwrap();
         assert_eq!(json["exit_code"], 1);
@@ -393,11 +415,11 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn writes_tool_timing_json_on_timeout() {
-        let handler = ToolHandler;
-        let mut node = Node::new("tool_node");
+    async fn writes_script_timing_json_on_timeout() {
+        let handler = ScriptHandler;
+        let mut node = Node::new("script_node");
         node.attrs.insert(
-            "tool_command".to_string(),
+            "script".to_string(),
             AttrValue::String("sleep 60".to_string()),
         );
         node.attrs.insert(
@@ -413,11 +435,87 @@ mod tests {
             .await
             .unwrap();
 
-        let timing_path = logs_root.path().join("tool_node").join("tool_timing.json");
+        let timing_path = logs_root.path().join("script_node").join("script_timing.json");
         let content = std::fs::read_to_string(&timing_path).unwrap();
         let json: serde_json::Value = serde_json::from_str(&content).unwrap();
         assert!(json["duration_ms"].as_u64().unwrap() >= 0);
         assert_eq!(json["exit_code"], serde_json::Value::Null);
         assert_eq!(json["timed_out"], true);
+    }
+
+    #[tokio::test]
+    async fn script_handler_python_echo() {
+        let handler = ScriptHandler;
+        let mut node = Node::new("script_node");
+        node.attrs.insert(
+            "script".to_string(),
+            AttrValue::String("print('hello from python')".to_string()),
+        );
+        node.attrs.insert(
+            "language".to_string(),
+            AttrValue::String("python".to_string()),
+        );
+        let context = Context::new();
+        let graph = Graph::new("test");
+        let logs_root = tempfile::tempdir().unwrap();
+
+        let outcome = handler
+            .execute(&node, &context, &graph, logs_root.path(), &make_services())
+            .await
+            .unwrap();
+        assert_eq!(outcome.status, StageStatus::Success);
+        let script_output = outcome.context_updates.get("script.output").unwrap();
+        assert!(script_output.as_str().unwrap().contains("hello from python"));
+    }
+
+    #[tokio::test]
+    async fn script_handler_python_failure() {
+        let handler = ScriptHandler;
+        let mut node = Node::new("script_node");
+        node.attrs.insert(
+            "script".to_string(),
+            AttrValue::String("raise Exception('boom')".to_string()),
+        );
+        node.attrs.insert(
+            "language".to_string(),
+            AttrValue::String("python".to_string()),
+        );
+        let context = Context::new();
+        let graph = Graph::new("test");
+        let logs_root = tempfile::tempdir().unwrap();
+
+        let outcome = handler
+            .execute(&node, &context, &graph, logs_root.path(), &make_services())
+            .await
+            .unwrap();
+        assert_eq!(outcome.status, StageStatus::Fail);
+    }
+
+    #[tokio::test]
+    async fn script_handler_invalid_language() {
+        let handler = ScriptHandler;
+        let mut node = Node::new("script_node");
+        node.attrs.insert(
+            "script".to_string(),
+            AttrValue::String("echo hello".to_string()),
+        );
+        node.attrs.insert(
+            "language".to_string(),
+            AttrValue::String("ruby".to_string()),
+        );
+        let context = Context::new();
+        let graph = Graph::new("test");
+        let logs_root = tempfile::tempdir().unwrap();
+
+        let outcome = handler
+            .execute(&node, &context, &graph, logs_root.path(), &make_services())
+            .await
+            .unwrap();
+        assert_eq!(outcome.status, StageStatus::Fail);
+        assert!(outcome
+            .failure_reason
+            .as_deref()
+            .unwrap()
+            .contains("Invalid language"));
     }
 }

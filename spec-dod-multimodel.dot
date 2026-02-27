@@ -485,7 +485,7 @@ Otherwise set preferred_next_label to \"Ready for build\"."
     build_check [
         label="Build & Smoke Test",
         shape=parallelogram,
-        tool_command="cd /Users/bhelmkamp/p/brynary/attractor-rust && cargo build 2>&1 && echo '---BUILD OK---' && ./target/debug/attractor run --dry-run test/simple.dot 2>&1 && ./target/debug/attractor run --dry-run test/branching.dot 2>&1 && ./target/debug/attractor run --dry-run test/styled.dot 2>&1 && ./target/debug/attractor run --dry-run test/parallel.dot 2>&1 && ./target/debug/attractor run --dry-run test/conditions.dot 2>&1 && echo '---ALL TESTS PASSED---'",
+        script="cd /Users/bhelmkamp/p/brynary/attractor-rust && cargo build 2>&1 && echo '---BUILD OK---' && ./target/debug/attractor run --dry-run test/simple.dot 2>&1 && ./target/debug/attractor run --dry-run test/branching.dot 2>&1 && ./target/debug/attractor run --dry-run test/styled.dot 2>&1 && ./target/debug/attractor run --dry-run test/parallel.dot 2>&1 && ./target/debug/attractor run --dry-run test/conditions.dot 2>&1 && echo '---ALL TESTS PASSED---'",
         timeout="120s"
     ]
 
@@ -494,7 +494,7 @@ Otherwise set preferred_next_label to \"Ready for build\"."
         shape=box,
         class="opus",
         fidelity="full",
-        prompt="The build or smoke tests failed. The build output is in context key tool.output. Diagnose the compilation errors or test failures and fix them.
+        prompt="The build or smoke tests failed. The build output is in context key script.output. Diagnose the compilation errors or test failures and fix them.
 
 Read the relevant source files, identify the issue, and write corrected versions. Common issues:
 - Missing includes

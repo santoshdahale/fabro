@@ -368,7 +368,7 @@ const KNOWN_HANDLER_TYPES: &[&str] = &[
     "conditional",
     "parallel",
     "parallel.fan_in",
-    "tool",
+    "script",
     "stack.manager_loop",
 ];
 
@@ -1792,7 +1792,7 @@ mod tests {
         let mut n5 = Node::new("n5");
         n5.attrs.insert(
             "type".to_string(),
-            AttrValue::String("tool".to_string()),
+            AttrValue::String("script".to_string()),
         );
         g.nodes.insert("n5".to_string(), n5);
 

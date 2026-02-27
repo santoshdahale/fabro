@@ -13,7 +13,7 @@ use attractor::handler::conditional::ConditionalHandler;
 use attractor::handler::exit::ExitHandler;
 use attractor::handler::manager_loop::ManagerLoopHandler;
 use attractor::handler::start::StartHandler;
-use attractor::handler::tool::ToolHandler;
+use attractor::handler::script::ScriptHandler;
 use attractor::handler::wait_human::WaitHumanHandler;
 use attractor::handler::{Handler, HandlerRegistry};
 use attractor::interviewer::auto_approve::AutoApproveInterviewer;
@@ -1145,7 +1145,7 @@ fn make_full_registry(interviewer: Arc<dyn Interviewer>) -> HandlerRegistry {
     registry.register("exit", Box::new(ExitHandler));
     registry.register("codergen", Box::new(CodergenHandler::new(None)));
     registry.register("conditional", Box::new(ConditionalHandler));
-    registry.register("tool", Box::new(ToolHandler));
+    registry.register("script", Box::new(ScriptHandler));
     registry.register(
         "wait.human",
         Box::new(WaitHumanHandler::new(interviewer)),
@@ -1702,8 +1702,8 @@ async fn tool_handler_e2e() {
         AttrValue::String("parallelogram".to_string()),
     );
     echo_task.attrs.insert(
-        "tool_command".to_string(),
-        AttrValue::String("echo hello-from-tool".to_string()),
+        "script".to_string(),
+        AttrValue::String("echo hello-from-script".to_string()),
     );
     graph.nodes.insert("echo_task".to_string(), echo_task);
     graph.edges.push(Edge::new("start", "echo_task"));
@@ -1720,11 +1720,11 @@ async fn tool_handler_e2e() {
     assert_eq!(outcome.status, StageStatus::Success);
 
     let cp = Checkpoint::load(&dir.path().join("checkpoint.json")).unwrap();
-    let tool_output = cp
+    let script_output = cp
         .context_values
-        .get("tool.output")
-        .expect("tool.output should exist");
-    assert!(tool_output.as_str().unwrap().contains("hello-from-tool"));
+        .get("script.output")
+        .expect("script.output should exist");
+    assert!(script_output.as_str().unwrap().contains("hello-from-script"));
 }
 
 #[tokio::test]
@@ -1998,7 +1998,7 @@ async fn scenario_ship_a_feature() {
         exit  [shape=Msquare]
         plan  [shape=box, prompt="Plan to achieve: $goal"]
         implement [shape=box, prompt="Implement the plan"]
-        test  [shape=parallelogram, tool_command="echo PASS"]
+        test  [shape=parallelogram, script="echo PASS"]
         review [shape=hexagon, label="Review Changes"]
         start -> plan -> implement -> test -> review
         review -> exit [label="[A] Approve"]
@@ -2025,8 +2025,8 @@ async fn scenario_ship_a_feature() {
     assert_eq!(outcome.status, StageStatus::Success);
 
     let cp = Checkpoint::load(&dir.path().join("checkpoint.json")).unwrap();
-    let tool_output = cp.context_values.get("tool.output").expect("tool.output");
-    assert!(tool_output.as_str().unwrap().contains("PASS"));
+    let script_output = cp.context_values.get("script.output").expect("script.output");
+    assert!(script_output.as_str().unwrap().contains("PASS"));
     assert!(cp.completed_nodes.contains(&"plan".to_string()));
     assert!(cp.completed_nodes.contains(&"implement".to_string()));
     assert!(cp.completed_nodes.contains(&"test".to_string()));

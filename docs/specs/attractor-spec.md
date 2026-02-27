@@ -187,7 +187,7 @@ The `shape` attribute on a node determines which handler executes it, unless ove
 | `diamond`         | `conditional`         | Conditional routing point. Routes based on edge conditions against current context. |
 | `component`       | `parallel`            | Parallel fan-out. Executes multiple branches concurrently. |
 | `tripleoctagon`   | `parallel.fan_in`     | Parallel fan-in. Waits for all branches and consolidates results. |
-| `parallelogram`   | `tool`                | External tool execution (shell command, API call). |
+| `parallelogram`   | `script`              | External script execution (shell command, Python script, API call). |
 | `house`           | `stack.manager_loop`  | Supervisor loop. Orchestrates observe/steer/wait cycles over a child pipeline. |
 
 ### 2.9 Chained Edges
@@ -922,24 +922,29 @@ FUNCTION heuristic_select(candidates):
 
 Fan-in runs even when some candidates failed, as long as at least one candidate is available. Only when all candidates fail does fan-in return FAIL.
 
-### 4.10 Tool Handler
+### 4.10 Script Handler
 
-Executes an external tool (shell command, API call, or other non-LLM operation) configured via node attributes.
+Executes an external script (shell command, Python script, or other non-LLM operation) configured via node attributes.
 
 ```
-ToolHandler:
+ScriptHandler:
     FUNCTION execute(node, context, graph, logs_root) -> Outcome:
-        command = node.attrs.get("tool_command", "")
-        IF command is empty:
-            RETURN Outcome(status=FAIL, failure_reason="No tool_command specified")
+        script = node.attrs.get("script", "")
+        IF script is empty:
+            RETURN Outcome(status=FAIL, failure_reason="No script specified")
 
-        -- Execute the command
+        language = node.attrs.get("language", "shell")  -- "shell" or "python"
+
+        -- Execute the script
         TRY:
-            result = run_shell_command(command, timeout=node.timeout)
+            IF language == "python":
+                result = run_command("python3", "-c", script, timeout=node.timeout)
+            ELSE:
+                result = run_command("sh", "-c", script, timeout=node.timeout)
             RETURN Outcome(
                 status=SUCCESS,
-                context_updates={"tool.output": result.stdout},
-                notes="Tool completed: " + command
+                context_updates={"script.output": result.stdout},
+                notes="Script completed: " + script
             )
         CATCH exception:
             RETURN Outcome(status=FAIL, failure_reason=str(exception))
@@ -2078,7 +2083,7 @@ ASSERT "review" IN checkpoint.completed_nodes
 | `diamond`       | `conditional`       | Pass-through; engine evaluates edge conditions |
 | `component`     | `parallel`          | Concurrent branch execution |
 | `tripleoctagon` | `parallel.fan_in`   | Consolidate parallel results |
-| `parallelogram` | `tool`              | External tool execution |
+| `parallelogram` | `script`            | External script execution |
 | `house`         | `stack.manager_loop`| Supervisor polling loop |
 
 ---
