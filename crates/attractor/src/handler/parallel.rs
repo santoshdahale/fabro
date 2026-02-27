@@ -140,6 +140,7 @@ impl Handler for ParallelHandler {
             let branch_context = context.clone_context();
             let registry = Arc::clone(&services.registry);
             let emitter = Arc::clone(&services.emitter);
+            let execution_env = Arc::clone(&services.execution_env);
             let graph = graph.clone();
             let logs_root = logs_root.to_path_buf();
             let sem = Arc::clone(&semaphore);
@@ -172,6 +173,7 @@ impl Handler for ParallelHandler {
                 let branch_services = EngineServices {
                     registry: Arc::clone(&registry),
                     emitter: Arc::clone(&emitter),
+                    execution_env: Arc::clone(&execution_env),
                 };
                 let handler = registry.resolve(target_node);
                 let outcome = handler
@@ -360,6 +362,9 @@ mod tests {
         EngineServices {
             registry: Arc::new(registry),
             emitter: Arc::new(EventEmitter::new()),
+            execution_env: Arc::new(agent::LocalExecutionEnvironment::new(
+                std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from(".")),
+            )),
         }
     }
 

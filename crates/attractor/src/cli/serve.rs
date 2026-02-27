@@ -66,8 +66,6 @@ pub async fn serve_command(args: ServeArgs, styles: &'static Styles) -> anyhow::
                     provider.clone(),
                     0,
                     styles,
-                    args.execution_env.unwrap_or_default(),
-                    Vec::new(),
                 )))
             }
         })

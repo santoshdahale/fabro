@@ -1,6 +1,8 @@
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
+use agent::{DockerConfig, DockerExecutionEnvironment, ExecutionEnvironment, LocalExecutionEnvironment};
 use anyhow::bail;
 use chrono::{Local, Utc};
 use terminal::Styles;
@@ -226,7 +228,70 @@ pub async fn run_command(args: RunArgs, styles: &'static Styles) -> anyhow::Resu
         .map(|s| s.parse::<ExecutionEnvKind>())
         .transpose()
         .map_err(|e| anyhow::anyhow!("Invalid execution environment in TOML: {e}"))?;
-    let execution_env = args.execution_env.or(toml_execution_env).unwrap_or_default();
+    let execution_env_kind = args.execution_env.or(toml_execution_env).unwrap_or_default();
+
+    let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+    let daytona_config = task_cfg
+        .as_ref()
+        .and_then(|c| c.execution.as_ref())
+        .and_then(|e| e.daytona.clone());
+
+    let execution_env: Arc<dyn ExecutionEnvironment> = match execution_env_kind {
+        ExecutionEnvKind::Docker => {
+            let config = DockerConfig {
+                host_working_directory: cwd.to_string_lossy().to_string(),
+                ..DockerConfig::default()
+            };
+            Arc::new(
+                DockerExecutionEnvironment::new(config)
+                    .map_err(|e| anyhow::anyhow!("Failed to create Docker environment: {e}"))?,
+            )
+        }
+        ExecutionEnvKind::Daytona => {
+            let daytona_client = daytona_sdk::Client::new()
+                .await
+                .map_err(|e| anyhow::anyhow!("Failed to create Daytona client: {e}"))?;
+            let config = daytona_config.clone().unwrap_or_default();
+            Arc::new(crate::daytona_env::DaytonaExecutionEnvironment::new(
+                daytona_client,
+                config,
+            ))
+        }
+        ExecutionEnvKind::Local => Arc::new(LocalExecutionEnvironment::new(cwd)),
+    };
+
+    // Initialize execution environment (creates sandbox/container once for the whole pipeline)
+    execution_env.initialize().await
+        .map_err(|e| anyhow::anyhow!("Failed to initialize execution environment: {e}"))?;
+
+    // Ensure cleanup runs even on error/panic
+    let exec_env_for_cleanup = Arc::clone(&execution_env);
+    let _cleanup_guard = scopeguard::guard((), move |()| {
+        // Best-effort cleanup — fire and forget in a blocking context
+        let rt = tokio::runtime::Handle::try_current();
+        if let Ok(handle) = rt {
+            handle.spawn(async move {
+                if let Err(e) = exec_env_for_cleanup.cleanup().await {
+                    eprintln!("Warning: execution environment cleanup failed: {e}");
+                }
+            });
+        }
+    });
+
+    // Run setup commands inside the execution environment (once, not per-stage)
+    for cmd in &setup_commands {
+        let result = execution_env
+            .exec_command(cmd, 300_000, None, None, None)
+            .await
+            .map_err(|e| anyhow::anyhow!("Setup command failed: {e}"))?;
+        if result.exit_code != 0 {
+            anyhow::bail!(
+                "Setup command failed (exit code {}): {cmd}\n{}",
+                result.exit_code,
+                result.stderr,
+            );
+        }
+    }
 
     // 6. Resolve backend, model, and provider
     let dry_run_mode = if args.dry_run {
@@ -294,7 +359,7 @@ pub async fn run_command(args: RunArgs, styles: &'static Styles) -> anyhow::Resu
         None => (model, provider),
     };
 
-    // 6. Build engine
+    // 7. Build engine
     let registry = default_registry(interviewer.clone(), || {
         if dry_run_mode {
             None
@@ -304,12 +369,10 @@ pub async fn run_command(args: RunArgs, styles: &'static Styles) -> anyhow::Resu
                 provider.clone(),
                 args.verbose,
                 styles,
-                execution_env,
-                setup_commands.clone(),
             )))
         }
     });
-    let engine = PipelineEngine::with_interviewer(registry, emitter, interviewer);
+    let engine = PipelineEngine::with_interviewer(registry, emitter, interviewer, Arc::clone(&execution_env));
 
     // 7. Execute
     let config = RunConfig {

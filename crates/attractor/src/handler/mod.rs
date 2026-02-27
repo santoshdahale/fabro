@@ -13,6 +13,7 @@ use std::collections::HashMap;
 use std::path::Path;
 use std::sync::Arc;
 
+use agent::ExecutionEnvironment;
 use async_trait::async_trait;
 
 use crate::context::Context;
@@ -26,6 +27,7 @@ use crate::outcome::Outcome;
 pub struct EngineServices {
     pub registry: Arc<HandlerRegistry>,
     pub emitter: Arc<EventEmitter>,
+    pub execution_env: Arc<dyn ExecutionEnvironment>,
 }
 
 /// The handler interface for node execution.

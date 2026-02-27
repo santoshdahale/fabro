@@ -146,6 +146,12 @@ mod tests {
     use crate::handler::HandlerRegistry;
     use crate::outcome::StageStatus;
 
+    fn local_env() -> Arc<dyn agent::ExecutionEnvironment> {
+        Arc::new(agent::LocalExecutionEnvironment::new(
+            std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from(".")),
+        ))
+    }
+
     fn make_services() -> EngineServices {
         let mut registry = HandlerRegistry::new(Box::new(StartHandler));
         registry.register("start", Box::new(StartHandler));
@@ -153,6 +159,7 @@ mod tests {
         EngineServices {
             registry: Arc::new(registry),
             emitter: Arc::new(EventEmitter::new()),
+            execution_env: local_env(),
         }
     }
 
@@ -160,6 +167,7 @@ mod tests {
         EngineServices {
             registry: Arc::new(registry),
             emitter: Arc::new(EventEmitter::new()),
+            execution_env: local_env(),
         }
     }
 

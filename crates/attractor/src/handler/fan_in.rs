@@ -1,6 +1,7 @@
 use std::path::Path;
 use std::sync::Arc;
 
+use agent::ExecutionEnvironment;
 use async_trait::async_trait;
 
 use crate::context::Context;
@@ -42,7 +43,7 @@ impl Handler for FanInHandler {
         let prompt = node.prompt().filter(|p| !p.is_empty());
 
         let best = if let (Some(prompt_text), Some(backend)) = (prompt, &self.backend) {
-            llm_evaluate(backend.as_ref(), prompt_text, &results, context, logs_root, &node.id, &services.emitter).await?
+            llm_evaluate(backend.as_ref(), prompt_text, &results, context, logs_root, &node.id, &services.emitter, &services.execution_env).await?
         } else {
             heuristic_select(&results)
         };
@@ -156,6 +157,7 @@ async fn llm_evaluate(
     logs_root: &Path,
     node_id: &str,
     emitter: &Arc<EventEmitter>,
+    execution_env: &Arc<dyn ExecutionEnvironment>,
 ) -> Result<Candidate, AttractorError> {
     let results_text = serde_json::to_string_pretty(results)
         .unwrap_or_else(|_| results.to_string());
@@ -174,7 +176,7 @@ async fn llm_evaluate(
     let eval_node = Node::new("fan_in_eval");
 
     // Fan-in evaluation runs outside a thread context, so pass None
-    match backend.run(&eval_node, &full_prompt, context, None, emitter, &stage_dir).await {
+    match backend.run(&eval_node, &full_prompt, context, None, emitter, &stage_dir, execution_env).await {
         Ok(CodergenResult::Full(outcome)) => {
             // If the backend returned a full Outcome, extract best_id from context_updates
             let best_id = outcome
@@ -246,6 +248,9 @@ mod tests {
         EngineServices {
             registry: std::sync::Arc::new(HandlerRegistry::new(Box::new(StartHandler))),
             emitter: std::sync::Arc::new(EventEmitter::new()),
+            execution_env: std::sync::Arc::new(agent::LocalExecutionEnvironment::new(
+                std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from(".")),
+            )),
         }
     }
 
@@ -372,6 +377,7 @@ mod tests {
                 _thread_id: Option<&str>,
                 _emitter: &Arc<EventEmitter>,
                 _stage_dir: &std::path::Path,
+                _execution_env: &Arc<dyn ExecutionEnvironment>,
             ) -> Result<CodergenResult, AttractorError> {
                 // Return text that contains the ID "branch_b"
                 Ok(CodergenResult::Text { text: "The best candidate is branch_b".to_string(), usage: None, files_touched: Vec::new() })

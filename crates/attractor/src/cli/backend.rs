@@ -1,18 +1,15 @@
 use std::collections::{HashMap, HashSet};
-use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
 
 use agent::{
-    AgentEvent, AnthropicProfile, DockerConfig, DockerExecutionEnvironment,
-    ExecutionEnvironment, GeminiProfile, LocalExecutionEnvironment, OpenAiProfile, ProviderProfile,
-    Session, SessionConfig, Turn,
+    AgentEvent, AnthropicProfile, ExecutionEnvironment, GeminiProfile, OpenAiProfile,
+    ProviderProfile, Session, SessionConfig, Turn,
 };
 use llm::client::Client;
 use terminal::Styles;
 
-use crate::cli::ExecutionEnvKind;
 use crate::context::Context;
 use crate::error::AttractorError;
 use crate::graph::Node;
@@ -25,8 +22,6 @@ pub struct AgentBackend {
     provider: Option<String>,
     verbose: u8,
     styles: &'static Styles,
-    execution_env: ExecutionEnvKind,
-    setup_commands: Vec<String>,
 }
 
 impl AgentBackend {
@@ -36,16 +31,12 @@ impl AgentBackend {
         provider: Option<String>,
         verbose: u8,
         styles: &'static Styles,
-        execution_env: ExecutionEnvKind,
-        setup_commands: Vec<String>,
     ) -> Self {
         Self {
             model,
             provider,
             verbose,
             styles,
-            execution_env,
-            setup_commands,
         }
     }
 
@@ -142,44 +133,20 @@ impl CodergenBackend for AgentBackend {
         _thread_id: Option<&str>,
         emitter: &Arc<crate::event::EventEmitter>,
         stage_dir: &std::path::Path,
+        execution_env: &Arc<dyn ExecutionEnvironment>,
     ) -> Result<CodergenResult, AttractorError> {
         let client = Client::from_env()
             .await
             .map_err(|e| AttractorError::Handler(format!("Failed to create LLM client: {e}")))?;
 
         let profile = self.build_profile();
-        let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-
-        let exec_env: Arc<dyn ExecutionEnvironment> = match self.execution_env {
-            ExecutionEnvKind::Docker => {
-                let config = DockerConfig {
-                    host_working_directory: cwd.to_string_lossy().to_string(),
-                    ..DockerConfig::default()
-                };
-                Arc::new(
-                    DockerExecutionEnvironment::new(config)
-                        .map_err(|e| AttractorError::Handler(format!("Failed to create Docker environment: {e}")))?,
-                )
-            }
-            ExecutionEnvKind::Daytona => {
-                let daytona_client = daytona_sdk::Client::new()
-                    .await
-                    .map_err(|e| AttractorError::Handler(format!("Failed to create Daytona client: {e}")))?;
-                Arc::new(crate::daytona_env::DaytonaExecutionEnvironment::new(
-                    daytona_client,
-                    crate::daytona_env::DaytonaConfig::default(),
-                ))
-            }
-            ExecutionEnvKind::Local => Arc::new(LocalExecutionEnvironment::new(cwd)),
-        };
 
         let config = SessionConfig {
             reasoning_effort: Some(node.reasoning_effort().to_string()),
             ..SessionConfig::default()
         };
 
-        let exec_env_for_setup = Arc::clone(&exec_env);
-        let mut session = Session::new(client, profile, exec_env, config);
+        let mut session = Session::new(client, profile, Arc::clone(execution_env), config);
 
         // File change tracking: shared between spawned task and main fn.
         let pending_tool_calls: Arc<Mutex<HashMap<String, String>>> =
@@ -300,21 +267,6 @@ impl CodergenBackend for AgentBackend {
 
         session.initialize().await;
 
-        // Run setup commands inside the execution environment
-        for cmd in &self.setup_commands {
-            let result = exec_env_for_setup
-                .exec_command(cmd, 300_000, None, None, None)
-                .await
-                .map_err(|e| AttractorError::Handler(format!("Setup command failed: {e}")))?;
-            if result.exit_code != 0 {
-                return Err(AttractorError::Handler(format!(
-                    "Setup command failed (exit code {}): {cmd}\n{}",
-                    result.exit_code,
-                    result.stderr,
-                )));
-            }
-        }
-
         session.process_input(prompt).await.map_err(|e| {
             AttractorError::Handler(format!("Agent session failed: {e}"))
         })?;
@@ -422,17 +374,16 @@ mod tests {
     use super::*;
 
     #[test]
-    fn agent_backend_stores_execution_env_kind() {
+    fn agent_backend_stores_config() {
         let styles = Box::leak(Box::new(Styles::new(false)));
         let backend = AgentBackend::new(
             "claude-opus-4-6".to_string(),
-            None,
-            0,
+            Some("openai".to_string()),
+            2,
             styles,
-            ExecutionEnvKind::Daytona,
-            vec!["npm install".to_string()],
         );
-        assert_eq!(backend.execution_env, ExecutionEnvKind::Daytona);
-        assert_eq!(backend.setup_commands, vec!["npm install".to_string()]);
+        assert_eq!(backend.model, "claude-opus-4-6");
+        assert_eq!(backend.provider.as_deref(), Some("openai"));
+        assert_eq!(backend.verbose, 2);
     }
 }

@@ -36,6 +36,9 @@ mod tests {
         EngineServices {
             registry: std::sync::Arc::new(HandlerRegistry::new(Box::new(StartHandler))),
             emitter: std::sync::Arc::new(EventEmitter::new()),
+            execution_env: std::sync::Arc::new(agent::LocalExecutionEnvironment::new(
+                std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from(".")),
+            )),
         }
     }
 

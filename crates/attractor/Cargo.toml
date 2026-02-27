@@ -42,6 +42,8 @@ toml.workspace = true
 dirs = "6"
 dialoguer.workspace = true
 daytona-sdk.workspace = true
+daytona-api-client.workspace = true
+scopeguard = "1"
 git2.workspace = true
 tokio-util.workspace = true
 axum = { version = "0.8", optional = true }

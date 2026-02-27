@@ -1,6 +1,7 @@
 use std::path::Path;
 use std::sync::Arc;
 
+use agent::ExecutionEnvironment;
 use async_trait::async_trait;
 
 use crate::context::Context;
@@ -33,6 +34,7 @@ pub trait CodergenBackend: Send + Sync {
         thread_id: Option<&str>,
         emitter: &Arc<EventEmitter>,
         stage_dir: &Path,
+        execution_env: &Arc<dyn ExecutionEnvironment>,
     ) -> Result<CodergenResult, AttractorError>;
 
     /// Run a single LLM call with no tools (one_shot mode).
@@ -224,7 +226,7 @@ impl Handler for CodergenHandler {
         let (response_text, stage_usage, backend_files_touched) = if let Some(backend) = &self.backend {
             let result = match mode {
                 CodergenMode::AgentLoop => {
-                    backend.run(node, &prompt, context, thread_id.as_deref(), &services.emitter, &stage_dir).await
+                    backend.run(node, &prompt, context, thread_id.as_deref(), &services.emitter, &stage_dir, &services.execution_env).await
                 }
                 CodergenMode::OneShot => backend.one_shot(node, &prompt, &stage_dir).await,
             };
@@ -302,6 +304,9 @@ mod tests {
         EngineServices {
             registry: std::sync::Arc::new(HandlerRegistry::new(Box::new(StartHandler))),
             emitter: std::sync::Arc::new(EventEmitter::new()),
+            execution_env: std::sync::Arc::new(agent::LocalExecutionEnvironment::new(
+                std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from(".")),
+            )),
         }
     }
 
@@ -549,6 +554,7 @@ mod tests {
                 thread_id: Option<&str>,
                 _emitter: &Arc<EventEmitter>,
                 _stage_dir: &Path,
+                _execution_env: &Arc<dyn ExecutionEnvironment>,
             ) -> Result<CodergenResult, AttractorError> {
                 *self.captured_thread_id.lock().unwrap() =
                     Some(thread_id.map(String::from));
@@ -596,6 +602,7 @@ mod tests {
                 thread_id: Option<&str>,
                 _emitter: &Arc<EventEmitter>,
                 _stage_dir: &Path,
+                _execution_env: &Arc<dyn ExecutionEnvironment>,
             ) -> Result<CodergenResult, AttractorError> {
                 *self.captured_thread_id.lock().unwrap() =
                     Some(thread_id.map(String::from));
@@ -638,6 +645,7 @@ mod tests {
                 _thread_id: Option<&str>,
                 _emitter: &Arc<EventEmitter>,
                 _stage_dir: &Path,
+                _execution_env: &Arc<dyn ExecutionEnvironment>,
             ) -> Result<CodergenResult, AttractorError> {
                 Err(AttractorError::Handler("Request timed out".to_string()))
             }
@@ -751,6 +759,7 @@ Some text in between.
                 _thread_id: Option<&str>,
                 _emitter: &Arc<EventEmitter>,
                 _stage_dir: &Path,
+                _execution_env: &Arc<dyn ExecutionEnvironment>,
             ) -> Result<CodergenResult, AttractorError> {
                 panic!("run() should not be called in one_shot mode");
             }
@@ -854,6 +863,7 @@ Some text in between.
                 _thread_id: Option<&str>,
                 _emitter: &Arc<EventEmitter>,
                 _stage_dir: &Path,
+                _execution_env: &Arc<dyn ExecutionEnvironment>,
             ) -> Result<CodergenResult, AttractorError> {
                 Err(AttractorError::Validation("bad config".to_string()))
             }

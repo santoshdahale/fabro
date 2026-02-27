@@ -13,6 +13,8 @@ use tokio::sync::broadcast;
 use tokio_stream::wrappers::BroadcastStream;
 use tokio_stream::StreamExt;
 
+use agent::LocalExecutionEnvironment;
+
 use crate::checkpoint::Checkpoint;
 use crate::context::Context;
 use crate::engine::{PipelineEngine, RunConfig};
@@ -184,10 +186,13 @@ async fn start_pipeline(
     });
 
     let registry = (state.registry_factory)(Arc::clone(&interviewer) as Arc<dyn Interviewer>);
+    let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+    let execution_env: Arc<dyn agent::ExecutionEnvironment> = Arc::new(LocalExecutionEnvironment::new(cwd));
     let engine = PipelineEngine::with_interviewer(
         registry,
         emitter,
         Arc::clone(&interviewer) as Arc<dyn Interviewer>,
+        execution_env,
     );
 
     {
