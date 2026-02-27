@@ -213,7 +213,10 @@ async fn end_to_end_linear_pipeline() {
     );
 
     let prompt_content = std::fs::read_to_string(stage_dir.join("prompt.md")).unwrap();
-    assert_eq!(prompt_content, "Implement the feature");
+    assert!(
+        prompt_content.ends_with("Implement the feature"),
+        "prompt should end with original prompt, got: {prompt_content}"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -1311,7 +1314,10 @@ async fn smoke_test_with_mock_codergen_backend() {
     // Verify prompt.md had $goal expanded by the CodergenHandler
     let plan_prompt = std::fs::read_to_string(dir.path().join("plan").join("prompt.md"))
         .expect("plan prompt should exist");
-    assert_eq!(plan_prompt, "Plan to achieve: Build and validate");
+    assert!(
+        plan_prompt.ends_with("Plan to achieve: Build and validate"),
+        "prompt should end with original prompt, got: {plan_prompt}"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -6645,5 +6651,166 @@ async fn attractor_e2e_with_real_llm() {
     assert!(
         checkpoint.completed_nodes.contains(&"work".to_string()),
         "completed_nodes should contain 'work'"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Fidelity preamble injection: verify prompt.md contains preamble + prompt
+// for each fidelity mode, using script → codergen pipeline with no live LLM.
+// ---------------------------------------------------------------------------
+
+/// Build a `start -> run_tests (script) -> report (codergen) -> exit` pipeline
+/// with the given fidelity and goal, then return the contents of `report/prompt.md`.
+async fn run_fidelity_prompt_pipeline(fidelity: &str) -> String {
+    let mut graph = Graph::new("FidelityPromptTest");
+    graph.attrs.insert(
+        "goal".to_string(),
+        AttrValue::String("Validate the build".to_string()),
+    );
+    graph.attrs.insert(
+        "default_fidelity".to_string(),
+        AttrValue::String(fidelity.to_string()),
+    );
+
+    let mut start = Node::new("start");
+    start.attrs.insert("shape".to_string(), AttrValue::String("Mdiamond".to_string()));
+    graph.nodes.insert("start".to_string(), start);
+
+    let mut exit = Node::new("exit");
+    exit.attrs.insert("shape".to_string(), AttrValue::String("Msquare".to_string()));
+    graph.nodes.insert("exit".to_string(), exit);
+
+    // Script node that produces test output via stdout
+    let mut run_tests = Node::new("run_tests");
+    run_tests.attrs.insert("shape".to_string(), AttrValue::String("parallelogram".to_string()));
+    run_tests.attrs.insert(
+        "script".to_string(),
+        AttrValue::String("echo '10 passed, 0 failed'".to_string()),
+    );
+    graph.nodes.insert("run_tests".to_string(), run_tests);
+
+    // Codergen node that should receive the preamble
+    let mut report = Node::new("report");
+    report.attrs.insert("shape".to_string(), AttrValue::String("box".to_string()));
+    report.attrs.insert(
+        "prompt".to_string(),
+        AttrValue::String("Summarize the test results".to_string()),
+    );
+    graph.nodes.insert("report".to_string(), report);
+
+    graph.edges.push(Edge::new("start", "run_tests"));
+    graph.edges.push(Edge::new("run_tests", "report"));
+    graph.edges.push(Edge::new("report", "exit"));
+
+    let dir = tempfile::tempdir().unwrap();
+    let mut registry = HandlerRegistry::new(Box::new(StartHandler));
+    registry.register("start", Box::new(StartHandler));
+    registry.register("exit", Box::new(ExitHandler));
+    registry.register("script", Box::new(ScriptHandler));
+    registry.register(
+        "codergen",
+        Box::new(CodergenHandler::new(Some(Box::new(MockCodergenBackend)))),
+    );
+
+    let engine = PipelineEngine::new(registry, Arc::new(EventEmitter::new()), local_env());
+    let config = RunConfig {
+        logs_root: dir.path().to_path_buf(),
+        cancel_token: None,
+        dry_run: false,
+    };
+
+    engine.run(&graph, &config).await.expect("pipeline should succeed");
+
+    std::fs::read_to_string(dir.path().join("report").join("prompt.md"))
+        .expect("report/prompt.md should exist")
+}
+
+#[tokio::test]
+async fn fidelity_prompt_compact() {
+    let prompt = run_fidelity_prompt_pipeline("compact").await;
+
+    // Preamble should contain goal, completed stages, and context values
+    assert!(prompt.contains("Validate the build"), "compact: should contain goal");
+    assert!(prompt.contains("Completed stages:"), "compact: should list completed stages");
+    assert!(prompt.contains("run_tests"), "compact: should mention run_tests node");
+    assert!(prompt.contains("Context values:"), "compact: should include context values section");
+
+    // Original prompt at the end
+    assert!(
+        prompt.ends_with("Summarize the test results"),
+        "compact: should end with original prompt, got:\n{prompt}"
+    );
+}
+
+#[tokio::test]
+async fn fidelity_prompt_truncate() {
+    let prompt = run_fidelity_prompt_pipeline("truncate").await;
+
+    // Truncate is minimal: goal + run ID only, no completed stages
+    assert!(prompt.contains("Validate the build"), "truncate: should contain goal");
+    assert!(!prompt.contains("Completed stages:"), "truncate: should NOT list completed stages");
+
+    // Original prompt at the end
+    assert!(
+        prompt.ends_with("Summarize the test results"),
+        "truncate: should end with original prompt, got:\n{prompt}"
+    );
+}
+
+#[tokio::test]
+async fn fidelity_prompt_summary_low() {
+    let prompt = run_fidelity_prompt_pipeline("summary:low").await;
+
+    // summary:low includes goal, stage count, recent stages, but NOT context values
+    assert!(prompt.contains("Validate the build"), "summary:low: should contain goal");
+    assert!(!prompt.contains("Context values:"), "summary:low: should NOT include context values");
+
+    // Original prompt at the end
+    assert!(
+        prompt.ends_with("Summarize the test results"),
+        "summary:low: should end with original prompt, got:\n{prompt}"
+    );
+}
+
+#[tokio::test]
+async fn fidelity_prompt_summary_medium() {
+    let prompt = run_fidelity_prompt_pipeline("summary:medium").await;
+
+    // summary:medium includes goal, stages, and context values
+    assert!(prompt.contains("Validate the build"), "summary:medium: should contain goal");
+    assert!(prompt.contains("run_tests"), "summary:medium: should mention run_tests");
+    assert!(prompt.contains("Context values:"), "summary:medium: should include context values");
+
+    // Original prompt at the end
+    assert!(
+        prompt.ends_with("Summarize the test results"),
+        "summary:medium: should end with original prompt, got:\n{prompt}"
+    );
+}
+
+#[tokio::test]
+async fn fidelity_prompt_summary_high() {
+    let prompt = run_fidelity_prompt_pipeline("summary:high").await;
+
+    // summary:high includes goal, all stages, context values
+    assert!(prompt.contains("Validate the build"), "summary:high: should contain goal");
+    assert!(prompt.contains("run_tests"), "summary:high: should mention run_tests");
+    assert!(prompt.contains("Context values:"), "summary:high: should include context values");
+
+    // Original prompt at the end
+    assert!(
+        prompt.ends_with("Summarize the test results"),
+        "summary:high: should end with original prompt, got:\n{prompt}"
+    );
+}
+
+#[tokio::test]
+async fn fidelity_prompt_full_has_no_preamble() {
+    let prompt = run_fidelity_prompt_pipeline("full").await;
+
+    // Full fidelity produces empty preamble — prompt is just the original
+    assert_eq!(
+        prompt, "Summarize the test results",
+        "full: should be bare prompt with no preamble, got:\n{prompt}"
     );
 }

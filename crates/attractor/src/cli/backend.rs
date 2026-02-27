@@ -17,11 +17,15 @@ use crate::handler::codergen::{CodergenBackend, CodergenResult};
 use crate::outcome::StageUsage;
 
 /// LLM backend that delegates to an `agent` Session per invocation.
+///
+/// For `full` fidelity nodes sharing a thread key, sessions are cached
+/// and reused so the LLM sees the full conversation history.
 pub struct AgentBackend {
     model: String,
     provider: Option<String>,
     verbose: u8,
     styles: &'static Styles,
+    sessions: Mutex<HashMap<String, Session>>,
 }
 
 impl AgentBackend {
@@ -37,7 +41,27 @@ impl AgentBackend {
             provider,
             verbose,
             styles,
+            sessions: Mutex::new(HashMap::new()),
         }
+    }
+
+    async fn create_session(
+        &self,
+        node: &Node,
+        execution_env: &Arc<dyn ExecutionEnvironment>,
+    ) -> Result<Session, AttractorError> {
+        let client = Client::from_env()
+            .await
+            .map_err(|e| AttractorError::Handler(format!("Failed to create LLM client: {e}")))?;
+
+        let profile = self.build_profile();
+
+        let config = SessionConfig {
+            reasoning_effort: Some(node.reasoning_effort().to_string()),
+            ..SessionConfig::default()
+        };
+
+        Ok(Session::new(client, profile, Arc::clone(execution_env), config))
     }
 
     fn build_profile(&self) -> Arc<dyn ProviderProfile> {
@@ -129,24 +153,30 @@ impl CodergenBackend for AgentBackend {
         &self,
         node: &Node,
         prompt: &str,
-        _context: &Context,
-        _thread_id: Option<&str>,
+        context: &Context,
+        thread_id: Option<&str>,
         emitter: &Arc<crate::event::EventEmitter>,
         stage_dir: &std::path::Path,
         execution_env: &Arc<dyn ExecutionEnvironment>,
     ) -> Result<CodergenResult, AttractorError> {
-        let client = Client::from_env()
-            .await
-            .map_err(|e| AttractorError::Handler(format!("Failed to create LLM client: {e}")))?;
-
-        let profile = self.build_profile();
-
-        let config = SessionConfig {
-            reasoning_effort: Some(node.reasoning_effort().to_string()),
-            ..SessionConfig::default()
+        let fidelity = context.get_string("internal.fidelity", "");
+        let reuse_key = if fidelity == "full" {
+            thread_id.map(String::from)
+        } else {
+            None
         };
 
-        let mut session = Session::new(client, profile, Arc::clone(execution_env), config);
+        // Take a cached session if reusing, otherwise create a new one.
+        let (mut session, is_reused) = if let Some(ref key) = reuse_key {
+            let existing = self.sessions.lock().unwrap().remove(key);
+            if let Some(s) = existing {
+                (s, true)
+            } else {
+                (self.create_session(node, execution_env).await?, false)
+            }
+        } else {
+            (self.create_session(node, execution_env).await?, false)
+        };
 
         // File change tracking: shared between spawned task and main fn.
         let pending_tool_calls: Arc<Mutex<HashMap<String, String>>> =
@@ -265,16 +295,26 @@ impl CodergenBackend for AgentBackend {
             text: prompt.to_string(),
         });
 
-        session.initialize().await;
+        // Record turn count before processing so we only aggregate new usage.
+        let turns_before = session.history().turns().len();
 
-        session.process_input(prompt).await.map_err(|e| {
+        if !is_reused {
+            session.initialize().await;
+        }
+
+        let result = session.process_input(prompt).await.map_err(|e| {
             AttractorError::Handler(format!("Agent session failed: {e}"))
-        })?;
+        });
 
-        // Aggregate token usage from all assistant turns.
+        // On error, drop the session (don't cache failed state).
+        if let Err(e) = result {
+            return Err(e);
+        }
+
+        // Aggregate token usage only from new turns (prevents double-counting on reuse).
         let (mut turn_count, mut tool_call_count) = (0usize, 0usize);
         let mut total_usage = llm::types::Usage::default();
-        for turn in session.history().turns() {
+        for turn in &session.history().turns()[turns_before..] {
             if let Turn::Assistant {
                 tool_calls, usage, ..
             } = turn
@@ -304,8 +344,9 @@ impl CodergenBackend for AgentBackend {
             } else {
                 format!("{total_tokens} tokens")
             };
+            let reuse_label = if is_reused { " (reused session)" } else { "" };
             eprintln!(
-                "{dim}[{node_id}] Done ({turn_count} turns, {tool_call_count} tool calls, {token_str}){reset}",
+                "{dim}[{node_id}] Done ({turn_count} turns, {tool_call_count} tool calls, {token_str}{reuse_label}){reset}",
                 node_id = node.id,
                 dim = self.styles.dim,
                 reset = self.styles.reset,
@@ -343,6 +384,11 @@ impl CodergenBackend for AgentBackend {
         });
         if let Ok(json) = serde_json::to_string_pretty(&provider_used) {
             let _ = std::fs::write(stage_dir.join("provider_used.json"), json);
+        }
+
+        // Cache session back for reuse on success.
+        if let Some(key) = reuse_key {
+            self.sessions.lock().unwrap().insert(key, session);
         }
 
         Ok(CodergenResult::Text { text: response, usage: Some(stage_usage), files_touched })
@@ -385,5 +431,17 @@ mod tests {
         assert_eq!(backend.model, "claude-opus-4-6");
         assert_eq!(backend.provider.as_deref(), Some("openai"));
         assert_eq!(backend.verbose, 2);
+    }
+
+    #[test]
+    fn agent_backend_initializes_empty_sessions() {
+        let styles = Box::leak(Box::new(Styles::new(false)));
+        let backend = AgentBackend::new(
+            "claude-opus-4-6".to_string(),
+            None,
+            0,
+            styles,
+        );
+        assert!(backend.sessions.lock().unwrap().is_empty());
     }
 }

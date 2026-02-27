@@ -197,12 +197,18 @@ impl Handler for CodergenHandler {
         logs_root: &Path,
         services: &EngineServices,
     ) -> Result<Outcome, AttractorError> {
-        // 1. Build prompt
+        // 1. Build prompt (prepend fidelity preamble if present)
         let raw_prompt = node
             .prompt()
             .filter(|p| !p.is_empty())
             .unwrap_or_else(|| node.label());
-        let prompt = expand_variables(raw_prompt, graph);
+        let expanded = expand_variables(raw_prompt, graph);
+        let preamble = context.get_string("current.preamble", "");
+        let prompt = if preamble.is_empty() {
+            expanded
+        } else {
+            format!("{preamble}\n\n{expanded}")
+        };
 
         // 2. Write prompt to logs
         let stage_dir = logs_root.join(&node.id);
@@ -881,5 +887,234 @@ Some text in between.
             .unwrap();
         assert_eq!(outcome.status, crate::outcome::StageStatus::Fail);
         assert!(outcome.failure_reason.unwrap().contains("bad config"));
+    }
+
+    #[tokio::test]
+    async fn codergen_handler_prepends_preamble_to_prompt() {
+        use std::sync::{Arc, Mutex};
+
+        struct PromptCapturingBackend {
+            captured_prompt: Arc<Mutex<Option<String>>>,
+        }
+
+        #[async_trait]
+        impl CodergenBackend for PromptCapturingBackend {
+            async fn run(
+                &self,
+                _node: &Node,
+                prompt: &str,
+                _context: &Context,
+                _thread_id: Option<&str>,
+                _emitter: &Arc<EventEmitter>,
+                _stage_dir: &std::path::Path,
+                _execution_env: &Arc<dyn ExecutionEnvironment>,
+            ) -> Result<CodergenResult, AttractorError> {
+                *self.captured_prompt.lock().unwrap() = Some(prompt.to_string());
+                Ok(CodergenResult::Text {
+                    text: "ok".to_string(),
+                    usage: None,
+                    files_touched: Vec::new(),
+                })
+            }
+        }
+
+        let captured = Arc::new(Mutex::new(None));
+        let backend = PromptCapturingBackend {
+            captured_prompt: captured.clone(),
+        };
+        let handler = CodergenHandler::new(Some(Box::new(backend)));
+
+        let mut node = Node::new("report");
+        node.attrs.insert(
+            "prompt".to_string(),
+            AttrValue::String("Summarize the results".to_string()),
+        );
+        let context = Context::new();
+        context.set(
+            "current.preamble",
+            serde_json::json!("## Test Output\n10 passed, 0 failed"),
+        );
+        let graph = Graph::new("test");
+        let tmp = TempDir::new().unwrap();
+
+        handler
+            .execute(&node, &context, &graph, tmp.path(), &make_services())
+            .await
+            .unwrap();
+
+        let prompt = captured.lock().unwrap().clone().unwrap();
+        assert!(
+            prompt.starts_with("## Test Output\n10 passed, 0 failed"),
+            "prompt should start with preamble, got: {prompt}"
+        );
+        assert!(
+            prompt.ends_with("Summarize the results"),
+            "prompt should end with original prompt, got: {prompt}"
+        );
+        assert!(
+            prompt.contains("\n\nSummarize"),
+            "preamble and prompt should be separated by blank line"
+        );
+    }
+
+    #[tokio::test]
+    async fn codergen_handler_no_preamble_when_empty() {
+        use std::sync::{Arc, Mutex};
+
+        struct PromptCapturingBackend {
+            captured_prompt: Arc<Mutex<Option<String>>>,
+        }
+
+        #[async_trait]
+        impl CodergenBackend for PromptCapturingBackend {
+            async fn run(
+                &self,
+                _node: &Node,
+                prompt: &str,
+                _context: &Context,
+                _thread_id: Option<&str>,
+                _emitter: &Arc<EventEmitter>,
+                _stage_dir: &std::path::Path,
+                _execution_env: &Arc<dyn ExecutionEnvironment>,
+            ) -> Result<CodergenResult, AttractorError> {
+                *self.captured_prompt.lock().unwrap() = Some(prompt.to_string());
+                Ok(CodergenResult::Text {
+                    text: "ok".to_string(),
+                    usage: None,
+                    files_touched: Vec::new(),
+                })
+            }
+        }
+
+        let captured = Arc::new(Mutex::new(None));
+        let backend = PromptCapturingBackend {
+            captured_prompt: captured.clone(),
+        };
+        let handler = CodergenHandler::new(Some(Box::new(backend)));
+
+        let mut node = Node::new("report");
+        node.attrs.insert(
+            "prompt".to_string(),
+            AttrValue::String("Summarize the results".to_string()),
+        );
+        let context = Context::new();
+        // No preamble set -- context.get_string returns ""
+        let graph = Graph::new("test");
+        let tmp = TempDir::new().unwrap();
+
+        handler
+            .execute(&node, &context, &graph, tmp.path(), &make_services())
+            .await
+            .unwrap();
+
+        let prompt = captured.lock().unwrap().clone().unwrap();
+        assert_eq!(prompt, "Summarize the results");
+    }
+
+    #[tokio::test]
+    async fn codergen_handler_one_shot_prepends_preamble() {
+        use std::sync::{Arc, Mutex};
+
+        struct OneShotCapturingBackend {
+            captured_prompt: Arc<Mutex<Option<String>>>,
+        }
+
+        #[async_trait]
+        impl CodergenBackend for OneShotCapturingBackend {
+            async fn run(
+                &self,
+                _node: &Node,
+                _prompt: &str,
+                _context: &Context,
+                _thread_id: Option<&str>,
+                _emitter: &Arc<EventEmitter>,
+                _stage_dir: &std::path::Path,
+                _execution_env: &Arc<dyn ExecutionEnvironment>,
+            ) -> Result<CodergenResult, AttractorError> {
+                panic!("run() should not be called in one_shot mode");
+            }
+
+            async fn one_shot(
+                &self,
+                _node: &Node,
+                prompt: &str,
+                _stage_dir: &std::path::Path,
+            ) -> Result<CodergenResult, AttractorError> {
+                *self.captured_prompt.lock().unwrap() = Some(prompt.to_string());
+                Ok(CodergenResult::Text {
+                    text: "classified".to_string(),
+                    usage: None,
+                    files_touched: Vec::new(),
+                })
+            }
+        }
+
+        let captured = Arc::new(Mutex::new(None));
+        let backend = OneShotCapturingBackend {
+            captured_prompt: captured.clone(),
+        };
+        let handler = CodergenHandler::new(Some(Box::new(backend)));
+
+        let mut node = Node::new("classify");
+        node.attrs.insert(
+            "codergen_mode".to_string(),
+            AttrValue::String("one_shot".to_string()),
+        );
+        node.attrs.insert(
+            "prompt".to_string(),
+            AttrValue::String("Classify this".to_string()),
+        );
+        let context = Context::new();
+        context.set(
+            "current.preamble",
+            serde_json::json!("Prior output here"),
+        );
+        let graph = Graph::new("test");
+        let tmp = TempDir::new().unwrap();
+
+        handler
+            .execute(&node, &context, &graph, tmp.path(), &make_services())
+            .await
+            .unwrap();
+
+        let prompt = captured.lock().unwrap().clone().unwrap();
+        assert!(
+            prompt.starts_with("Prior output here"),
+            "one_shot prompt should start with preamble, got: {prompt}"
+        );
+        assert!(prompt.ends_with("Classify this"));
+    }
+
+    #[tokio::test]
+    async fn codergen_handler_preamble_written_to_prompt_md() {
+        let handler = CodergenHandler::new(None);
+        let mut node = Node::new("report");
+        node.attrs.insert(
+            "prompt".to_string(),
+            AttrValue::String("Summarize".to_string()),
+        );
+        let context = Context::new();
+        context.set(
+            "current.preamble",
+            serde_json::json!("## Script Output\nAll tests passed"),
+        );
+        let graph = Graph::new("test");
+        let tmp = TempDir::new().unwrap();
+
+        handler
+            .execute(&node, &context, &graph, tmp.path(), &make_services())
+            .await
+            .unwrap();
+
+        let prompt_content =
+            std::fs::read_to_string(tmp.path().join("report").join("prompt.md")).unwrap();
+        assert!(
+            prompt_content.contains("## Script Output\nAll tests passed"),
+            "prompt.md should contain preamble"
+        );
+        assert!(
+            prompt_content.contains("Summarize"),
+            "prompt.md should contain original prompt"
+        );
     }
 }
