@@ -714,45 +714,18 @@ and conversational filler.{file_ops_section}"
                 continue;
             }
 
-            self.event_emitter.emit(
-                self.id.clone(),
-                AgentEvent::ToolCallStarted {
-                    tool_name: tc.name.clone(),
-                    tool_call_id: tc.id.clone(),
-                    arguments: tc.arguments.clone(),
-                },
-            );
-
-            let result = execute_one_tool(
-                &tc.id,
-                &tc.name,
-                &tc.arguments,
+            let result = execute_and_emit_one_tool(
+                tc,
                 self.provider_profile.tool_registry(),
                 self.execution_env.clone(),
                 self.config.tool_approval.as_ref(),
                 self.cancel_token.child_token(),
+                &self.config,
+                &self.event_emitter,
+                &self.id,
             )
             .await;
-
-            self.event_emitter.emit(
-                self.id.clone(),
-                AgentEvent::ToolCallOutputDelta {
-                    delta: result.content.to_string(),
-                },
-            );
-
-            self.event_emitter.emit(
-                self.id.clone(),
-                AgentEvent::ToolCallCompleted {
-                    tool_name: tc.name.clone(),
-                    tool_call_id: tc.id.clone(),
-                    output: result.content.clone(),
-                    is_error: result.is_error,
-                },
-            );
-
-            let truncated = truncate_tool_result(&result, &tc.name, &self.config);
-            results.push(truncated);
+            results.push(result);
         }
         results
     }
@@ -779,44 +752,17 @@ and conversational filler.{file_ops_section}"
                 let cancel_token = cancel_token.clone();
                 let tc = tc.clone();
                 async move {
-                    emitter.emit(
-                        session_id.clone(),
-                        AgentEvent::ToolCallStarted {
-                            tool_name: tc.name.clone(),
-                            tool_call_id: tc.id.clone(),
-                            arguments: tc.arguments.clone(),
-                        },
-                    );
-
-                    let result = execute_one_tool(
-                        &tc.id,
-                        &tc.name,
-                        &tc.arguments,
+                    execute_and_emit_one_tool(
+                        &tc,
                         profile.tool_registry(),
                         env,
                         config.tool_approval.as_ref(),
                         cancel_token.child_token(),
+                        &config,
+                        &emitter,
+                        &session_id,
                     )
-                    .await;
-
-                    emitter.emit(
-                        session_id.clone(),
-                        AgentEvent::ToolCallOutputDelta {
-                            delta: result.content.to_string(),
-                        },
-                    );
-
-                    emitter.emit(
-                        session_id,
-                        AgentEvent::ToolCallCompleted {
-                            tool_name: tc.name.clone(),
-                            tool_call_id: tc.id.clone(),
-                            output: result.content.clone(),
-                            is_error: result.is_error,
-                        },
-                    );
-
-                    truncate_tool_result(&result, &tc.name, &config)
+                    .await
                 }
             })
             .collect();
@@ -880,8 +826,60 @@ and conversational filler.{file_ops_section}"
     }
 }
 
-/// Execute a single tool call: registry lookup, argument validation, and execution.
+/// Execute a single tool call with event emission and output truncation.
 /// Shared by both sequential and parallel execution paths.
+#[allow(clippy::too_many_arguments)]
+async fn execute_and_emit_one_tool(
+    tc: &llm::types::ToolCall,
+    registry: &ToolRegistry,
+    env: Arc<dyn ExecutionEnvironment>,
+    tool_approval: Option<&ToolApprovalFn>,
+    cancel_token: CancellationToken,
+    config: &SessionConfig,
+    emitter: &EventEmitter,
+    session_id: &str,
+) -> ToolResult {
+    emitter.emit(
+        session_id.to_owned(),
+        AgentEvent::ToolCallStarted {
+            tool_name: tc.name.clone(),
+            tool_call_id: tc.id.clone(),
+            arguments: tc.arguments.clone(),
+        },
+    );
+
+    let result = execute_one_tool(
+        &tc.id,
+        &tc.name,
+        &tc.arguments,
+        registry,
+        env,
+        tool_approval,
+        cancel_token,
+    )
+    .await;
+
+    emitter.emit(
+        session_id.to_owned(),
+        AgentEvent::ToolCallOutputDelta {
+            delta: result.content.to_string(),
+        },
+    );
+
+    emitter.emit(
+        session_id.to_owned(),
+        AgentEvent::ToolCallCompleted {
+            tool_name: tc.name.clone(),
+            tool_call_id: tc.id.clone(),
+            output: result.content.clone(),
+            is_error: result.is_error,
+        },
+    );
+
+    truncate_tool_result(&result, &tc.name, config)
+}
+
+/// Execute a single tool call: registry lookup, argument validation, and execution.
 async fn execute_one_tool(
     tool_call_id: &str,
     tool_name: &str,
