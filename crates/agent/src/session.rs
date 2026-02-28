@@ -36,6 +36,7 @@ pub struct Session {
     project_docs: Vec<String>,
     env_context: EnvContext,
     skills: Vec<Skill>,
+    system_prompt: String,
 }
 
 impl Session {
@@ -61,6 +62,7 @@ impl Session {
             project_docs: Vec::new(),
             env_context: EnvContext::default(),
             skills: Vec::new(),
+            system_prompt: String::new(),
         }
     }
 
@@ -95,6 +97,15 @@ impl Session {
 
         // Populate environment context
         self.env_context = self.build_env_context().await;
+
+        // Build system prompt once (static for the session lifetime)
+        self.system_prompt = self.provider_profile.build_system_prompt(
+            self.execution_env.as_ref(),
+            &self.env_context,
+            &self.project_docs,
+            self.config.user_instructions.as_deref(),
+            &self.skills,
+        );
     }
 
     async fn build_env_context(&self) -> EnvContext {
@@ -266,15 +277,6 @@ impl Session {
         // Drain steering queue before first LLM call
         self.drain_steering();
 
-        // Cache system prompt for this input cycle (it doesn't change during tool rounds)
-        let system_prompt = self.provider_profile.build_system_prompt(
-            self.execution_env.as_ref(),
-            &self.env_context,
-            &self.project_docs,
-            self.config.user_instructions.as_deref(),
-            &self.skills,
-        );
-
         let mut round_count: usize = 0;
 
         loop {
@@ -299,7 +301,7 @@ impl Session {
             }
 
             // Build request
-            let request = self.build_request(&system_prompt);
+            let request = self.build_request();
 
             // Emit AssistantTextStart before LLM call
             self.event_emitter
@@ -436,9 +438,9 @@ impl Session {
             );
 
             // Check context window usage and compact if needed
-            let over_threshold = self.check_context_usage(&system_prompt);
+            let over_threshold = self.check_context_usage();
             if over_threshold && self.config.enable_context_compaction {
-                if let Err(e) = self.compact_context(&system_prompt).await {
+                if let Err(e) = self.compact_context().await {
                     self.event_emitter.emit(
                         self.id.clone(),
                         AgentEvent::Error {
@@ -493,8 +495,8 @@ impl Session {
         Ok(())
     }
 
-    async fn compact_context(&mut self, system_prompt: &str) -> Result<(), AgentError> {
-        let estimated_tokens = self.estimate_token_count(system_prompt);
+    async fn compact_context(&mut self) -> Result<(), AgentError> {
+        let estimated_tokens = self.estimate_token_count();
         let context_window = self.provider_profile.context_window_size();
         let original_turn_count = self.history.turns().len();
 
@@ -584,8 +586,8 @@ and conversational filler.".to_string()),
         }
     }
 
-    fn build_request(&self, system_prompt: &str) -> Request {
-        let mut messages = vec![Message::system(system_prompt.to_string())];
+    fn build_request(&self) -> Request {
+        let mut messages = vec![Message::system(self.system_prompt.clone())];
         messages.extend(self.history.convert_to_messages());
 
         let tools = self.provider_profile.tools();
@@ -745,8 +747,8 @@ and conversational filler.".to_string()),
         futures::future::join_all(futures).await
     }
 
-    fn estimate_token_count(&self, system_prompt: &str) -> usize {
-        let mut total_chars = system_prompt.len();
+    fn estimate_token_count(&self) -> usize {
+        let mut total_chars = self.system_prompt.len();
 
         for turn in self.history.turns() {
             match turn {
@@ -780,8 +782,8 @@ and conversational filler.".to_string()),
         total_chars / 4 // rough estimate: ~4 chars per token
     }
 
-    fn check_context_usage(&self, system_prompt: &str) -> bool {
-        let estimated_tokens = self.estimate_token_count(system_prompt);
+    fn check_context_usage(&self) -> bool {
+        let estimated_tokens = self.estimate_token_count();
         let context_window = self.provider_profile.context_window_size();
         let threshold = context_window * self.config.compaction_threshold_percent / 100;
 
@@ -1602,11 +1604,12 @@ mod tests {
         };
         let mut session = Session::new(client, profile, env, config);
 
+        session.system_prompt = "You are a test assistant.".to_string();
+
         // Push a user turn to populate history
         session.process_input(&large_input).await.unwrap();
 
-        let system_prompt = "You are a test assistant.";
-        assert!(session.check_context_usage(system_prompt));
+        assert!(session.check_context_usage());
     }
 
     #[tokio::test]
@@ -1732,6 +1735,7 @@ mod tests {
             ..Default::default()
         };
         let mut session = Session::new(client, profile, env, config);
+        session.initialize().await;
         session.process_input("test").await.unwrap();
 
         // Verify user instructions are included in the system prompt
