@@ -1,0 +1,20 @@
+[package]
+name = "arc-util"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+description = "Shared utilities: secret redaction and terminal styling"
+
+[lib]
+doctest = false
+
+[dependencies]
+regex.workspace = true
+aho-corasick.workspace = true
+serde_json.workspace = true
+
+[build-dependencies]
+toml = "0.8"
+serde = { workspace = true }
+
+[dev-dependencies]

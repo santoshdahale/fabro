@@ -1,0 +1,56 @@
+[package]
+name = "arc-agent"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+description = "A programmable agentic loop for coding agents"
+repository = "https://github.com/brynary/attractor-rust"
+readme = "README.md"
+keywords = ["llm", "ai", "agent", "coding"]
+categories = ["api-bindings"]
+
+[features]
+default = ["docker"]
+docker = ["bollard", "tar"]
+
+[lib]
+doctest = false
+
+[[bin]]
+name = "arc-agent"
+path = "src/main.rs"
+test = false
+
+[dependencies]
+clap.workspace = true
+anyhow.workspace = true
+dotenvy.workspace = true
+arc-llm = { path = "../arc-llm" }
+arc-mcp = { path = "../arc-mcp" }
+arc-util = { path = "../arc-util" }
+thiserror.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+uuid.workspace = true
+futures.workspace = true
+async-trait.workspace = true
+jsonschema.workspace = true
+chrono.workspace = true
+reqwest.workspace = true
+tokio-util.workspace = true
+dirs = "6"
+glob = "0.3"
+shell-escape = "0.1"
+htmd = "0.5"
+bollard = { workspace = true, optional = true }
+tar = { workspace = true, optional = true }
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["test-util", "macros"] }
+tempfile = "3"
+dotenvy = { workspace = true }
+paste = "1"

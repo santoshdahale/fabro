@@ -1,0 +1,18 @@
+[package]
+name = "arc-git-storage"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+description = "Store structured data in git without touching the working directory"
+repository = "https://github.com/brynary/attractor-rust"
+
+[lib]
+doctest = false
+
+[dependencies]
+git2.workspace = true
+thiserror.workspace = true
+walkdir.workspace = true
+
+[dev-dependencies]
+tempfile = "3"

@@ -1,0 +1,337 @@
+use crate::config::SessionConfig;
+use crate::execution_env::ExecutionEnvironment;
+use crate::profiles::assemble_system_prompt;
+use crate::profiles::BaseProfile;
+use crate::provider_profile::{ProfileCapabilities, ProviderProfile};
+use crate::skills::Skill;
+use crate::tool_registry::ToolRegistry;
+use crate::tools::{register_core_tools, WebFetchSummarizer};
+use crate::v4a_patch::make_apply_patch_tool;
+use arc_llm::provider::Provider;
+
+use super::EnvContext;
+
+pub struct OpenAiProfile {
+    base: BaseProfile,
+    reasoning_effort: Option<String>,
+}
+
+impl OpenAiProfile {
+    #[must_use]
+    pub fn new(model: impl Into<String>) -> Self {
+        Self::with_summarizer(model, None)
+    }
+
+    #[must_use]
+    pub fn with_summarizer(model: impl Into<String>, summarizer: Option<WebFetchSummarizer>) -> Self {
+        let config = SessionConfig::default();
+        let mut registry = ToolRegistry::new();
+
+        register_core_tools(&mut registry, &config, summarizer);
+        registry.register(make_apply_patch_tool());
+
+        Self {
+            base: BaseProfile {
+                provider: Provider::OpenAi,
+                model: model.into(),
+                registry,
+            },
+            reasoning_effort: None,
+        }
+    }
+
+    pub fn set_reasoning_effort(&mut self, effort: Option<String>) {
+        self.reasoning_effort = effort;
+    }
+
+    /// Override the provider identity (e.g. for Z.AI or Minimax, which use the
+    /// OpenAI Chat Completions protocol but route to different adapters).
+    #[must_use]
+    pub fn with_provider(mut self, provider: Provider) -> Self {
+        self.base.provider = provider;
+        self
+    }
+}
+
+impl ProviderProfile for OpenAiProfile {
+    fn provider(&self) -> Provider {
+        self.base.provider
+    }
+
+    fn model(&self) -> &str {
+        &self.base.model
+    }
+
+    fn tool_registry(&self) -> &ToolRegistry {
+        &self.base.registry
+    }
+
+    fn tool_registry_mut(&mut self) -> &mut ToolRegistry {
+        &mut self.base.registry
+    }
+
+    fn build_system_prompt(
+        &self,
+        env: &dyn ExecutionEnvironment,
+        env_context: &EnvContext,
+        project_docs: &[String],
+        user_instructions: Option<&str>,
+        skills: &[Skill],
+    ) -> String {
+        let core_prompt = "\
+You are a coding agent powered by OpenAI, running in a terminal-based agentic coding assistant. \
+You are expected to be precise, safe, and helpful.
+
+You can receive user prompts and context such as files in the workspace, communicate with the \
+user by streaming thinking and responses, and emit function calls to run terminal commands and \
+apply patches.
+
+# Personality
+
+Be concise, direct, and friendly. Communicate efficiently, keeping the user clearly informed \
+about ongoing actions without unnecessary detail. Prioritize actionable guidance, clearly \
+stating assumptions, environment prerequisites, and next steps.
+
+{env_block}
+
+# AGENTS.md
+
+Repos may contain AGENTS.md files with instructions for the agent. These files can appear \
+anywhere in the repository. Instructions in AGENTS.md files whose scope includes a file you \
+touch must be obeyed. More-deeply-nested AGENTS.md files take precedence in case of conflict. \
+Direct system/developer/user instructions take precedence over AGENTS.md instructions.
+
+# Task Execution
+
+Keep going until the task is completely resolved before ending your turn. Autonomously resolve \
+the query to the best of your ability using the tools available. Do NOT guess or make up an answer.
+
+Working on repos in the current environment is allowed, even if they are proprietary.
+
+If completing the task requires writing or modifying files:
+- Fix the problem at the root cause rather than applying surface-level patches, when possible.
+- Avoid unneeded complexity in your solution.
+- Do not attempt to fix unrelated bugs or broken tests.
+- Keep changes consistent with the style of the existing codebase. Changes should be minimal \
+and focused on the task.
+- Use `git log` and `git blame` to search the history of the codebase if additional context is needed.
+- NEVER add copyright or license headers unless specifically requested.
+- Do not waste tokens re-reading files after calling apply_patch on them. The tool call will \
+fail if it did not work.
+- Do not `git commit` your changes or create new git branches unless explicitly requested.
+
+# Validating Your Work
+
+If the codebase has tests or the ability to build or run, consider using them to verify your \
+work. Start as specific as possible to the code you changed to catch issues efficiently, then \
+make your way to broader tests as you build confidence.
+
+# Tools
+
+Use the provided tools to interact with the codebase and environment.
+
+## read_file
+Read files to understand code before modifying. Use offset/limit for large files.
+
+## apply_patch
+Use the v4a patch format for all file modifications. The format uses `*** Begin Patch` / \
+`*** End Patch` delimiters with `*** Add File:`, `*** Delete File:`, `*** Update File:` \
+operations. Update operations use `@@` context hints and +/- prefixes for changes. Show 3 \
+lines of context around each change. NEVER use `applypatch` or `apply-patch`, only `apply_patch`.
+
+## write_file
+Use for creating new files. For modifications, prefer apply_patch.
+
+## shell
+Execute shell commands. Default timeout is 10 seconds. Use timeout_ms parameter for \
+longer-running commands. When searching for text or files, prefer `rg` (ripgrep) because \
+it is much faster than alternatives like `grep`.
+
+## grep
+Search file contents with regex. Use glob_filter to narrow results.
+
+## glob
+Find files by name pattern.
+
+## web_search
+Search the web using Brave Search. Returns titles, URLs, and descriptions.
+
+## web_fetch
+Fetch content from a URL and optionally summarize it. Pass a prompt to extract specific \
+information instead of returning the full page. URLs must start with http:// or https://.
+
+# Coding Best Practices
+
+Write clean, maintainable code. Handle errors appropriately. Follow existing code conventions \
+in the project.";
+
+        assemble_system_prompt(core_prompt, env, env_context, project_docs, user_instructions, skills)
+    }
+
+    fn capabilities(&self) -> ProfileCapabilities {
+        ProfileCapabilities {
+            supports_reasoning: true,
+            supports_streaming: true,
+            supports_parallel_tool_calls: true,
+            context_window_size: 128_000,
+        }
+    }
+
+    fn provider_options(&self) -> Option<serde_json::Value> {
+        self.reasoning_effort.as_ref().map(|effort| {
+            serde_json::json!({
+                "openai": {
+                    "reasoning": {
+                        "effort": effort
+                    }
+                }
+            })
+        })
+    }
+
+    fn knowledge_cutoff(&self) -> &'static str {
+        "April 2025"
+    }
+}
+
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::test_support::MockExecutionEnvironment;
+
+    #[test]
+    fn openai_profile_identity() {
+        let profile = OpenAiProfile::new("o3-mini");
+        assert_eq!(profile.provider(), Provider::OpenAi);
+        assert_eq!(profile.model(), "o3-mini");
+    }
+
+    #[test]
+    fn openai_profile_capabilities() {
+        let profile = OpenAiProfile::new("o3-mini");
+        assert!(profile.supports_reasoning());
+        assert!(profile.supports_streaming());
+        assert!(profile.supports_parallel_tool_calls());
+        assert_eq!(profile.context_window_size(), 128_000);
+    }
+
+    #[test]
+    fn openai_system_prompt_contains_env_context() {
+        let profile = OpenAiProfile::new("o3-mini");
+        let env = MockExecutionEnvironment::linux();
+        let prompt = profile.build_system_prompt(&env, &EnvContext::default(), &[], None, &[]);
+        assert!(prompt.contains("You are a coding agent powered by OpenAI"));
+        assert!(prompt.contains("<environment>"));
+        assert!(prompt.contains("linux"));
+        assert!(prompt.contains("v4a patch format"));
+        assert!(prompt.contains("*** Begin Patch"));
+    }
+
+    #[test]
+    fn openai_system_prompt_contains_tool_guidance() {
+        let profile = OpenAiProfile::new("o3-mini");
+        let env = MockExecutionEnvironment::linux();
+        let prompt = profile.build_system_prompt(&env, &EnvContext::default(), &[], None, &[]);
+        assert!(prompt.contains("read_file"));
+        assert!(prompt.contains("apply_patch"));
+        assert!(prompt.contains("write_file"));
+        assert!(prompt.contains("shell"));
+        assert!(prompt.contains("grep"));
+        assert!(prompt.contains("glob"));
+        assert!(prompt.contains("timeout_ms"));
+    }
+
+    #[test]
+    fn openai_system_prompt_contains_coding_best_practices() {
+        let profile = OpenAiProfile::new("o3-mini");
+        let env = MockExecutionEnvironment::linux();
+        let prompt = profile.build_system_prompt(&env, &EnvContext::default(), &[], None, &[]);
+        assert!(prompt.contains("clean, maintainable code"));
+        assert!(prompt.contains("existing code conventions"));
+    }
+
+    #[test]
+    fn openai_system_prompt_includes_project_docs() {
+        let profile = OpenAiProfile::new("o3-mini");
+        let env = MockExecutionEnvironment::linux();
+        let docs = vec!["# Project README".into(), "# CONTRIBUTING guide".into()];
+        let prompt = profile.build_system_prompt(&env, &EnvContext::default(), &docs, None, &[]);
+        assert!(prompt.contains("# Project README"));
+        assert!(prompt.contains("# CONTRIBUTING guide"));
+    }
+
+    #[test]
+    fn openai_system_prompt_includes_user_instructions() {
+        let profile = OpenAiProfile::new("o3-mini");
+        let env = MockExecutionEnvironment::linux();
+        let prompt = profile.build_system_prompt(&env, &EnvContext::default(), &[], Some("Always write tests first"), &[]);
+        assert!(prompt.contains("Always write tests first"));
+        assert!(prompt.contains("# User Instructions"));
+    }
+
+    #[test]
+    fn openai_provider_options_default_none() {
+        let profile = OpenAiProfile::new("o3-mini");
+        assert!(profile.provider_options().is_none());
+    }
+
+    #[test]
+    fn openai_provider_options_with_reasoning_effort() {
+        let mut profile = OpenAiProfile::new("o3-mini");
+        profile.set_reasoning_effort(Some("high".to_string()));
+        let options = profile.provider_options().unwrap();
+        assert_eq!(
+            options,
+            serde_json::json!({
+                "openai": {
+                    "reasoning": {
+                        "effort": "high"
+                    }
+                }
+            })
+        );
+    }
+
+    #[test]
+    fn openai_provider_options_cleared() {
+        let mut profile = OpenAiProfile::new("o3-mini");
+        profile.set_reasoning_effort(Some("high".to_string()));
+        assert!(profile.provider_options().is_some());
+        profile.set_reasoning_effort(None);
+        assert!(profile.provider_options().is_none());
+    }
+
+    #[test]
+    fn openai_subagent_tools_registered() {
+        use crate::subagent::SubAgentManager;
+        use crate::subagent::SessionFactory;
+        use std::sync::Arc;
+
+        let mut profile = OpenAiProfile::new("o3-mini");
+        assert_eq!(profile.tool_registry().names().len(), 8);
+
+        let manager = Arc::new(tokio::sync::Mutex::new(SubAgentManager::new(3)));
+        let factory: SessionFactory = Arc::new(|| {
+            panic!("should not be called in test")
+        });
+        profile.register_subagent_tools(manager, factory, 0);
+        assert_eq!(profile.tool_registry().names().len(), 12);
+    }
+
+    #[test]
+    fn openai_tools_registered() {
+        let profile = OpenAiProfile::new("o3-mini");
+        let names = profile.tool_registry().names();
+        assert_eq!(names.len(), 8);
+        assert!(names.contains(&"read_file".to_string()));
+        assert!(names.contains(&"write_file".to_string()));
+        assert!(names.contains(&"shell".to_string()));
+        assert!(names.contains(&"grep".to_string()));
+        assert!(names.contains(&"glob".to_string()));
+        assert!(names.contains(&"apply_patch".to_string()));
+        assert!(names.contains(&"web_search".to_string()));
+        assert!(names.contains(&"web_fetch".to_string()));
+    }
+
+}
