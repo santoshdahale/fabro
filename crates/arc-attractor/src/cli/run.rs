@@ -480,7 +480,7 @@ pub async fn run_command(args: RunArgs, styles: &'static Styles) -> anyhow::Resu
     let engine = PipelineEngine::with_interviewer(registry, Arc::clone(&emitter), interviewer, Arc::clone(&execution_env));
 
     // 7. Execute
-    let run_id = worktree_run_id.unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+    let run_id = worktree_run_id.unwrap_or_else(|| ulid::Ulid::new().to_string());
     let config = RunConfig {
         logs_root: logs_dir.clone(),
         cancel_token: None,
@@ -602,7 +602,7 @@ fn setup_worktree(
 ) -> anyhow::Result<(String, PathBuf, PathBuf, String, String)> {
     let base_sha = crate::git::head_sha(original_cwd)
         .map_err(|e| anyhow::anyhow!("{e}"))?;
-    let run_id = uuid::Uuid::new_v4().to_string();
+    let run_id = ulid::Ulid::new().to_string();
     let branch_name = format!("arc/run/{run_id}");
     crate::git::create_branch(original_cwd, &branch_name)
         .map_err(|e| anyhow::anyhow!("{e}"))?;

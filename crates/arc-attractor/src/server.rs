@@ -170,7 +170,7 @@ async fn start_pipeline(
         }
     };
 
-    let run_id = uuid::Uuid::new_v4().to_string();
+    let run_id = ulid::Ulid::new().to_string();
     let interviewer = Arc::new(WebInterviewer::new());
     let (event_tx, _) = broadcast::channel(256);
     let (cancel_tx, cancel_rx) = tokio::sync::oneshot::channel::<()>();
