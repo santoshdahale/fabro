@@ -53,7 +53,9 @@ export default function AppShell() {
           <div className="flex h-16 items-center justify-between">
             <div className="flex items-center">
               <div className="shrink-0">
-                <img alt="Arc" src="/logotype.svg" className="h-8 w-auto" />
+                <Link to="/workflows">
+                  <img alt="Arc" src="/logotype.svg" className="h-8 w-auto" />
+                </Link>
               </div>
               <div className="hidden md:block">
                 <div className="ml-10 flex items-baseline space-x-4">
