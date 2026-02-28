@@ -16,6 +16,8 @@ pub mod parser;
 pub mod preamble;
 pub mod pipeline;
 #[cfg(any(feature = "server", test))]
+pub mod jwt_auth;
+#[cfg(any(feature = "server", test))]
 pub mod server;
 pub mod stylesheet;
 pub mod transform;

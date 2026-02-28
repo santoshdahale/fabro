@@ -79,8 +79,10 @@ pub async fn serve_command(args: ServeArgs, styles: &'static Styles) -> anyhow::
         })
     };
 
+    let auth_mode = crate::jwt_auth::resolve_auth_mode();
+
     let state = create_app_state_with_options(factory, dry_run_mode);
-    let router = build_router(state);
+    let router = build_router(state, auth_mode);
 
     let addr = format!("{}:{}", args.host, args.port);
     let listener = TcpListener::bind(&addr).await?;

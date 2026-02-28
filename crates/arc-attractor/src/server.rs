@@ -17,6 +17,7 @@ use arc_agent::LocalExecutionEnvironment;
 
 use crate::checkpoint::Checkpoint;
 use crate::context::Context;
+use crate::jwt_auth::{AuthMode, AuthenticatedService};
 use crate::engine::{PipelineEngine, RunConfig};
 use crate::event::{EventEmitter, PipelineEvent};
 use crate::handler::HandlerRegistry;
@@ -105,7 +106,7 @@ pub struct SubmitAnswerResponse {
 }
 
 /// Build the axum Router with all pipeline endpoints.
-pub fn build_router(state: Arc<AppState>) -> Router {
+pub fn build_router(state: Arc<AppState>, auth_mode: AuthMode) -> Router {
     Router::new()
         .route("/pipelines", get(list_pipelines).post(start_pipeline))
         .route("/pipelines/{id}", get(get_pipeline_status))
@@ -119,6 +120,7 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         .route("/pipelines/{id}/context", get(get_context))
         .route("/pipelines/{id}/cancel", post(cancel_pipeline))
         .route("/pipelines/{id}/graph", get(get_graph))
+        .layer(axum::Extension(auth_mode))
         .with_state(state)
 }
 
@@ -144,7 +146,7 @@ pub fn create_app_state_with_options(
     })
 }
 
-async fn list_pipelines(State(state): State<Arc<AppState>>) -> Response {
+async fn list_pipelines(_auth: AuthenticatedService, State(state): State<Arc<AppState>>) -> Response {
     let pipelines = state.pipelines.lock().expect("pipelines lock poisoned");
     let items: Vec<PipelineStatusResponse> = pipelines
         .iter()
@@ -158,6 +160,7 @@ async fn list_pipelines(State(state): State<Arc<AppState>>) -> Response {
 }
 
 async fn start_pipeline(
+    _auth: AuthenticatedService,
     State(state): State<Arc<AppState>>,
     Json(req): Json<StartPipelineRequest>,
 ) -> Response {
@@ -263,6 +266,7 @@ async fn start_pipeline(
 }
 
 async fn get_pipeline_status(
+    _auth: AuthenticatedService,
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
 ) -> Response {
@@ -282,6 +286,7 @@ async fn get_pipeline_status(
 }
 
 async fn get_questions(
+    _auth: AuthenticatedService,
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
 ) -> Response {
@@ -314,6 +319,7 @@ async fn get_questions(
 }
 
 async fn submit_answer(
+    _auth: AuthenticatedService,
     State(state): State<Arc<AppState>>,
     Path((id, qid)): Path<(String, String)>,
     Json(req): Json<SubmitAnswerRequest>,
@@ -354,6 +360,7 @@ async fn submit_answer(
 }
 
 async fn get_events(
+    _auth: AuthenticatedService,
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
 ) -> Response {
@@ -383,6 +390,7 @@ async fn get_events(
 }
 
 async fn get_checkpoint(
+    _auth: AuthenticatedService,
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
 ) -> Response {
@@ -397,6 +405,7 @@ async fn get_checkpoint(
 }
 
 async fn get_context(
+    _auth: AuthenticatedService,
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
 ) -> Response {
@@ -411,6 +420,7 @@ async fn get_context(
 }
 
 async fn cancel_pipeline(
+    _auth: AuthenticatedService,
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
 ) -> Response {
@@ -436,6 +446,7 @@ async fn cancel_pipeline(
 }
 
 async fn get_graph(
+    _auth: AuthenticatedService,
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
 ) -> Response {
@@ -519,7 +530,7 @@ mod tests {
 
     fn test_app() -> Router {
         let state = create_app_state(test_registry);
-        build_router(state)
+        build_router(state, AuthMode::Disabled)
     }
 
     async fn body_json(body: Body) -> serde_json::Value {
@@ -568,7 +579,7 @@ mod tests {
     #[tokio::test]
     async fn get_pipeline_status_returns_status() {
         let state = create_app_state(test_registry);
-        let app = build_router(Arc::clone(&state));
+        let app = build_router(Arc::clone(&state), AuthMode::Disabled);
 
         // Start a pipeline
         let req = Request::builder()
@@ -624,7 +635,7 @@ mod tests {
     #[tokio::test]
     async fn get_questions_returns_empty_list() {
         let state = create_app_state(test_registry);
-        let app = build_router(Arc::clone(&state));
+        let app = build_router(Arc::clone(&state), AuthMode::Disabled);
 
         // Start a pipeline
         let req = Request::builder()
@@ -688,7 +699,7 @@ mod tests {
     #[tokio::test]
     async fn get_checkpoint_returns_null_initially() {
         let state = create_app_state(test_registry);
-        let app = build_router(Arc::clone(&state));
+        let app = build_router(Arc::clone(&state), AuthMode::Disabled);
 
         // Start a pipeline
         let req = Request::builder()
@@ -718,7 +729,7 @@ mod tests {
     #[tokio::test]
     async fn get_context_returns_map() {
         let state = create_app_state(test_registry);
-        let app = build_router(Arc::clone(&state));
+        let app = build_router(Arc::clone(&state), AuthMode::Disabled);
 
         // Start a pipeline
         let req = Request::builder()
@@ -751,7 +762,7 @@ mod tests {
     #[tokio::test]
     async fn cancel_pipeline_succeeds() {
         let state = create_app_state(test_registry);
-        let app = build_router(Arc::clone(&state));
+        let app = build_router(Arc::clone(&state), AuthMode::Disabled);
 
         // Start a pipeline
         let req = Request::builder()
@@ -800,7 +811,7 @@ mod tests {
     #[tokio::test]
     async fn get_events_returns_sse_stream() {
         let state = create_app_state(test_registry);
-        let app = build_router(Arc::clone(&state));
+        let app = build_router(Arc::clone(&state), AuthMode::Disabled);
 
         // Start a pipeline
         let req = Request::builder()
@@ -842,7 +853,7 @@ mod tests {
     #[tokio::test]
     async fn pipeline_completes_and_status_is_completed() {
         let state = create_app_state(test_registry);
-        let app = build_router(Arc::clone(&state));
+        let app = build_router(Arc::clone(&state), AuthMode::Disabled);
 
         // Start a pipeline
         let req = Request::builder()
@@ -881,7 +892,7 @@ mod tests {
     #[tokio::test]
     async fn get_graph_returns_svg() {
         let state = create_app_state(test_registry);
-        let app = build_router(Arc::clone(&state));
+        let app = build_router(Arc::clone(&state), AuthMode::Disabled);
 
         // Start a pipeline
         let req = Request::builder()
@@ -949,7 +960,7 @@ mod tests {
     #[tokio::test]
     async fn list_pipelines_returns_started_pipeline() {
         let state = create_app_state(test_registry);
-        let app = build_router(Arc::clone(&state));
+        let app = build_router(Arc::clone(&state), AuthMode::Disabled);
 
         // List should be empty initially
         let req = Request::builder()
