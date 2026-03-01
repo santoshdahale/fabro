@@ -9865,7 +9865,7 @@ async fn e2e_circuit_breaker_ignores_transient_failures() {
     let err = result.unwrap_err().to_string();
     // Should hit visit limit, NOT circuit breaker
     assert!(
-        err.contains("exceeded max visit limit"),
+        err.contains("stuck in a cycle"),
         "transient failures should not trigger circuit breaker, got: {err}"
     );
 }
@@ -9909,7 +9909,7 @@ async fn e2e_circuit_breaker_different_reasons_separate_counters() {
     let err = result.unwrap_err().to_string();
     // Should hit visit limit because each failure has a unique signature
     assert!(
-        err.contains("exceeded max visit limit"),
+        err.contains("stuck in a cycle"),
         "varying reasons should not trigger circuit breaker, got: {err}"
     );
 }

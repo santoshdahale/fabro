@@ -1120,9 +1120,9 @@ impl PipelineEngine {
                 .entry(current_node_id.clone())
                 .or_insert(0);
             *count += 1;
-            if max_node_visits > 0 && *count > max_node_visits {
+            if max_node_visits > 0 && *count >= max_node_visits {
                 return Err(ArcError::Engine(format!(
-                    "node \"{}\" exceeded max visit limit of {max_node_visits}",
+                    "node \"{}\" visited {count} times (limit {max_node_visits}); pipeline is stuck in a cycle",
                     current_node_id
                 )));
             }
@@ -3308,7 +3308,7 @@ mod tests {
         assert!(result.is_err());
         let err = result.unwrap_err().to_string();
         assert!(
-            err.contains("exceeded max visit limit"),
+            err.contains("stuck in a cycle"),
             "expected visit limit error, got: {err}"
         );
     }
@@ -3333,7 +3333,7 @@ mod tests {
         assert!(result.is_err());
         let err = result.unwrap_err().to_string();
         assert!(
-            err.contains("exceeded max visit limit"),
+            err.contains("stuck in a cycle"),
             "expected visit limit error, got: {err}"
         );
     }
@@ -3360,7 +3360,7 @@ mod tests {
         assert!(result.is_err());
         let err = result.unwrap_err().to_string();
         assert!(
-            err.contains("exceeded max visit limit of 2"),
+            err.contains("(limit 2)"),
             "expected limit of 2, got: {err}"
         );
     }
@@ -3703,7 +3703,7 @@ mod tests {
         let err = result.unwrap_err().to_string();
         // Should hit visit limit, NOT circuit breaker
         assert!(
-            err.contains("exceeded max visit limit"),
+            err.contains("stuck in a cycle"),
             "expected visit limit error (transient shouldn't trigger circuit breaker), got: {err}"
         );
     }
@@ -3739,7 +3739,7 @@ mod tests {
         assert!(result.is_err());
         let err = result.unwrap_err().to_string();
         assert!(
-            err.contains("exceeded max visit limit"),
+            err.contains("stuck in a cycle"),
             "expected visit limit (each failure unique), got: {err}"
         );
     }
