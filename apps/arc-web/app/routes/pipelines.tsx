@@ -1,7 +1,24 @@
-import { useState } from "react";
+import { useState, useCallback, useRef } from "react";
 import { Link } from "react-router";
 import { ChevronDownIcon, ChevronRightIcon, MagnifyingGlassIcon } from "@heroicons/react/24/outline";
-import { columns, ciConfig, statusColors } from "../data/runs";
+import {
+  DndContext,
+  closestCenter,
+  KeyboardSensor,
+  PointerSensor,
+  useSensor,
+  useSensors,
+} from "@dnd-kit/core";
+import type { DragEndEvent } from "@dnd-kit/core";
+import {
+  SortableContext,
+  sortableKeyboardCoordinates,
+  useSortable,
+  verticalListSortingStrategy,
+  arrayMove,
+} from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
+import { columns as staticColumns, ciConfig, statusColors } from "../data/runs";
 import type { CiStatus, RunItem, RunWithStatus } from "../data/runs";
 import type { Route } from "./+types/pipelines";
 
@@ -51,8 +68,8 @@ function CiBadge({ status }: { status: CiStatus }) {
   );
 }
 
-const totalCards = columns.reduce((sum, col) => sum + col.items.length, 0);
-const totalPrs = columns.reduce(
+const totalCards = staticColumns.reduce((sum, col) => sum + col.items.length, 0);
+const totalPrs = staticColumns.reduce(
   (sum, col) => sum + col.items.filter((item) => item.number != null).length,
   0,
 );
@@ -179,7 +196,47 @@ function PrCard({
   );
 }
 
-function BoardColumn({ column }: { column: (typeof columns)[number] }) {
+function SortablePrCard({
+  pr,
+  icon,
+  iconColor,
+  actions,
+}: {
+  pr: RunItem;
+  icon: React.ComponentType<{ className?: string }>;
+  iconColor: string;
+  actions?: string[];
+}) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: pr.id });
+  const wasDragging = useRef(false);
+  if (isDragging) wasDragging.current = true;
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    opacity: isDragging ? 0.5 : undefined,
+    position: "relative" as const,
+    zIndex: isDragging ? 10 : undefined,
+  };
+  return (
+    <div
+      ref={setNodeRef}
+      style={style}
+      {...attributes}
+      {...listeners}
+      onClickCapture={(e) => {
+        if (wasDragging.current) {
+          e.preventDefault();
+          e.stopPropagation();
+          wasDragging.current = false;
+        }
+      }}
+    >
+      <PrCard pr={pr} icon={icon} iconColor={iconColor} actions={actions} />
+    </div>
+  );
+}
+
+function BoardColumn({ column }: { column: (typeof staticColumns)[number] }) {
   const Icon = iconMap[column.iconType];
   return (
     <div className="flex min-w-[280px] flex-1 flex-col">
@@ -193,17 +250,19 @@ function BoardColumn({ column }: { column: (typeof columns)[number] }) {
         </span>
       </div>
 
-      <div className="flex flex-1 flex-col gap-3">
-        {column.items.map((pr) => (
-          <PrCard
-            key={pr.id}
-            pr={pr}
-            icon={Icon}
-            iconColor={column.iconColor}
-            actions={column.actions}
-          />
-        ))}
-      </div>
+      <SortableContext items={column.items.map((pr) => pr.id)} strategy={verticalListSortingStrategy}>
+        <div className="flex flex-1 flex-col gap-3">
+          {column.items.map((pr) => (
+            <SortablePrCard
+              key={pr.id}
+              pr={pr}
+              icon={Icon}
+              iconColor={column.iconColor}
+              actions={column.actions}
+            />
+          ))}
+        </div>
+      </SortableContext>
     </div>
   );
 }
@@ -248,14 +307,67 @@ function RunRow({ run }: { run: RunWithStatus }) {
   );
 }
 
-const allRepos = [...new Set(columns.flatMap((col) => col.items.map((item) => item.repo)))].sort();
+function SortableRunRow({ run }: { run: RunWithStatus }) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: run.id });
+  const wasDragging = useRef(false);
+  if (isDragging) wasDragging.current = true;
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    opacity: isDragging ? 0.5 : undefined,
+    position: "relative" as const,
+    zIndex: isDragging ? 10 : undefined,
+    gridColumn: "1 / -1",
+    display: "grid",
+    gridTemplateColumns: "subgrid",
+  };
+  return (
+    <div
+      ref={setNodeRef}
+      style={style}
+      {...attributes}
+      {...listeners}
+      onClickCapture={(e) => {
+        if (wasDragging.current) {
+          e.preventDefault();
+          e.stopPropagation();
+          wasDragging.current = false;
+        }
+      }}
+    >
+      <RunRow run={run} />
+    </div>
+  );
+}
+
+const allRepos = [...new Set(staticColumns.flatMap((col) => col.items.map((item) => item.repo)))].sort();
 
 export default function Pipelines() {
   const [query, setQuery] = useState("");
   const [repoFilter, setRepoFilter] = useState("all");
   const [view, setView] = useState<ViewMode>("columns");
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
+  const [columns, setColumns] = useState(staticColumns);
   const lowerQuery = query.toLowerCase();
+
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
+  );
+
+  const handleDragEnd = useCallback((event: DragEndEvent) => {
+    const { active, over } = event;
+    if (!over || active.id === over.id) return;
+
+    setColumns((prev) =>
+      prev.map((col) => {
+        const oldIndex = col.items.findIndex((item) => item.id === active.id);
+        const newIndex = col.items.findIndex((item) => item.id === over.id);
+        if (oldIndex === -1 || newIndex === -1) return col;
+        return { ...col, items: arrayMove(col.items, oldIndex, newIndex) };
+      }),
+    );
+  }, []);
 
   const filteredColumns = columns.map((col) => ({
     ...col,
@@ -270,100 +382,104 @@ export default function Pipelines() {
   }));
 
   return (
-    <div className="space-y-4">
-      <div className="flex gap-3">
-        <div className="relative flex-1">
-          <MagnifyingGlassIcon className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-navy-600" />
-          <input
-            type="text"
-            placeholder="Search runs..."
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            className="w-full rounded-md border border-white/[0.06] bg-navy-800/80 py-2 pl-9 pr-3 text-sm text-ice-100 placeholder-navy-600 outline-none transition-colors focus:border-teal-500/40 focus:ring-0"
-          />
+    <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
+      <div className="space-y-4">
+        <div className="flex gap-3">
+          <div className="relative flex-1">
+            <MagnifyingGlassIcon className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-navy-600" />
+            <input
+              type="text"
+              placeholder="Search runs..."
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              className="w-full rounded-md border border-white/[0.06] bg-navy-800/80 py-2 pl-9 pr-3 text-sm text-ice-100 placeholder-navy-600 outline-none transition-colors focus:border-teal-500/40 focus:ring-0"
+            />
+          </div>
+          <div className="relative">
+            <select
+              value={repoFilter}
+              onChange={(e) => setRepoFilter(e.target.value)}
+              className="appearance-none rounded-md border border-white/[0.06] bg-navy-800/80 py-2 pl-3 pr-8 text-sm text-ice-100 outline-none transition-colors focus:border-teal-500/40 focus:ring-0"
+            >
+              <option value="all">All repos</option>
+              {allRepos.map((repo) => (
+                <option key={repo} value={repo}>{repo}</option>
+              ))}
+            </select>
+            <ChevronDownIcon className="pointer-events-none absolute right-2 top-1/2 size-4 -translate-y-1/2 text-navy-600" />
+          </div>
+          <div className="flex rounded-md border border-white/[0.06] bg-navy-800/80">
+            <button
+              type="button"
+              onClick={() => setView("columns")}
+              className={`inline-flex items-center gap-1.5 px-3 py-2 text-xs font-medium transition-colors ${view === "columns" ? "text-teal-500" : "text-navy-600 hover:text-ice-300"}`}
+              aria-label="Columns view"
+            >
+              <svg viewBox="0 0 20 20" fill="currentColor" className="size-4" aria-hidden="true">
+                <path d="M2 4.75A.75.75 0 0 1 2.75 4h2.5a.75.75 0 0 1 .75.75v10.5a.75.75 0 0 1-.75.75h-2.5a.75.75 0 0 1-.75-.75V4.75ZM8.25 4a.75.75 0 0 0-.75.75v10.5c0 .414.336.75.75.75h2.5a.75.75 0 0 0 .75-.75V4.75a.75.75 0 0 0-.75-.75h-2.5ZM14 4.75a.75.75 0 0 1 .75-.75h2.5a.75.75 0 0 1 .75.75v10.5a.75.75 0 0 1-.75.75h-2.5a.75.75 0 0 1-.75-.75V4.75Z" />
+              </svg>
+            </button>
+            <button
+              type="button"
+              onClick={() => setView("list")}
+              className={`inline-flex items-center gap-1.5 px-3 py-2 text-xs font-medium transition-colors ${view === "list" ? "text-teal-500" : "text-navy-600 hover:text-ice-300"}`}
+              aria-label="List view"
+            >
+              <svg viewBox="0 0 20 20" fill="currentColor" className="size-4" aria-hidden="true">
+                <path fillRule="evenodd" d="M2 4.75A.75.75 0 0 1 2.75 4h14.5a.75.75 0 0 1 0 1.5H2.75A.75.75 0 0 1 2 4.75Zm0 5A.75.75 0 0 1 2.75 9h14.5a.75.75 0 0 1 0 1.5H2.75A.75.75 0 0 1 2 9.75Zm0 5a.75.75 0 0 1 .75-.75h14.5a.75.75 0 0 1 0 1.5H2.75a.75.75 0 0 1-.75-.75Z" clipRule="evenodd" />
+              </svg>
+            </button>
+          </div>
         </div>
-        <div className="relative">
-          <select
-            value={repoFilter}
-            onChange={(e) => setRepoFilter(e.target.value)}
-            className="appearance-none rounded-md border border-white/[0.06] bg-navy-800/80 py-2 pl-3 pr-8 text-sm text-ice-100 outline-none transition-colors focus:border-teal-500/40 focus:ring-0"
-          >
-            <option value="all">All repos</option>
-            {allRepos.map((repo) => (
-              <option key={repo} value={repo}>{repo}</option>
-            ))}
-          </select>
-          <ChevronDownIcon className="pointer-events-none absolute right-2 top-1/2 size-4 -translate-y-1/2 text-navy-600" />
-        </div>
-        <div className="flex rounded-md border border-white/[0.06] bg-navy-800/80">
-          <button
-            type="button"
-            onClick={() => setView("columns")}
-            className={`inline-flex items-center gap-1.5 px-3 py-2 text-xs font-medium transition-colors ${view === "columns" ? "text-teal-500" : "text-navy-600 hover:text-ice-300"}`}
-            aria-label="Columns view"
-          >
-            <svg viewBox="0 0 20 20" fill="currentColor" className="size-4" aria-hidden="true">
-              <path d="M2 4.75A.75.75 0 0 1 2.75 4h2.5a.75.75 0 0 1 .75.75v10.5a.75.75 0 0 1-.75.75h-2.5a.75.75 0 0 1-.75-.75V4.75ZM8.25 4a.75.75 0 0 0-.75.75v10.5c0 .414.336.75.75.75h2.5a.75.75 0 0 0 .75-.75V4.75a.75.75 0 0 0-.75-.75h-2.5ZM14 4.75a.75.75 0 0 1 .75-.75h2.5a.75.75 0 0 1 .75.75v10.5a.75.75 0 0 1-.75.75h-2.5a.75.75 0 0 1-.75-.75V4.75Z" />
-            </svg>
-          </button>
-          <button
-            type="button"
-            onClick={() => setView("list")}
-            className={`inline-flex items-center gap-1.5 px-3 py-2 text-xs font-medium transition-colors ${view === "list" ? "text-teal-500" : "text-navy-600 hover:text-ice-300"}`}
-            aria-label="List view"
-          >
-            <svg viewBox="0 0 20 20" fill="currentColor" className="size-4" aria-hidden="true">
-              <path fillRule="evenodd" d="M2 4.75A.75.75 0 0 1 2.75 4h14.5a.75.75 0 0 1 0 1.5H2.75A.75.75 0 0 1 2 4.75Zm0 5A.75.75 0 0 1 2.75 9h14.5a.75.75 0 0 1 0 1.5H2.75A.75.75 0 0 1 2 9.75Zm0 5a.75.75 0 0 1 .75-.75h14.5a.75.75 0 0 1 0 1.5H2.75a.75.75 0 0 1-.75-.75Z" clipRule="evenodd" />
-            </svg>
-          </button>
-        </div>
-      </div>
 
-      {view === "columns" ? (
-        <div className="flex gap-5 overflow-x-auto pb-4">
-          {filteredColumns.map((col) => (
-            <BoardColumn key={col.id} column={col} />
-          ))}
-        </div>
-      ) : (
-        <div className="space-y-4">
-          {filteredColumns.map((col) => {
-            const isCollapsed = collapsed.has(col.id);
-            return (
-              <div key={col.id}>
-                <button
-                  type="button"
-                  onClick={() => setCollapsed((prev) => {
-                    const next = new Set(prev);
-                    if (next.has(col.id)) next.delete(col.id);
-                    else next.add(col.id);
-                    return next;
-                  })}
-                  className="mb-3 flex w-full items-center gap-2 text-left"
-                >
-                  {isCollapsed
-                    ? <ChevronRightIcon className="size-3.5 text-navy-600" />
-                    : <ChevronDownIcon className="size-3.5 text-navy-600" />}
-                  <div className={`h-2.5 w-2.5 rounded-full ${col.accent}`} />
-                  <h3 className="text-sm font-semibold tracking-wide text-ice-100">{col.name}</h3>
-                  <span className="rounded-full bg-white/[0.06] px-2 py-0.5 font-mono text-xs text-navy-600">
-                    {col.items.length}
-                  </span>
-                </button>
-                {!isCollapsed && (col.items.length > 0 ? (
-                  <div className="grid gap-2" style={{ gridTemplateColumns: "5rem 1fr 8rem auto" }}>
-                    {col.items.map((item) => (
-                      <RunRow key={item.id} run={{ ...item, status: col.id, statusLabel: col.name }} />
-                    ))}
-                  </div>
-                ) : (
-                  <p className="py-4 text-center text-sm text-navy-600">No runs</p>
-                ))}
-              </div>
-            );
-          })}
-        </div>
-      )}
-    </div>
+        {view === "columns" ? (
+          <div className="flex gap-5 overflow-x-auto pb-4">
+            {filteredColumns.map((col) => (
+              <BoardColumn key={col.id} column={col} />
+            ))}
+          </div>
+        ) : (
+          <div className="space-y-4">
+            {filteredColumns.map((col) => {
+              const isCollapsed = collapsed.has(col.id);
+              return (
+                <div key={col.id}>
+                  <button
+                    type="button"
+                    onClick={() => setCollapsed((prev) => {
+                      const next = new Set(prev);
+                      if (next.has(col.id)) next.delete(col.id);
+                      else next.add(col.id);
+                      return next;
+                    })}
+                    className="mb-3 flex w-full items-center gap-2 text-left"
+                  >
+                    {isCollapsed
+                      ? <ChevronRightIcon className="size-3.5 text-navy-600" />
+                      : <ChevronDownIcon className="size-3.5 text-navy-600" />}
+                    <div className={`h-2.5 w-2.5 rounded-full ${col.accent}`} />
+                    <h3 className="text-sm font-semibold tracking-wide text-ice-100">{col.name}</h3>
+                    <span className="rounded-full bg-white/[0.06] px-2 py-0.5 font-mono text-xs text-navy-600">
+                      {col.items.length}
+                    </span>
+                  </button>
+                  {!isCollapsed && (col.items.length > 0 ? (
+                    <SortableContext items={col.items.map((item) => item.id)} strategy={verticalListSortingStrategy}>
+                      <div className="grid gap-2" style={{ gridTemplateColumns: "5rem 1fr 8rem auto" }}>
+                        {col.items.map((item) => (
+                          <SortableRunRow key={item.id} run={{ ...item, status: col.id, statusLabel: col.name }} />
+                        ))}
+                      </div>
+                    </SortableContext>
+                  ) : (
+                    <p className="py-4 text-center text-sm text-navy-600">No runs</p>
+                  ))}
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    </DndContext>
   );
 }
