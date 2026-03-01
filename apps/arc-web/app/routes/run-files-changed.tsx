@@ -248,6 +248,48 @@ function steerKey(fileName: string, side: AnnotationSide, lineNumber: number) {
   return `${fileName}:${side}:${lineNumber}`;
 }
 
+function DiffHeaderToggles({
+  diffStyle,
+  onDiffStyleChange,
+  disableBackground,
+  onDisableBackgroundChange,
+}: {
+  diffStyle: "split" | "unified";
+  onDiffStyleChange: (style: "split" | "unified") => void;
+  disableBackground: boolean;
+  onDisableBackgroundChange: (disabled: boolean) => void;
+}) {
+  return (
+    <div className="flex items-center gap-1">
+      <button
+        type="button"
+        onClick={() => onDiffStyleChange(diffStyle === "split" ? "unified" : "split")}
+        title={diffStyle === "split" ? "Switch to unified" : "Switch to split"}
+        aria-label={diffStyle === "split" ? "Switch to unified" : "Switch to split"}
+        className="cursor-pointer p-1 opacity-60 hover:opacity-100"
+      >
+        <svg xmlns="http://www.w3.org/2000/svg" fill="currentColor" viewBox="0 0 16 16" width="16" height="16">
+          <path d="M14 0H8.5v16H14a2 2 0 0 0 2-2V2a2 2 0 0 0-2-2m-1.5 6.5v1h1a.5.5 0 0 1 0 1h-1v1a.5.5 0 0 1-1 0v-1h-1a.5.5 0 0 1 0-1h1v-1a.5.5 0 0 1 1 0" />
+          <path d="M2 0a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h5.5V0zm.5 7.5h3a.5.5 0 0 1 0 1h-3a.5.5 0 0 1 0-1" opacity="0.3" />
+        </svg>
+      </button>
+      <button
+        type="button"
+        onClick={() => onDisableBackgroundChange(!disableBackground)}
+        title={disableBackground ? "Enable background" : "Disable background"}
+        aria-label={disableBackground ? "Enable background" : "Disable background"}
+        className="cursor-pointer p-1 opacity-60 hover:opacity-100"
+      >
+        <svg xmlns="http://www.w3.org/2000/svg" fill="currentColor" viewBox="0 0 16 16" width="16" height="16">
+          <path d="M0 2.25a.75.75 0 0 1 .75-.75h10.5a.75.75 0 0 1 0 1.5H.75A.75.75 0 0 1 0 2.25" opacity="0.4" />
+          <path fillRule="evenodd" d="M15 5a1 1 0 0 1 1 1v5a1 1 0 0 1-1 1H1a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1zM2.5 9a.5.5 0 0 0 0 1h8a.5.5 0 0 0 0-1zm0-2a.5.5 0 0 0 0 1h11a.5.5 0 0 0 0-1z" clipRule="evenodd" />
+          <path d="M0 14.75A.75.75 0 0 1 .75 14h5.5a.75.75 0 0 1 0 1.5H.75a.75.75 0 0 1-.75-.75" opacity="0.4" />
+        </svg>
+      </button>
+    </div>
+  );
+}
+
 function DiffWithSteer({
   oldFile,
   newFile,
@@ -265,6 +307,9 @@ function DiffWithSteer({
   onSubmit: (annotation: SteerAnnotation, text: string) => void;
   onCancel: (annotation: SteerAnnotation) => void;
 }) {
+  const [diffStyle, setDiffStyle] = useState<"split" | "unified">("split");
+  const [disableBackground, setDisableBackground] = useState(false);
+
   const containerRef = useRef<HTMLDivElement>(null);
   const buttonRef = useRef<HTMLDivElement>(null);
   const hoveredRef = useRef<{ lineNumber: number; side: AnnotationSide } | null>(null);
@@ -301,7 +346,8 @@ function DiffWithSteer({
         oldFile={oldFile}
         newFile={newFile}
         options={{
-          diffStyle: "split",
+          diffStyle,
+          disableBackground,
           theme: "pierre-dark",
           lineDiffType: "word",
           onLineEnter({ lineNumber, annotationSide, lineElement }) {
@@ -311,6 +357,14 @@ function DiffWithSteer({
             hideButton();
           },
         }}
+        renderHeaderMetadata={() => (
+          <DiffHeaderToggles
+            diffStyle={diffStyle}
+            onDiffStyleChange={setDiffStyle}
+            disableBackground={disableBackground}
+            onDisableBackgroundChange={setDisableBackground}
+          />
+        )}
         lineAnnotations={buildAnnotationsForFile(
           newFile.name,
           openSteers,
