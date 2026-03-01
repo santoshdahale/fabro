@@ -98,7 +98,7 @@ const TRANSIENT_INFRA_HINTS: &[&str] = &[
     "context deadline exceeded",
     "could not resolve host",
     "could not resolve hostname",
-    "temporary failure in name resolution",
+    "temporary failure",
     "network is unreachable",
     "broken pipe",
     "tls handshake timeout",
@@ -115,6 +115,14 @@ const TRANSIENT_INFRA_HINTS: &[&str] = &[
     "transport is closing",
     "stream disconnected",
     "stream closed before",
+    "index.crates.io",
+    "download of config.json failed",
+    "toolchain_or_dependency_registry_unavailable",
+    "toolchain dependency resolution blocked by network",
+    "toolchain_workspace_io",
+    "cross-device link",
+    "invalid cross-device link",
+    "os error 18",
 ];
 
 const BUDGET_EXHAUSTED_HINTS: &[&str] = &[
@@ -132,7 +140,11 @@ const BUDGET_EXHAUSTED_HINTS: &[&str] = &[
     "token limit exceeded",
 ];
 
-const STRUCTURAL_HINTS: &[&str] = &["scope violation"];
+const STRUCTURAL_HINTS: &[&str] = &[
+    "write_scope_violation",
+    "write scope violation",
+    "scope violation",
+];
 
 /// Classify a failure reason string using heuristics.
 ///
@@ -146,6 +158,13 @@ pub fn classify_failure_reason(reason: &str) -> FailureClass {
         return FailureClass::Canceled;
     }
 
+    if TRANSIENT_INFRA_HINTS
+        .iter()
+        .any(|hint| lower.contains(hint))
+    {
+        return FailureClass::TransientInfra;
+    }
+
     if BUDGET_EXHAUSTED_HINTS
         .iter()
         .any(|hint| lower.contains(hint))
@@ -155,13 +174,6 @@ pub fn classify_failure_reason(reason: &str) -> FailureClass {
 
     if STRUCTURAL_HINTS.iter().any(|hint| lower.contains(hint)) {
         return FailureClass::Structural;
-    }
-
-    if TRANSIENT_INFRA_HINTS
-        .iter()
-        .any(|hint| lower.contains(hint))
-    {
-        return FailureClass::TransientInfra;
     }
 
     FailureClass::Deterministic
@@ -585,7 +597,7 @@ mod tests {
 
     #[test]
     fn transient_infra_hints_count() {
-        assert_eq!(TRANSIENT_INFRA_HINTS.len(), 30);
+        assert_eq!(TRANSIENT_INFRA_HINTS.len(), 38);
     }
 
     #[test]
@@ -595,7 +607,7 @@ mod tests {
 
     #[test]
     fn structural_hints_count() {
-        assert_eq!(STRUCTURAL_HINTS.len(), 1);
+        assert_eq!(STRUCTURAL_HINTS.len(), 3);
     }
 
     // --- classify_failure_reason regression tests ---
@@ -817,6 +829,14 @@ mod tests {
     }
 
     #[test]
+    fn classify_reason_temporary_failure() {
+        assert_eq!(
+            classify_failure_reason("temporary failure"),
+            FailureClass::TransientInfra
+        );
+    }
+
+    #[test]
     fn classify_reason_temporary_failure_in_name_resolution() {
         assert_eq!(
             classify_failure_reason("temporary failure in name resolution"),
@@ -949,6 +969,88 @@ mod tests {
         assert_eq!(
             classify_failure_reason("stream closed before completion"),
             FailureClass::TransientInfra
+        );
+    }
+
+    #[test]
+    fn classify_reason_index_crates_io() {
+        assert_eq!(
+            classify_failure_reason("failed to fetch index.crates.io"),
+            FailureClass::TransientInfra
+        );
+    }
+
+    #[test]
+    fn classify_reason_download_config_json_failed() {
+        assert_eq!(
+            classify_failure_reason("download of config.json failed"),
+            FailureClass::TransientInfra
+        );
+    }
+
+    #[test]
+    fn classify_reason_toolchain_registry_unavailable() {
+        assert_eq!(
+            classify_failure_reason("toolchain_or_dependency_registry_unavailable"),
+            FailureClass::TransientInfra
+        );
+    }
+
+    #[test]
+    fn classify_reason_toolchain_dependency_network() {
+        assert_eq!(
+            classify_failure_reason("toolchain dependency resolution blocked by network"),
+            FailureClass::TransientInfra
+        );
+    }
+
+    #[test]
+    fn classify_reason_toolchain_workspace_io() {
+        assert_eq!(
+            classify_failure_reason("toolchain_workspace_io"),
+            FailureClass::TransientInfra
+        );
+    }
+
+    #[test]
+    fn classify_reason_cross_device_link() {
+        assert_eq!(
+            classify_failure_reason("cross-device link"),
+            FailureClass::TransientInfra
+        );
+    }
+
+    #[test]
+    fn classify_reason_invalid_cross_device_link() {
+        assert_eq!(
+            classify_failure_reason("invalid cross-device link"),
+            FailureClass::TransientInfra
+        );
+    }
+
+    #[test]
+    fn classify_reason_os_error_18() {
+        assert_eq!(
+            classify_failure_reason("os error 18"),
+            FailureClass::TransientInfra
+        );
+    }
+
+    // Structural
+
+    #[test]
+    fn classify_reason_write_scope_violation_underscore() {
+        assert_eq!(
+            classify_failure_reason("write_scope_violation detected"),
+            FailureClass::Structural
+        );
+    }
+
+    #[test]
+    fn classify_reason_write_scope_violation_space() {
+        assert_eq!(
+            classify_failure_reason("write scope violation detected"),
+            FailureClass::Structural
         );
     }
 
