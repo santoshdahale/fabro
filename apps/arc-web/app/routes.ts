@@ -25,7 +25,12 @@ export default [
       route("files", "routes/run-files-changed.tsx"),
       route("usage", "routes/run-usage.tsx"),
     ]),
-    route("insights", "routes/insights.tsx"),
+    route("verifications", "routes/verifications.tsx"),
+    route("retros", "routes/retros.tsx"),
+    route("insights", "routes/insights.tsx", [
+      index("routes/insights-editor.tsx"),
+      route("new", "routes/insights-new.tsx"),
+    ]),
     route("settings", "routes/settings.tsx"),
   ]),
 ] satisfies RouteConfig;

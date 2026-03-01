@@ -9,7 +9,10 @@ import {
 } from "@headlessui/react";
 import {
   Bars3Icon,
+  ChartBarIcon,
+  CheckBadgeIcon,
   Cog6ToothIcon,
+  LightBulbIcon,
   PlayIcon,
   RectangleStackIcon,
   SparklesIcon,
@@ -28,6 +31,9 @@ const navigation = [
   { name: "Start", href: "/start", icon: SparklesIcon },
   { name: "Workflows", href: "/workflows", icon: RectangleStackIcon },
   { name: "Runs", href: "/runs", icon: PlayIcon },
+  { name: "Verifications", href: "/verifications", icon: CheckBadgeIcon },
+  { name: "Retros", href: "/retros", icon: LightBulbIcon },
+  { name: "Insights", href: "/insights", icon: ChartBarIcon },
   { name: "Settings", href: "/settings", icon: Cog6ToothIcon },
 ];
 
@@ -43,10 +49,11 @@ export default function AppShell() {
   const currentNav = navigation.find((item) => pathname.startsWith(item.href));
   const title = currentNav?.name ?? "";
   const lastMatch = matches[matches.length - 1];
-  const handle = lastMatch?.handle as { headerExtra?: React.ReactNode; wide?: boolean } | undefined;
+  const handle = lastMatch?.handle as { headerExtra?: React.ReactNode } | undefined;
   const headerExtra = handle?.headerExtra;
   const hideHeader = matches.some((m) => (m.handle as { hideHeader?: boolean } | undefined)?.hideHeader);
-  const maxWidth = handle?.wide ? "" : "max-w-5xl";
+  const wide = matches.some((m) => (m.handle as { wide?: boolean } | undefined)?.wide);
+  const maxWidth = wide ? "" : "max-w-5xl";
 
   return (
     <div className="min-h-full">
