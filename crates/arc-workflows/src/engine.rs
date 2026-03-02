@@ -876,12 +876,7 @@ impl PipelineEngine {
                         tokio::time::sleep(delay).await;
                         continue;
                     }
-                    let mut fail_outcome = Outcome::fail(e.to_string());
-                    fail_outcome.context_updates.insert(
-                        "failure_class".to_string(),
-                        serde_json::json!(e.failure_class().to_string()),
-                    );
-                    return Ok((fail_outcome, attempt));
+                    return Ok((e.to_fail_outcome(), attempt));
                 }
             };
 

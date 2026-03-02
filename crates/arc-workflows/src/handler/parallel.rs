@@ -503,7 +503,7 @@ impl Handler for ParallelHandler {
                 Ok(Err(e)) => {
                     let result = BranchResult {
                         id: String::new(),
-                        outcome: Outcome::fail(e.to_string()),
+                        outcome: e.to_fail_outcome(),
                         head_sha: None,
                         worktree_path: None,
                     };

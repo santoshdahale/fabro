@@ -131,6 +131,54 @@ impl SdkError {
             _ => None,
         }
     }
+
+    #[must_use]
+    pub fn provider_name(&self) -> &str {
+        match self {
+            Self::Provider { detail, .. } => &detail.provider,
+            _ => "unknown",
+        }
+    }
+
+    #[must_use]
+    pub fn failure_signature_hint(&self) -> String {
+        let provider = self.provider_name();
+        match self {
+            Self::Provider { kind, .. } => {
+                let category = if self.retryable() {
+                    "api_transient"
+                } else {
+                    "api_deterministic"
+                };
+                let detail = match kind {
+                    ProviderErrorKind::RateLimit => "rate_limited",
+                    ProviderErrorKind::Server => "server_error",
+                    ProviderErrorKind::ContextLength => "context_length",
+                    ProviderErrorKind::QuotaExceeded => "quota_exceeded",
+                    ProviderErrorKind::Authentication => "authentication",
+                    ProviderErrorKind::AccessDenied => "access_denied",
+                    ProviderErrorKind::NotFound => "not_found",
+                    ProviderErrorKind::InvalidRequest => "invalid_request",
+                    ProviderErrorKind::ContentFilter => "content_filter",
+                };
+                format!("{category}|{provider}|{detail}")
+            }
+            Self::RequestTimeout { .. } => format!("api_transient|{provider}|timeout"),
+            Self::Network { .. } => format!("api_transient|{provider}|network"),
+            Self::Stream { .. } => format!("api_transient|{provider}|stream"),
+            Self::Abort { .. } => format!("api_canceled|{provider}|abort"),
+            Self::Configuration { .. } => format!("api_deterministic|{provider}|configuration"),
+            Self::InvalidToolCall { .. } => {
+                format!("api_deterministic|{provider}|invalid_tool_call")
+            }
+            Self::NoObjectGenerated { .. } => {
+                format!("api_deterministic|{provider}|no_object")
+            }
+            Self::UnsupportedToolChoice { .. } => {
+                format!("api_deterministic|{provider}|unsupported_tool_choice")
+            }
+        }
+    }
 }
 
 /// HTTP status code to error type mapping (Section 6.4).
@@ -720,5 +768,169 @@ mod tests {
             message: "refused".into(),
         };
         assert_eq!(err.status_code(), None);
+    }
+
+    #[test]
+    fn provider_name_from_provider_variant() {
+        let err = SdkError::Provider {
+            kind: ProviderErrorKind::Authentication,
+            detail: Box::new(ProviderErrorDetail::new("bad key", "openai")),
+        };
+        assert_eq!(err.provider_name(), "openai");
+    }
+
+    #[test]
+    fn provider_name_defaults_to_unknown() {
+        let err = SdkError::Network {
+            message: "refused".into(),
+        };
+        assert_eq!(err.provider_name(), "unknown");
+    }
+
+    #[test]
+    fn failure_signature_hint_provider_transient() {
+        let err = SdkError::Provider {
+            kind: ProviderErrorKind::RateLimit,
+            detail: Box::new(ProviderErrorDetail::new("too fast", "openai")),
+        };
+        assert_eq!(
+            err.failure_signature_hint(),
+            "api_transient|openai|rate_limited"
+        );
+
+        let err = SdkError::Provider {
+            kind: ProviderErrorKind::Server,
+            detail: Box::new(ProviderErrorDetail::new("500", "anthropic")),
+        };
+        assert_eq!(
+            err.failure_signature_hint(),
+            "api_transient|anthropic|server_error"
+        );
+    }
+
+    #[test]
+    fn failure_signature_hint_provider_deterministic() {
+        let err = SdkError::Provider {
+            kind: ProviderErrorKind::Authentication,
+            detail: Box::new(ProviderErrorDetail::new("bad key", "openai")),
+        };
+        assert_eq!(
+            err.failure_signature_hint(),
+            "api_deterministic|openai|authentication"
+        );
+
+        let err = SdkError::Provider {
+            kind: ProviderErrorKind::AccessDenied,
+            detail: Box::new(ProviderErrorDetail::new("denied", "anthropic")),
+        };
+        assert_eq!(
+            err.failure_signature_hint(),
+            "api_deterministic|anthropic|access_denied"
+        );
+
+        let err = SdkError::Provider {
+            kind: ProviderErrorKind::NotFound,
+            detail: Box::new(ProviderErrorDetail::new("missing", "openai")),
+        };
+        assert_eq!(
+            err.failure_signature_hint(),
+            "api_deterministic|openai|not_found"
+        );
+
+        let err = SdkError::Provider {
+            kind: ProviderErrorKind::InvalidRequest,
+            detail: Box::new(ProviderErrorDetail::new("bad", "openai")),
+        };
+        assert_eq!(
+            err.failure_signature_hint(),
+            "api_deterministic|openai|invalid_request"
+        );
+
+        let err = SdkError::Provider {
+            kind: ProviderErrorKind::ContentFilter,
+            detail: Box::new(ProviderErrorDetail::new("blocked", "openai")),
+        };
+        assert_eq!(
+            err.failure_signature_hint(),
+            "api_deterministic|openai|content_filter"
+        );
+
+        let err = SdkError::Provider {
+            kind: ProviderErrorKind::ContextLength,
+            detail: Box::new(ProviderErrorDetail::new("too long", "openai")),
+        };
+        assert_eq!(
+            err.failure_signature_hint(),
+            "api_deterministic|openai|context_length"
+        );
+
+        let err = SdkError::Provider {
+            kind: ProviderErrorKind::QuotaExceeded,
+            detail: Box::new(ProviderErrorDetail::new("out of quota", "openai")),
+        };
+        assert_eq!(
+            err.failure_signature_hint(),
+            "api_deterministic|openai|quota_exceeded"
+        );
+    }
+
+    #[test]
+    fn failure_signature_hint_non_provider_variants() {
+        assert_eq!(
+            SdkError::RequestTimeout {
+                message: "timed out".into()
+            }
+            .failure_signature_hint(),
+            "api_transient|unknown|timeout"
+        );
+        assert_eq!(
+            SdkError::Network {
+                message: "refused".into()
+            }
+            .failure_signature_hint(),
+            "api_transient|unknown|network"
+        );
+        assert_eq!(
+            SdkError::Stream {
+                message: "broken".into()
+            }
+            .failure_signature_hint(),
+            "api_transient|unknown|stream"
+        );
+        assert_eq!(
+            SdkError::Abort {
+                message: "cancelled".into()
+            }
+            .failure_signature_hint(),
+            "api_canceled|unknown|abort"
+        );
+        assert_eq!(
+            SdkError::Configuration {
+                message: "bad".into()
+            }
+            .failure_signature_hint(),
+            "api_deterministic|unknown|configuration"
+        );
+        assert_eq!(
+            SdkError::InvalidToolCall {
+                message: "bad".into()
+            }
+            .failure_signature_hint(),
+            "api_deterministic|unknown|invalid_tool_call"
+        );
+        assert_eq!(
+            SdkError::NoObjectGenerated {
+                message: "none".into()
+            }
+            .failure_signature_hint(),
+            "api_deterministic|unknown|no_object"
+        );
+        assert_eq!(
+            SdkError::UnsupportedToolChoice {
+                message: "nope".into()
+            }
+            .failure_signature_hint(),
+            "api_deterministic|unknown|unsupported_tool_choice"
+        );
     }
 }

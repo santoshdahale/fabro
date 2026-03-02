@@ -271,7 +271,7 @@ impl Handler for CodergenHandler {
                         return Err(e);
                     }
                     Err(e) => {
-                        return Ok(Outcome::fail(e.to_string()));
+                        return Ok(e.to_fail_outcome());
                     }
                 }
             } else {

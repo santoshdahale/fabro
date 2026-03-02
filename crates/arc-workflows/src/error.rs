@@ -351,6 +351,32 @@ impl ArcError {
             Self::Handler(msg) | Self::Engine(msg) => classify_failure_reason(msg),
         }
     }
+
+    /// Return a stable failure signature hint when structured error info is available.
+    #[must_use]
+    pub fn failure_signature_hint(&self) -> Option<String> {
+        match self {
+            Self::Llm(sdk_err) => Some(sdk_err.failure_signature_hint()),
+            _ => None,
+        }
+    }
+
+    /// Build an `Outcome::fail` with `failure_class` and optional `failure_signature`
+    /// populated in `context_updates`.
+    pub fn to_fail_outcome(&self) -> crate::outcome::Outcome {
+        let mut outcome = crate::outcome::Outcome::fail(self.to_string());
+        outcome.context_updates.insert(
+            "failure_class".to_string(),
+            serde_json::json!(self.failure_class().to_string()),
+        );
+        if let Some(sig) = self.failure_signature_hint() {
+            outcome.context_updates.insert(
+                "failure_signature".to_string(),
+                serde_json::json!(sig),
+            );
+        }
+        outcome
+    }
 }
 
 impl From<std::io::Error> for ArcError {
@@ -1416,5 +1442,76 @@ mod tests {
         assert!(!FailureClass::BudgetExhausted.is_signature_tracked());
         assert!(!FailureClass::Canceled.is_signature_tracked());
         assert!(!FailureClass::CompilationLoop.is_signature_tracked());
+    }
+
+    // --- failure_signature_hint tests ---
+
+    #[test]
+    fn failure_signature_hint_llm_returns_some() {
+        let err = ArcError::Llm(SdkError::Provider {
+            kind: ProviderErrorKind::Authentication,
+            detail: Box::new(ProviderErrorDetail::new("bad key", "openai")),
+        });
+        assert_eq!(
+            err.failure_signature_hint(),
+            Some("api_deterministic|openai|authentication".to_string())
+        );
+    }
+
+    #[test]
+    fn failure_signature_hint_handler_returns_none() {
+        let err = ArcError::Handler("something failed".to_string());
+        assert_eq!(err.failure_signature_hint(), None);
+    }
+
+    #[test]
+    fn failure_signature_hint_engine_returns_none() {
+        let err = ArcError::Engine("engine error".to_string());
+        assert_eq!(err.failure_signature_hint(), None);
+    }
+
+    // --- to_fail_outcome tests ---
+
+    #[test]
+    fn to_fail_outcome_llm_has_class_and_signature() {
+        let err = ArcError::Llm(SdkError::Provider {
+            kind: ProviderErrorKind::Authentication,
+            detail: Box::new(ProviderErrorDetail::new("bad key", "openai")),
+        });
+        let outcome = err.to_fail_outcome();
+        assert_eq!(outcome.status, crate::outcome::StageStatus::Fail);
+        assert_eq!(
+            outcome.context_updates.get("failure_class"),
+            Some(&serde_json::json!("deterministic"))
+        );
+        assert_eq!(
+            outcome.context_updates.get("failure_signature"),
+            Some(&serde_json::json!("api_deterministic|openai|authentication"))
+        );
+    }
+
+    #[test]
+    fn to_fail_outcome_handler_has_class_but_no_signature() {
+        let err = ArcError::Handler("connection refused".to_string());
+        let outcome = err.to_fail_outcome();
+        assert_eq!(outcome.status, crate::outcome::StageStatus::Fail);
+        assert_eq!(
+            outcome.context_updates.get("failure_class"),
+            Some(&serde_json::json!("transient_infra"))
+        );
+        assert!(!outcome.context_updates.contains_key("failure_signature"));
+    }
+
+    #[test]
+    fn to_fail_outcome_includes_error_message_as_reason() {
+        let err = ArcError::Llm(SdkError::Network {
+            message: "connection refused".into(),
+        });
+        let outcome = err.to_fail_outcome();
+        assert!(outcome
+            .failure_reason
+            .as_ref()
+            .unwrap()
+            .contains("connection refused"));
     }
 }
