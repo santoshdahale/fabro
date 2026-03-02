@@ -24,12 +24,12 @@ enum Command {
     },
     /// Run an agentic coding session
     Agent(arc_agent::cli::AgentArgs),
-    /// Launch and manage pipeline runs
+    /// Launch and manage workflow runs
     Run {
         #[command(subcommand)]
         command: RunCommand,
     },
-    /// Validate a pipeline
+    /// Validate a workflow
     Validate(arc_workflows::cli::ValidateArgs),
     /// List and test LLM models
     Models {
@@ -42,11 +42,11 @@ enum Command {
 
 #[derive(Subcommand)]
 enum RunCommand {
-    /// Launch a pipeline from a .dot or .toml task file
+    /// Launch a workflow from a .dot or .toml task file
     Start(arc_workflows::cli::RunArgs),
-    /// List pipeline runs
+    /// List workflow runs
     List(arc_workflows::cli::runs::RunsListArgs),
-    /// Delete old pipeline runs
+    /// Delete old workflow runs
     Prune(arc_workflows::cli::runs::RunsPruneArgs),
 }
 

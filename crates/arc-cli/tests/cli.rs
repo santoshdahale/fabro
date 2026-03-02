@@ -498,17 +498,17 @@ fn dry_run_writes_ndjson_and_live_json() {
     );
     assert!(first_line.get("event").is_some(), "line should have event");
 
-    // Events should contain PipelineStarted (may not be first due to exec env events)
-    let has_pipeline_started = lines.iter().any(|line| {
+    // Events should contain WorkflowRunStarted (may not be first due to exec env events)
+    let has_run_started = lines.iter().any(|line| {
         let parsed: serde_json::Value = serde_json::from_str(line).unwrap();
-        parsed["event"].get("PipelineStarted").is_some()
+        parsed["event"].get("WorkflowRunStarted").is_some()
     });
     assert!(
-        has_pipeline_started,
-        "events should contain PipelineStarted"
+        has_run_started,
+        "events should contain WorkflowRunStarted"
     );
 
-    // run_id should be non-empty after PipelineStarted
+    // run_id should be non-empty after WorkflowRunStarted
     let last_line: serde_json::Value = serde_json::from_str(lines[lines.len() - 1]).unwrap();
     let run_id = last_line["run_id"].as_str().unwrap();
     assert!(!run_id.is_empty(), "run_id should be non-empty");
