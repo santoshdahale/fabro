@@ -28,6 +28,7 @@ export default [
       route("retro", "routes/run-retro.tsx"),
     ]),
     route("verifications", "routes/verifications.tsx"),
+    route("verifications/:slug", "routes/verification-detail.tsx"),
     route("retros", "routes/retros.tsx"),
     route("insights", "routes/insights.tsx", [
       index("routes/insights-editor.tsx"),

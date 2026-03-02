@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useNavigate } from "react-router";
 import {
   Disclosure,
   DisclosureButton,
@@ -54,6 +55,7 @@ import {
   typeConfig,
   modeConfig,
   criterionPerformance,
+  slugify,
 } from "../data/verifications";
 import type {
   VerificationType,
@@ -142,6 +144,18 @@ function TypeBadge({ type }: { type: VerificationType | null }) {
 
 type ViewMode = "grouped" | "ungrouped";
 
+function CriterionRow({ slug, children }: { slug: string; children: React.ReactNode }) {
+  const navigate = useNavigate();
+  return (
+    <tr
+      className="border-b border-line last:border-b-0 cursor-pointer transition-colors hover:bg-overlay"
+      onClick={() => navigate(`/verifications/${slug}`)}
+    >
+      {children}
+    </tr>
+  );
+}
+
 function CategoryCard({ category }: { category: VerificationCategory }) {
   return (
     <Disclosure
@@ -180,10 +194,7 @@ function CategoryCard({ category }: { category: VerificationCategory }) {
                 const Icon = criterionIcons[criterion.name];
                 const perf = criterionPerformance[criterion.name];
                 return (
-                  <tr
-                    key={criterion.name}
-                    className="border-b border-line last:border-b-0 transition-colors hover:bg-overlay"
-                  >
+                  <CriterionRow key={criterion.name} slug={slugify(criterion.name)}>
                     <td className="w-8 py-2.5 pl-5 pr-0">
                       {Icon && <Icon className="size-4 text-fg-3" />}
                     </td>
@@ -204,7 +215,7 @@ function CategoryCard({ category }: { category: VerificationCategory }) {
                     <td className="whitespace-nowrap py-2.5 pl-1 pr-4">
                       {perf && <EvaluationDots evaluations={perf.evaluations} />}
                     </td>
-                  </tr>
+                  </CriterionRow>
                 );
               })}
             </tbody>
@@ -281,10 +292,7 @@ function UngroupedView({ categories }: { categories: readonly VerificationCatego
               const Icon = criterionIcons[criterion.name];
               const perf = criterionPerformance[criterion.name];
               return (
-                <tr
-                  key={`${category.name}-${criterion.name}`}
-                  className="border-b border-line last:border-b-0 transition-colors hover:bg-overlay"
-                >
+                <CriterionRow key={`${category.name}-${criterion.name}`} slug={slugify(criterion.name)}>
                   <td className="w-8 py-2.5 pl-4 pr-0">
                     {Icon && <Icon className="size-4 text-fg-3" />}
                   </td>
@@ -314,7 +322,7 @@ function UngroupedView({ categories }: { categories: readonly VerificationCatego
                   <td className="whitespace-nowrap py-2.5 pl-3 pr-4">
                     {perf && <EvaluationDots evaluations={perf.evaluations} />}
                   </td>
-                </tr>
+                </CriterionRow>
               );
             }),
           )}
