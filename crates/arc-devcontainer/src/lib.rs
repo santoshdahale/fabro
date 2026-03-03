@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 mod compose;
 mod dockerfile;
 mod features;
