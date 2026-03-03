@@ -5536,7 +5536,7 @@ mod real_llm {
     fn make_llm_backend(client: Arc<Client>) -> Box<LlmCodergenBackend> {
         Box::new(LlmCodergenBackend {
             client,
-            model: "claude-haiku-4-5-20251001".to_string(),
+            model: "claude-haiku-4-5".to_string(),
         })
     }
 
@@ -5958,7 +5958,7 @@ mod real_llm {
         );
         classify.attrs.insert(
             "llm_model".to_string(),
-            AttrValue::String("claude-haiku-4-5-20251001".to_string()),
+            AttrValue::String("claude-haiku-4-5".to_string()),
         );
         graph.nodes.insert("classify".to_string(), classify);
 
@@ -7197,7 +7197,7 @@ async fn arc_e2e_with_real_llm() {
     validate_or_raise(&graph, &[]).expect("validation should pass");
 
     let interviewer: Arc<dyn Interviewer> = Arc::new(AutoApproveInterviewer);
-    let model = "claude-haiku-4-5-20251001".to_string();
+    let model = "claude-haiku-4-5".to_string();
 
     let registry = default_registry(interviewer, move || {
         Some(Box::new(AgentApiBackend::new(

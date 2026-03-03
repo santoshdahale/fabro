@@ -26,7 +26,7 @@ async fn anthropic_complete() {
     dotenvy::dotenv().ok();
     let api_key = std::env::var("ANTHROPIC_API_KEY").expect("ANTHROPIC_API_KEY must be set");
     let adapter = AnthropicAdapter::new(api_key);
-    let request = make_request("claude-haiku-4-5-20251001");
+    let request = make_request("claude-haiku-4-5");
     let response = adapter.complete(&request).await.unwrap();
 
     assert!(
@@ -171,7 +171,7 @@ async fn anthropic_multi_turn_cache() {
     dotenvy::dotenv().ok();
     let api_key = std::env::var("ANTHROPIC_API_KEY").expect("ANTHROPIC_API_KEY must be set");
     let adapter = AnthropicAdapter::new(api_key);
-    run_multi_turn_cache_test(&adapter, "claude-haiku-4-5-20251001", 0.5).await;
+    run_multi_turn_cache_test(&adapter, "claude-haiku-4-5", 0.5).await;
 }
 
 #[tokio::test]

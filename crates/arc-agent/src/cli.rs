@@ -156,7 +156,7 @@ fn summarizer_model_id(provider: Provider) -> ModelId {
     match provider {
         Provider::OpenAi => ModelId::new(Provider::OpenAi, "gpt-4o-mini"),
         Provider::Gemini => ModelId::new(Provider::Gemini, "gemini-2.0-flash"),
-        Provider::Anthropic => ModelId::new(Provider::Anthropic, "claude-haiku-4-5-20251001"),
+        Provider::Anthropic => ModelId::new(Provider::Anthropic, "claude-haiku-4-5"),
         Provider::Kimi => ModelId::new(Provider::Kimi, "kimi-k2.5"),
         Provider::Zai => ModelId::new(Provider::Zai, "glm-4.7"),
         Provider::Minimax => ModelId::new(Provider::Minimax, "minimax-m2.5"),

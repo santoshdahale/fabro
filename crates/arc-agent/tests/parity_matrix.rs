@@ -16,7 +16,7 @@ fn summarizer_model_id(provider: Provider) -> ModelId {
         | Provider::Minimax
         | Provider::Inception => ModelId::new(Provider::OpenAi, "gpt-4o-mini"),
         Provider::Gemini => ModelId::new(Provider::Gemini, "gemini-2.0-flash"),
-        Provider::Anthropic => ModelId::new(Provider::Anthropic, "claude-haiku-4-5-20251001"),
+        Provider::Anthropic => ModelId::new(Provider::Anthropic, "claude-haiku-4-5"),
     }
 }
 
@@ -110,7 +110,7 @@ macro_rules! provider_tests {
             #[ignore = "requires LLM API keys"]
             async fn [<anthropic_ $scenario>]() {
                 let tmp = tempfile::tempdir().expect("failed to create tempdir");
-                let mut session = make_session(Provider::Anthropic, "claude-haiku-4-5-20251001", tmp.path()).await;
+                let mut session = make_session(Provider::Anthropic, "claude-haiku-4-5", tmp.path()).await;
                 session.initialize().await;
                 [<scenario_ $scenario>](&mut session, tmp.path()).await;
             }
@@ -165,7 +165,7 @@ macro_rules! anthropic_gemini_tests {
             #[ignore = "requires LLM API keys"]
             async fn [<anthropic_ $scenario>]() {
                 let tmp = tempfile::tempdir().expect("failed to create tempdir");
-                let mut session = make_session(Provider::Anthropic, "claude-haiku-4-5-20251001", tmp.path()).await;
+                let mut session = make_session(Provider::Anthropic, "claude-haiku-4-5", tmp.path()).await;
                 session.initialize().await;
                 [<scenario_ $scenario>](&mut session, tmp.path()).await;
             }
@@ -349,7 +349,7 @@ macro_rules! reasoning_effort_tests {
 
 reasoning_effort_tests!(
     Provider::Anthropic,
-    "claude-haiku-4-5-20251001",
+    "claude-haiku-4-5",
     anthropic_reasoning_effort
 );
 // gpt-4o-mini does not support the reasoning.effort parameter, so no OpenAI test.
@@ -399,7 +399,7 @@ macro_rules! loop_detection_tests {
 
 loop_detection_tests!(
     Provider::Anthropic,
-    "claude-haiku-4-5-20251001",
+    "claude-haiku-4-5",
     anthropic_loop_detection
 );
 loop_detection_tests!(Provider::OpenAi, "gpt-4o-mini", openai_loop_detection);
