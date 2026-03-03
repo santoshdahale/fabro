@@ -408,14 +408,14 @@ fn topo_sort(
             for dep in dep_refs {
                 let dep_dir = dir_name_from_id(dep);
                 for candidate in feature_ids {
-                    if candidate == dep || dir_name_from_id(candidate) == dep_dir {
-                        if id_set.contains(candidate.as_str()) {
-                            // candidate -> id (candidate must come before id)
-                            let edge = (candidate.as_str(), id.as_str());
-                            if edge_set.insert(edge) {
-                                edges.entry(candidate.as_str()).or_default().push(id.as_str());
-                                *in_degree.entry(id.as_str()).or_insert(0) += 1;
-                            }
+                    if (candidate == dep || dir_name_from_id(candidate) == dep_dir)
+                        && id_set.contains(candidate.as_str())
+                    {
+                        // candidate -> id (candidate must come before id)
+                        let edge = (candidate.as_str(), id.as_str());
+                        if edge_set.insert(edge) {
+                            edges.entry(candidate.as_str()).or_default().push(id.as_str());
+                            *in_degree.entry(id.as_str()).or_insert(0) += 1;
                         }
                     }
                 }
