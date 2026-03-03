@@ -21,25 +21,62 @@ pub struct WorkflowRunConfig {
     pub vars: Option<HashMap<String, String>>,
 }
 
-#[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
+#[derive(Clone, Debug, Deserialize)]
 pub struct LlmConfig {
     pub model: Option<String>,
     pub provider: Option<String>,
 }
 
-#[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
+#[derive(Clone, Debug, Deserialize)]
 pub struct SetupConfig {
     pub commands: Vec<String>,
     pub timeout_ms: Option<u64>,
 }
 
-#[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
+#[derive(Clone, Debug, Deserialize)]
 pub struct SandboxConfig {
     pub provider: Option<String>,
     pub daytona: Option<DaytonaConfig>,
+}
+
+/// Defaults for workflow runs, loaded from the server config.
+///
+/// Fields mirror `WorkflowRunConfig` but are all optional.
+#[derive(Clone, Debug, Default, Deserialize)]
+pub struct RunDefaults {
+    pub directory: Option<String>,
+    pub llm: Option<LlmConfig>,
+    pub setup: Option<SetupConfig>,
+    pub sandbox: Option<SandboxConfig>,
+    pub vars: Option<HashMap<String, String>>,
+}
+
+impl WorkflowRunConfig {
+    /// Apply server-level run defaults to this config.
+    ///
+    /// Each field uses the first non-`None` value (task config wins).
+    /// Vars are merged: defaults first, then task config overwrites.
+    pub fn apply_defaults(&mut self, defaults: &RunDefaults) {
+        if self.directory.is_none() {
+            self.directory = defaults.directory.clone();
+        }
+        if self.llm.is_none() {
+            self.llm = defaults.llm.clone();
+        }
+        if self.setup.is_none() {
+            self.setup = defaults.setup.clone();
+        }
+        if self.sandbox.is_none() {
+            self.sandbox = defaults.sandbox.clone();
+        }
+        if let Some(ref default_vars) = defaults.vars {
+            let mut merged = default_vars.clone();
+            if let Some(ref task_vars) = self.vars {
+                merged.extend(task_vars.clone());
+            }
+            self.vars = Some(merged);
+        }
+    }
 }
 
 /// Load and validate a run config from a TOML file.
@@ -384,6 +421,151 @@ version = 1
 goal = "x"
 "#;
         assert!(parse_run_config(no_graph).is_err());
+    }
+
+    #[test]
+    fn parse_run_defaults_with_llm() {
+        let toml = r#"
+[llm]
+model = "claude-haiku"
+provider = "anthropic"
+"#;
+        let defaults: RunDefaults = toml::from_str(toml).unwrap();
+        let llm = defaults.llm.unwrap();
+        assert_eq!(llm.model.as_deref(), Some("claude-haiku"));
+        assert_eq!(llm.provider.as_deref(), Some("anthropic"));
+    }
+
+    #[test]
+    fn parse_run_defaults_empty() {
+        let defaults: RunDefaults = toml::from_str("").unwrap();
+        assert!(defaults.directory.is_none());
+        assert!(defaults.llm.is_none());
+        assert!(defaults.setup.is_none());
+        assert!(defaults.sandbox.is_none());
+        assert!(defaults.vars.is_none());
+    }
+
+    #[test]
+    fn parse_run_defaults_full() {
+        let toml = r#"
+directory = "/work"
+
+[llm]
+model = "gpt-4"
+provider = "openai"
+
+[setup]
+commands = ["make build"]
+timeout_ms = 5000
+
+[sandbox]
+provider = "daytona"
+
+[vars]
+key = "value"
+"#;
+        let defaults: RunDefaults = toml::from_str(toml).unwrap();
+        assert_eq!(defaults.directory.as_deref(), Some("/work"));
+        assert!(defaults.llm.is_some());
+        assert!(defaults.setup.is_some());
+        assert!(defaults.sandbox.is_some());
+        assert_eq!(defaults.vars.as_ref().unwrap()["key"], "value");
+    }
+
+    #[test]
+    fn apply_defaults_fills_missing_llm() {
+        let mut cfg = parse_run_config(
+            r#"
+version = 1
+goal = "test"
+graph = "w.dot"
+"#,
+        )
+        .unwrap();
+        let defaults = RunDefaults {
+            llm: Some(LlmConfig {
+                model: Some("default-model".into()),
+                provider: Some("anthropic".into()),
+            }),
+            ..RunDefaults::default()
+        };
+        cfg.apply_defaults(&defaults);
+        let llm = cfg.llm.unwrap();
+        assert_eq!(llm.model.as_deref(), Some("default-model"));
+    }
+
+    #[test]
+    fn apply_defaults_task_config_wins() {
+        let mut cfg = parse_run_config(
+            r#"
+version = 1
+goal = "test"
+graph = "w.dot"
+
+[llm]
+model = "task-model"
+"#,
+        )
+        .unwrap();
+        let defaults = RunDefaults {
+            llm: Some(LlmConfig {
+                model: Some("default-model".into()),
+                provider: None,
+            }),
+            ..RunDefaults::default()
+        };
+        cfg.apply_defaults(&defaults);
+        let llm = cfg.llm.unwrap();
+        assert_eq!(llm.model.as_deref(), Some("task-model"));
+    }
+
+    #[test]
+    fn apply_defaults_merges_vars() {
+        let mut cfg = parse_run_config(
+            r#"
+version = 1
+goal = "test"
+graph = "w.dot"
+
+[vars]
+task_key = "task_val"
+shared = "from_task"
+"#,
+        )
+        .unwrap();
+        let defaults = RunDefaults {
+            vars: Some(HashMap::from([
+                ("default_key".into(), "default_val".into()),
+                ("shared".into(), "from_default".into()),
+            ])),
+            ..RunDefaults::default()
+        };
+        cfg.apply_defaults(&defaults);
+        let vars = cfg.vars.unwrap();
+        assert_eq!(vars["default_key"], "default_val");
+        assert_eq!(vars["task_key"], "task_val");
+        // Task config wins on collision
+        assert_eq!(vars["shared"], "from_task");
+    }
+
+    #[test]
+    fn apply_defaults_vars_default_only() {
+        let mut cfg = parse_run_config(
+            r#"
+version = 1
+goal = "test"
+graph = "w.dot"
+"#,
+        )
+        .unwrap();
+        let defaults = RunDefaults {
+            vars: Some(HashMap::from([("key".into(), "val".into())])),
+            ..RunDefaults::default()
+        };
+        cfg.apply_defaults(&defaults);
+        let vars = cfg.vars.unwrap();
+        assert_eq!(vars["key"], "val");
     }
 
     #[tokio::test]

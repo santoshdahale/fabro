@@ -26,7 +26,7 @@ use arc_llm::provider::Provider;
 use super::backend::AgentApiBackend;
 use super::cli_backend::{BackendRouter, AgentCliBackend};
 use super::run_config;
-use super::run_config::WorkflowRunConfig;
+use super::run_config::{RunDefaults, WorkflowRunConfig};
 use super::{
     compute_stage_cost, format_cost, format_duration_human,
     format_event_summary, format_tokens_human, print_diagnostics, read_dot_file,
@@ -47,12 +47,13 @@ fn default_model_for_provider(provider: Provider) -> &'static str {
 }
 
 /// Resolve model and provider through the full precedence chain:
-/// CLI flag > TOML config > DOT graph attrs > provider-specific defaults.
+/// CLI flag > TOML config > run defaults > DOT graph attrs > provider-specific defaults.
 /// Then resolve through the catalog for alias expansion.
 fn resolve_model_provider(
     cli_model: Option<&str>,
     cli_provider: Option<&str>,
     run_cfg: Option<&WorkflowRunConfig>,
+    run_defaults: &RunDefaults,
     graph: &crate::graph::types::Graph,
 ) -> (String, Option<String>) {
     let toml_model = run_cfg
@@ -61,10 +62,19 @@ fn resolve_model_provider(
     let toml_provider = run_cfg
         .and_then(|c| c.llm.as_ref())
         .and_then(|l| l.provider.as_deref());
+    let defaults_model = run_defaults
+        .llm
+        .as_ref()
+        .and_then(|l| l.model.as_deref());
+    let defaults_provider = run_defaults
+        .llm
+        .as_ref()
+        .and_then(|l| l.provider.as_deref());
 
-    // Precedence: CLI flag > TOML > DOT graph attrs > defaults
+    // Precedence: CLI flag > TOML > run defaults > DOT graph attrs > defaults
     let provider = cli_provider
         .or(toml_provider)
+        .or(defaults_provider)
         .or_else(|| {
             graph
                 .attrs
@@ -75,6 +85,7 @@ fn resolve_model_provider(
 
     let model = cli_model
         .or(toml_model)
+        .or(defaults_model)
         .or_else(|| {
             graph
                 .attrs
@@ -114,7 +125,11 @@ struct CostAccumulator {
 /// # Errors
 ///
 /// Returns an error if the workflow cannot be read, parsed, validated, or executed.
-pub async fn run_command(args: RunArgs, styles: &'static Styles) -> anyhow::Result<()> {
+pub async fn run_command(
+    args: RunArgs,
+    run_defaults: RunDefaults,
+    styles: &'static Styles,
+) -> anyhow::Result<()> {
     // Handle --run-branch resume: read everything from git metadata
     if let Some(branch) = args.run_branch.clone() {
         return run_from_branch(args, &branch, styles).await;
@@ -125,32 +140,40 @@ pub async fn run_command(args: RunArgs, styles: &'static Styles) -> anyhow::Resu
         .as_ref()
         .ok_or_else(|| anyhow::anyhow!("--workflow is required unless --run-branch is provided"))?;
 
-    // 0. Load run config if TOML, resolve DOT path, run setup
+    // 0. Load run config if TOML, resolve DOT path, apply defaults
     let (dot_path, run_cfg) = if workflow_path.extension().is_some_and(|ext| ext == "toml") {
-        let cfg = run_config::load_run_config(workflow_path)?;
+        let mut cfg = run_config::load_run_config(workflow_path)?;
+        cfg.apply_defaults(&run_defaults);
         let dot = run_config::resolve_graph_path(workflow_path, &cfg.graph);
         (dot, Some(cfg))
     } else {
         (workflow_path.clone(), None)
     };
 
-    if let Some(ref cfg) = run_cfg {
-        if let Some(ref dir) = cfg.directory {
-            std::env::set_current_dir(dir)
-                .map_err(|e| anyhow::anyhow!("Failed to set working directory to {dir}: {e}"))?;
-        }
+    let directory = run_cfg
+        .as_ref()
+        .and_then(|c| c.directory.as_deref())
+        .or(run_defaults.directory.as_deref());
+    if let Some(dir) = directory {
+        std::env::set_current_dir(dir)
+            .map_err(|e| anyhow::anyhow!("Failed to set working directory to {dir}: {e}"))?;
     }
 
     // Collect setup commands — they'll be run inside the sandbox
     let setup_commands: Vec<String> = run_cfg
         .as_ref()
         .and_then(|c| c.setup.as_ref())
+        .or(run_defaults.setup.as_ref())
         .map(|s| s.commands.clone())
         .unwrap_or_default();
 
     // 1. Parse and validate workflow
     let source = read_dot_file(&dot_path)?;
-    let source = match run_cfg.as_ref().and_then(|c| c.vars.as_ref()) {
+    let vars = run_cfg
+        .as_ref()
+        .and_then(|c| c.vars.as_ref())
+        .or(run_defaults.vars.as_ref());
+    let source = match vars {
         Some(vars) => run_config::expand_vars(&source, vars)?,
         None => source,
     };
@@ -192,7 +215,15 @@ pub async fn run_command(args: RunArgs, styles: &'static Styles) -> anyhow::Resu
             .transpose()
             .ok()
             .flatten();
-        args.sandbox.or(toml_exec).unwrap_or_default()
+        let defaults_exec = run_defaults
+            .sandbox
+            .as_ref()
+            .and_then(|s| s.provider.as_deref())
+            .map(|s| s.parse::<SandboxProvider>())
+            .transpose()
+            .ok()
+            .flatten();
+        args.sandbox.or(toml_exec).or(defaults_exec).unwrap_or_default()
     };
     let original_cwd = std::env::current_dir()?;
     let git_clean = match sandbox_provider_preview {
@@ -203,7 +234,7 @@ pub async fn run_command(args: RunArgs, styles: &'static Styles) -> anyhow::Resu
     };
 
     if args.preflight {
-        return run_preflight(&graph, &run_cfg, &args, git_clean, sandbox_provider_preview, styles).await;
+        return run_preflight(&graph, &run_cfg, &args, &run_defaults, git_clean, sandbox_provider_preview, styles).await;
     }
 
     // 3. Create logs directory
@@ -367,7 +398,7 @@ pub async fn run_command(args: RunArgs, styles: &'static Styles) -> anyhow::Resu
         Arc::new(ConsoleInterviewer::new(styles))
     };
 
-    // 5. Resolve sandbox: CLI flag > TOML > default
+    // 5. Resolve sandbox: CLI flag > TOML (with defaults applied) > run defaults > default
     let toml_sandbox = run_cfg
         .as_ref()
         .and_then(|c| c.sandbox.as_ref())
@@ -375,9 +406,17 @@ pub async fn run_command(args: RunArgs, styles: &'static Styles) -> anyhow::Resu
         .map(|s| s.parse::<SandboxProvider>())
         .transpose()
         .map_err(|e| anyhow::anyhow!("Invalid sandbox in TOML: {e}"))?;
+    let defaults_sandbox = run_defaults
+        .sandbox
+        .as_ref()
+        .and_then(|s| s.provider.as_deref())
+        .map(|s| s.parse::<SandboxProvider>())
+        .transpose()
+        .map_err(|e| anyhow::anyhow!("Invalid sandbox in server config: {e}"))?;
     let sandbox_provider = args
         .sandbox
         .or(toml_sandbox)
+        .or(defaults_sandbox)
         .unwrap_or_default();
 
     // Set up git worktree for local execution (must happen before cwd is captured)
@@ -403,7 +442,13 @@ pub async fn run_command(args: RunArgs, styles: &'static Styles) -> anyhow::Resu
     let daytona_config = run_cfg
         .as_ref()
         .and_then(|c| c.sandbox.as_ref())
-        .and_then(|e| e.daytona.clone());
+        .and_then(|e| e.daytona.clone())
+        .or_else(|| {
+            run_defaults
+                .sandbox
+                .as_ref()
+                .and_then(|s| s.daytona.clone())
+        });
 
     // Wrap emitter in Arc now so we can share it with exec env callbacks
     let emitter = Arc::new(emitter);
@@ -555,6 +600,7 @@ pub async fn run_command(args: RunArgs, styles: &'static Styles) -> anyhow::Resu
         args.model.as_deref(),
         args.provider.as_deref(),
         run_cfg.as_ref(),
+        &run_defaults,
         &graph,
     );
 
@@ -1047,6 +1093,7 @@ async fn run_preflight(
     graph: &crate::graph::types::Graph,
     run_cfg: &Option<run_config::WorkflowRunConfig>,
     args: &RunArgs,
+    run_defaults: &RunDefaults,
     git_clean: bool,
     sandbox_provider: SandboxProvider,
     styles: &'static Styles,
@@ -1125,6 +1172,7 @@ async fn run_preflight(
         args.model.as_deref(),
         args.provider.as_deref(),
         run_cfg.as_ref(),
+        run_defaults,
         graph,
     );
 
@@ -1328,7 +1376,8 @@ mod tests {
     #[test]
     fn resolve_model_provider_defaults() {
         let graph = crate::graph::types::Graph::new("test");
-        let (model, provider) = resolve_model_provider(None, None, None, &graph);
+        let defaults = RunDefaults::default();
+        let (model, provider) = resolve_model_provider(None, None, None, &defaults, &graph);
         assert_eq!(model, "claude-opus-4-6");
         // Catalog resolves anthropic as the provider for claude-opus-4-6
         assert_eq!(provider, Some("anthropic".to_string()));
@@ -1337,6 +1386,7 @@ mod tests {
     #[test]
     fn resolve_model_provider_cli_overrides_toml() {
         let graph = crate::graph::types::Graph::new("test");
+        let defaults = RunDefaults::default();
         let cfg = run_config::WorkflowRunConfig {
             version: 1,
             goal: "test".to_string(),
@@ -1354,6 +1404,7 @@ mod tests {
             Some("gpt-5.2"),
             Some("openai"),
             Some(&cfg),
+            &defaults,
             &graph,
         );
         assert_eq!(model, "gpt-5.2");
@@ -1367,6 +1418,7 @@ mod tests {
         graph.attrs.insert("default_model".to_string(), AttrValue::String("graph-model".to_string()));
         graph.attrs.insert("default_provider".to_string(), AttrValue::String("gemini".to_string()));
 
+        let defaults = RunDefaults::default();
         let cfg = run_config::WorkflowRunConfig {
             version: 1,
             goal: "test".to_string(),
@@ -1380,7 +1432,7 @@ mod tests {
             sandbox: None,
             vars: None,
         };
-        let (model, provider) = resolve_model_provider(None, None, Some(&cfg), &graph);
+        let (model, provider) = resolve_model_provider(None, None, Some(&cfg), &defaults, &graph);
         assert_eq!(model, "toml-model");
         assert_eq!(provider, Some("openai".to_string()));
     }
@@ -1392,7 +1444,8 @@ mod tests {
         graph.attrs.insert("default_model".to_string(), AttrValue::String("gpt-5.2".to_string()));
         graph.attrs.insert("default_provider".to_string(), AttrValue::String("openai".to_string()));
 
-        let (model, provider) = resolve_model_provider(None, None, None, &graph);
+        let defaults = RunDefaults::default();
+        let (model, provider) = resolve_model_provider(None, None, None, &defaults, &graph);
         assert_eq!(model, "gpt-5.2");
         assert_eq!(provider, Some("openai".to_string()));
     }
@@ -1400,9 +1453,53 @@ mod tests {
     #[test]
     fn resolve_model_provider_alias_expansion() {
         let graph = crate::graph::types::Graph::new("test");
-        let (model, provider) = resolve_model_provider(Some("opus"), None, None, &graph);
+        let defaults = RunDefaults::default();
+        let (model, provider) = resolve_model_provider(Some("opus"), None, None, &defaults, &graph);
         assert_eq!(model, "claude-opus-4-6");
         assert_eq!(provider, Some("anthropic".to_string()));
+    }
+
+    #[test]
+    fn resolve_model_provider_run_defaults_used() {
+        let graph = crate::graph::types::Graph::new("test");
+        let defaults = RunDefaults {
+            llm: Some(run_config::LlmConfig {
+                model: Some("default-model".to_string()),
+                provider: Some("openai".to_string()),
+            }),
+            ..RunDefaults::default()
+        };
+        let (model, provider) = resolve_model_provider(None, None, None, &defaults, &graph);
+        assert_eq!(model, "default-model");
+        assert_eq!(provider, Some("openai".to_string()));
+    }
+
+    #[test]
+    fn resolve_model_provider_toml_overrides_run_defaults() {
+        let graph = crate::graph::types::Graph::new("test");
+        let defaults = RunDefaults {
+            llm: Some(run_config::LlmConfig {
+                model: Some("default-model".to_string()),
+                provider: Some("anthropic".to_string()),
+            }),
+            ..RunDefaults::default()
+        };
+        let cfg = run_config::WorkflowRunConfig {
+            version: 1,
+            goal: "test".to_string(),
+            graph: "test.dot".to_string(),
+            directory: None,
+            llm: Some(run_config::LlmConfig {
+                model: Some("toml-model".to_string()),
+                provider: Some("openai".to_string()),
+            }),
+            setup: None,
+            sandbox: None,
+            vars: None,
+        };
+        let (model, provider) = resolve_model_provider(None, None, Some(&cfg), &defaults, &graph);
+        assert_eq!(model, "toml-model");
+        assert_eq!(provider, Some("openai".to_string()));
     }
 
     #[test]

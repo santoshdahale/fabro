@@ -93,7 +93,9 @@ async fn main() -> Result<()> {
             RunCommand::Start(args) => {
                 let styles: &'static arc_util::terminal::Styles =
                     Box::leak(Box::new(arc_util::terminal::Styles::detect_stderr()));
-                arc_workflows::cli::run::run_command(args, styles).await?;
+                let server_config = arc_api::server_config::load_server_config()?;
+                arc_workflows::cli::run::run_command(args, server_config.run_defaults, styles)
+                    .await?;
             }
             RunCommand::List(args) => {
                 arc_workflows::cli::runs::list_command(&args)?;

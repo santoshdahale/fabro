@@ -114,8 +114,8 @@ pub async fn serve_command(args: ServeArgs, styles: &'static Styles) -> anyhow::
     };
 
     // Initialize data directory and SQLite database
-    let app_config = crate::app_config::load_app_config()?;
-    let data_dir = crate::app_config::resolve_data_dir(&app_config);
+    let server_config = crate::server_config::load_server_config()?;
+    let data_dir = crate::server_config::resolve_data_dir(&server_config);
     std::fs::create_dir_all(&data_dir)?;
     let db = arc_db::connect(&data_dir.join("arc.db")).await?;
     arc_db::initialize_db(&db).await?;
@@ -123,7 +123,7 @@ pub async fn serve_command(args: ServeArgs, styles: &'static Styles) -> anyhow::
     let auth_mode = if args.demo {
         crate::jwt_auth::AuthMode::Disabled
     } else {
-        crate::jwt_auth::resolve_auth_mode(&app_config.api)
+        crate::jwt_auth::resolve_auth_mode(&server_config.api)
     };
 
     let state = create_app_state_with_options(db, factory, dry_run_mode, args.demo);

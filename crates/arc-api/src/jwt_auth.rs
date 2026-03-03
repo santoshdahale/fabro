@@ -30,8 +30,8 @@ pub enum AuthMode {
 ///
 /// Call this once at startup before serving requests. Panics if the
 /// configuration is invalid (JWT strategy but no public key).
-pub fn resolve_auth_mode(api_config: &crate::app_config::ApiConfig) -> AuthMode {
-    use crate::app_config::ApiAuthenticationStrategy;
+pub fn resolve_auth_mode(api_config: &crate::server_config::ApiConfig) -> AuthMode {
+    use crate::server_config::ApiAuthenticationStrategy;
 
     match api_config.authentication_strategy {
         ApiAuthenticationStrategy::InsecureDisabled => {
@@ -248,7 +248,7 @@ mod tests {
 
     #[test]
     fn resolve_auth_mode_insecure_disabled() {
-        use crate::app_config::{ApiAuthenticationStrategy, ApiConfig};
+        use crate::server_config::{ApiAuthenticationStrategy, ApiConfig};
 
         let config = ApiConfig {
             authentication_strategy: ApiAuthenticationStrategy::InsecureDisabled,
