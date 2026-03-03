@@ -127,6 +127,39 @@ async fn resolve_not_found() {
 }
 
 #[tokio::test]
+async fn resolve_subdirectory_mode() {
+    let config = DevcontainerResolver::resolve(&fixture_path("subdirectory-mode"))
+        .await
+        .unwrap();
+
+    assert!(config.dockerfile.contains("FROM mcr.microsoft.com/devcontainers/python:3.12"));
+    assert_eq!(config.remote_user.as_deref(), Some("vscode"));
+    assert_eq!(config.workspace_folder, "/workspaces/subdirectory-mode");
+}
+
+#[tokio::test]
+async fn resolve_subdirectory_multiple_picks_alphabetical_first() {
+    let config = DevcontainerResolver::resolve(&fixture_path("subdirectory-multiple"))
+        .await
+        .unwrap();
+
+    // "alpha" sorts before "beta", so alpha's config is used
+    assert!(config.dockerfile.contains("FROM mcr.microsoft.com/devcontainers/base:ubuntu"));
+    assert_eq!(config.remote_user.as_deref(), Some("alpha-user"));
+}
+
+#[tokio::test]
+async fn resolve_subdirectory_standard_wins_over_subdirs() {
+    let config = DevcontainerResolver::resolve(&fixture_path("subdirectory-with-standard"))
+        .await
+        .unwrap();
+
+    // Standard .devcontainer/devcontainer.json takes priority over subdirectory format
+    assert!(config.dockerfile.contains("FROM mcr.microsoft.com/devcontainers/base:ubuntu"));
+    assert_eq!(config.remote_user.as_deref(), Some("standard-user"));
+}
+
+#[tokio::test]
 async fn generated_dockerfile_is_well_formed() {
     let config = DevcontainerResolver::resolve(&fixture_path("image-only"))
         .await

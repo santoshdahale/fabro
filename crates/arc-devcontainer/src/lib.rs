@@ -357,16 +357,56 @@ impl DevcontainerResolver {
             return Ok((path.to_path_buf(), parsed));
         }
 
+        // Subdirectory format: scan .devcontainer/ for subdirs containing devcontainer.json
+        let devcontainer_dir = path.join(".devcontainer");
+        if devcontainer_dir.is_dir() {
+            let mut subdirs: Vec<PathBuf> = std::fs::read_dir(&devcontainer_dir)
+                .map_err(|source| DevcontainerError::ReadFile {
+                    path: devcontainer_dir.clone(),
+                    source,
+                })?
+                .filter_map(|entry| entry.ok())
+                .filter(|entry| entry.path().is_dir())
+                .map(|entry| entry.path())
+                .filter(|dir| dir.join("devcontainer.json").exists())
+                .collect();
+
+            // Sort alphabetically to get deterministic first pick
+            subdirs.sort();
+
+            if let Some(subdir) = subdirs.first() {
+                let candidate = subdir.join("devcontainer.json");
+                let raw = std::fs::read_to_string(&candidate).map_err(|source| {
+                    DevcontainerError::ReadFile {
+                        path: candidate.clone(),
+                        source,
+                    }
+                })?;
+                let stripped = jsonc::strip_jsonc(&raw);
+                let parsed: DevcontainerJson = serde_json::from_str(&stripped)?;
+                return Ok((candidate, parsed));
+            }
+        }
+
         Err(DevcontainerError::NotFound(path.to_path_buf()))
     }
 
     fn repo_root_from_json_path<'a>(json_path: &Path, original_path: &'a Path) -> &'a Path {
+        // If json_path is inside .devcontainer/<subdir>/, the repo root is two levels up
         // If json_path is inside .devcontainer/, the repo root is one level up
         if let Some(parent) = json_path.parent() {
             if parent.file_name().is_some_and(|n| n == ".devcontainer") {
                 if let Some(repo_root) = parent.parent() {
-                    // Only return repo_root if it matches the original path structure
                     let _ = repo_root;
+                }
+            } else if let Some(grandparent) = parent.parent() {
+                if grandparent
+                    .file_name()
+                    .is_some_and(|n| n == ".devcontainer")
+                {
+                    if let Some(repo_root) = grandparent.parent() {
+                        let _ = repo_root;
+                    }
                 }
             }
         }

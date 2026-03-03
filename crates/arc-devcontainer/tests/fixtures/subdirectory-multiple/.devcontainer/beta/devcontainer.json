@@ -1,0 +1,4 @@
+{
+  "image": "node:20",
+  "remoteUser": "beta-user"
+}
