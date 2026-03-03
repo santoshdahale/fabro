@@ -27,6 +27,8 @@ pub struct DevcontainerConfig {
     pub build_context: PathBuf,
     /// Build arguments (docker build --build-arg)
     pub build_args: HashMap<String, String>,
+    /// Multi-stage build target (docker build --target)
+    pub build_target: Option<String>,
     /// Run on host before build
     pub initialize_commands: Vec<Command>,
     /// Run in container after first creation (before updateContentCommand)
@@ -173,6 +175,7 @@ impl DevcontainerResolver {
                 dockerfile,
                 build_context: compose_base_dir.to_path_buf(),
                 build_args: HashMap::new(),
+                build_target: None,
                 initialize_commands: Self::collect_commands(&devcontainer.initialize_command, &vars),
                 on_create_commands: Self::collect_commands(
                     &devcontainer.on_create_command,
@@ -193,14 +196,22 @@ impl DevcontainerResolver {
                     .clone()
                     .or(compose_config.user),
                 workspace_folder,
-                forwarded_ports: compose_config.ports,
+                forwarded_ports: {
+                    let mut ports = compose_config.ports;
+                    for port in Self::parse_forward_ports(&devcontainer.forward_ports) {
+                        if !ports.contains(&port) {
+                            ports.push(port);
+                        }
+                    }
+                    ports
+                },
                 compose_files: compose_paths,
                 compose_service: Some(service_name),
             });
         }
 
         // Image or Dockerfile mode
-        let (base_dockerfile, build_context, build_args) = if let Some(build) =
+        let (base_dockerfile, build_context, build_args, build_target) = if let Some(build) =
             &devcontainer.build
         {
             let context_dir = build
@@ -223,13 +234,17 @@ impl DevcontainerResolver {
                 .iter()
                 .map(|(k, v)| (k.clone(), variables::substitute(v, &vars)))
                 .collect();
-            (content, context_dir, args)
+            let target = build
+                .target
+                .as_ref()
+                .map(|t| variables::substitute(t, &vars));
+            (content, context_dir, args, target)
         } else {
             let image = devcontainer
                 .image
                 .as_deref()
                 .unwrap_or("mcr.microsoft.com/devcontainers/base:ubuntu");
-            (format!("FROM {image}"), base_dir.to_path_buf(), HashMap::new())
+            (format!("FROM {image}"), base_dir.to_path_buf(), HashMap::new(), None)
         };
 
         // Features
@@ -244,7 +259,6 @@ impl DevcontainerResolver {
             &base_dockerfile,
             &feature_layers,
             &devcontainer.container_env,
-            &devcontainer.remote_env,
             devcontainer.remote_user.as_deref(),
         );
 
@@ -255,19 +269,13 @@ impl DevcontainerResolver {
             }
         }
 
-        let forwarded_ports = devcontainer
-            .forward_ports
-            .iter()
-            .filter_map(|p| match p {
-                serde_json::Value::Number(n) => n.as_u64().map(|n| n as u16),
-                _ => None,
-            })
-            .collect();
+        let forwarded_ports = Self::parse_forward_ports(&devcontainer.forward_ports);
 
         Ok(DevcontainerConfig {
             dockerfile: dockerfile_content,
             build_context,
             build_args,
+            build_target,
             initialize_commands: Self::collect_commands(&devcontainer.initialize_command, &vars),
             on_create_commands: Self::collect_commands(&devcontainer.on_create_command, &vars),
             post_create_commands: Self::collect_commands(&devcontainer.post_create_command, &vars),
@@ -373,5 +381,23 @@ impl DevcontainerResolver {
                 )]
             }
         }
+    }
+
+    fn parse_forward_ports(ports: &[serde_json::Value]) -> Vec<u16> {
+        ports
+            .iter()
+            .filter_map(|p| match p {
+                serde_json::Value::Number(n) => n.as_u64().map(|n| n as u16),
+                serde_json::Value::String(s) => {
+                    let s = s.split('/').next().unwrap_or(s); // strip protocol
+                    if let Some((_host, container)) = s.split_once(':') {
+                        container.parse::<u16>().ok()
+                    } else {
+                        s.parse::<u16>().ok()
+                    }
+                }
+                _ => None,
+            })
+            .collect()
     }
 }

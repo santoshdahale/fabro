@@ -1,6 +1,6 @@
 {
   "image": "mcr.microsoft.com/devcontainers/base:ubuntu",
-  "forwardPorts": [3000, 8080],
+  "forwardPorts": [3000, "8080:80", "9090"],
   "remoteUser": "vscode",
   "remoteEnv": {
     "EDITOR": "code"

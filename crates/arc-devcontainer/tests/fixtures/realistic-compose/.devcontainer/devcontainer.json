@@ -3,6 +3,7 @@
   "service": "app",
   "workspaceFolder": "/workspace",
   "remoteUser": "node",
+  "forwardPorts": [8080],
   "containerEnv": {
     "TERM": "xterm-256color",
     "EDITOR": "vim"

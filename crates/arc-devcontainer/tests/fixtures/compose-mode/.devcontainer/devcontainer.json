@@ -3,6 +3,7 @@
   "service": "app",
   "workspaceFolder": "/workspace",
   "remoteUser": "node",
+  "forwardPorts": [3000, 5173],
   "postCreateCommand": "npm install",
   "remoteEnv": {
     "NODE_ENV": "development"

@@ -8,17 +8,17 @@ Compatibility of `arc-devcontainer` with the [devcontainer.json reference](https
 
 | Property | Status | Notes |
 |---|---|---|
-| `name` | No | Parsed by serde (ignored via `#[serde(default)]`); not exposed in `DevcontainerConfig` |
-| `forwardPorts` | Yes | Numeric ports extracted into `DevcontainerConfig::forwarded_ports`; string formats ignored |
+| `name` | No | Silently ignored by serde (unknown fields are skipped); not exposed in `DevcontainerConfig` |
+| `forwardPorts` | Yes | Numeric and string formats (e.g., `"8080:80"`, `"9090"`) extracted into `DevcontainerConfig::forwarded_ports`; merged with compose ports in compose mode |
 | `portsAttributes` | No | Not parsed |
 | `otherPortsAttributes` | No | Not parsed |
 | `updateRemoteUserUID` | No | Not parsed |
 | `containerEnv` | Yes | Baked into generated Dockerfile as `ENV` directives; also exposed in `DevcontainerConfig::container_env` |
 | `remoteEnv` | Yes | Merged into `DevcontainerConfig::environment` with variable substitution |
-| `containerUser` | Partial | Parsed in `DevcontainerJson::container_user` but not exposed in `DevcontainerConfig` |
+| `containerUser` | No | Parsed but unused; not exposed in `DevcontainerConfig` |
 | `remoteUser` | Yes | Exposed as `DevcontainerConfig::remote_user` |
 | `userEnvProbe` | No | Not parsed |
-| `overrideCommand` | Partial | Parsed in `DevcontainerJson::override_command` but not acted on |
+| `overrideCommand` | No | Parsed but unused |
 | `shutdownAction` | No | Not parsed |
 
 ## Image
@@ -34,7 +34,7 @@ Compatibility of `arc-devcontainer` with the [devcontainer.json reference](https
 | `build.dockerfile` | Yes | Resolved relative to devcontainer.json; content read and used as base Dockerfile |
 | `build.context` | Yes | Resolved with variable substitution; passed as `DevcontainerConfig::build_context` |
 | `build.args` | Yes | Parsed and exposed in `DevcontainerConfig::build_args` for passing to `docker build --build-arg` |
-| `build.target` | No | Not parsed |
+| `build.target` | Yes | Parsed with variable substitution; exposed as `DevcontainerConfig::build_target` for passing to `docker build --target` |
 | `build.cacheFrom` | No | Not parsed |
 | `build.options` | No | Not parsed |
 
@@ -46,9 +46,9 @@ Compatibility of `arc-devcontainer` with the [devcontainer.json reference](https
 | `service` | Yes | Required when `dockerComposeFile` is set; used to extract service config |
 | `runServices` | No | Not parsed; all services assumed |
 | `shutdownAction` | No | Not parsed |
-| `overrideCommand` | Partial | Parsed but not acted on in compose mode |
+| `overrideCommand` | No | Parsed but unused |
 | `workspaceFolder` | Yes | Defaults to `/workspaces/{repo-name}` |
-| `workspaceMount` | Partial | Parsed in `DevcontainerJson::workspace_mount` but not used |
+| `workspaceMount` | No | Parsed but unused |
 
 ## Features
 

@@ -3,7 +3,8 @@
   "build": {
     "dockerfile": "Dockerfile",
     "context": "..",
-    "args": {"NODE_VERSION": "20"}
+    "args": {"NODE_VERSION": "20"},
+    "target": "dev"
   },
   "remoteUser": "developer",
   "postCreateCommand": "npm install",

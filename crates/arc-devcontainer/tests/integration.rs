@@ -15,7 +15,7 @@ async fn resolve_image_only() {
 
     assert!(config.dockerfile.contains("FROM mcr.microsoft.com/devcontainers/base:ubuntu"));
     assert_eq!(config.remote_user.as_deref(), Some("vscode"));
-    assert_eq!(config.forwarded_ports, vec![3000, 8080]);
+    assert_eq!(config.forwarded_ports, vec![3000, 80, 9090]);
     assert_eq!(config.environment.get("EDITOR").map(String::as_str), Some("code"));
     assert_eq!(config.workspace_folder, "/workspaces/image-only");
     assert!(config.compose_files.is_empty());
@@ -53,6 +53,9 @@ async fn resolve_dockerfile_mode() {
 
     // build.args
     assert_eq!(config.build_args.get("NODE_VERSION").map(String::as_str), Some("20"));
+
+    // build.target
+    assert_eq!(config.build_target.as_deref(), Some("dev"));
 }
 
 #[tokio::test]
@@ -68,8 +71,8 @@ async fn resolve_compose_mode() {
     assert_eq!(config.compose_files.len(), 1);
     assert_eq!(config.compose_service.as_deref(), Some("app"));
 
-    // Ports come from compose + remoteEnv merged
-    assert_eq!(config.forwarded_ports, vec![3000, 9229]);
+    // Ports come from compose + forwardPorts merged
+    assert_eq!(config.forwarded_ports, vec![3000, 9229, 5173]);
 
     // Environment merged from compose + remoteEnv
     assert_eq!(config.environment.get("NODE_ENV").map(String::as_str), Some("development"));

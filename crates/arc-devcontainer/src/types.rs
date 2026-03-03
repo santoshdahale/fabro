@@ -73,6 +73,9 @@ pub struct BuildConfig {
     /// Build arguments
     #[serde(default)]
     pub args: HashMap<String, String>,
+
+    /// Multi-stage build target
+    pub target: Option<String>,
 }
 
 /// A reference to one or more Docker Compose files.
@@ -189,7 +192,8 @@ mod tests {
             "build": {
                 "dockerfile": "Dockerfile",
                 "context": "..",
-                "args": {"VARIANT": "3.9"}
+                "args": {"VARIANT": "3.9"},
+                "target": "dev"
             }
         }"#;
         let config: DevcontainerJson = serde_json::from_str(json).unwrap();
@@ -197,6 +201,7 @@ mod tests {
         assert_eq!(build.dockerfile.as_deref(), Some("Dockerfile"));
         assert_eq!(build.context.as_deref(), Some(".."));
         assert_eq!(build.args.get("VARIANT").map(String::as_str), Some("3.9"));
+        assert_eq!(build.target.as_deref(), Some("dev"));
     }
 
     #[test]

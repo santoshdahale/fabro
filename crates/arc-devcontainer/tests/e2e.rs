@@ -36,9 +36,8 @@ async fn realistic_python_project() {
         Some("1")
     );
 
-    // Gap 3: remoteEnv overrides containerEnv on key collision (PYTHONUNBUFFERED)
-    // In the Dockerfile, remoteEnv value "yes" should win over containerEnv value "1"
-    assert!(config.dockerfile.contains("ENV PYTHONUNBUFFERED=yes"));
+    // After fix: only containerEnv is baked into Dockerfile (remoteEnv is runtime-only)
+    assert!(config.dockerfile.contains("ENV PYTHONUNBUFFERED=1"));
     // environment HashMap gets the remoteEnv value
     assert_eq!(
         config.environment.get("PYTHONUNBUFFERED").map(String::as_str),
@@ -92,11 +91,12 @@ async fn realistic_compose_project() {
     // Gap 4: image from base compose file (override doesn't change image)
     assert!(config.dockerfile.contains("FROM node:20-bookworm"));
 
-    // Gap 4: ports merged from both files (base: 3000, 9229; override: 4000)
+    // Ports merged from both compose files (base: 3000, 9229; override: 4000) + forwardPorts (8080)
     assert!(config.forwarded_ports.contains(&3000));
     assert!(config.forwarded_ports.contains(&9229));
     assert!(config.forwarded_ports.contains(&4000));
-    assert_eq!(config.forwarded_ports.len(), 3);
+    assert!(config.forwarded_ports.contains(&8080));
+    assert_eq!(config.forwarded_ports.len(), 4);
 
     // Gap 4: environment merged from both compose files + remoteEnv
     assert_eq!(
@@ -205,6 +205,84 @@ async fn build_args_empty_in_image_and_compose_modes() {
         .await
         .unwrap();
     assert!(compose_config.build_args.is_empty());
+}
+
+/// Verify build_target is None for image-only and compose modes.
+#[tokio::test]
+async fn build_target_none_in_image_and_compose_modes() {
+    let image_config = DevcontainerResolver::resolve(&fixture_path("image-only"))
+        .await
+        .unwrap();
+    assert!(image_config.build_target.is_none());
+
+    let compose_config = DevcontainerResolver::resolve(&fixture_path("compose-mode"))
+        .await
+        .unwrap();
+    assert!(compose_config.build_target.is_none());
+}
+
+/// Gap 1: remoteEnv values must NOT appear as ENV directives in the generated Dockerfile.
+/// Only containerEnv should be baked in.
+#[tokio::test]
+async fn remote_env_excluded_from_dockerfile() {
+    // image-only fixture has remoteEnv: {"EDITOR": "code"} and containerEnv: {"DEBIAN_FRONTEND": "noninteractive"}
+    let config = DevcontainerResolver::resolve(&fixture_path("image-only"))
+        .await
+        .unwrap();
+
+    // containerEnv IS in the Dockerfile
+    assert!(config.dockerfile.contains("ENV DEBIAN_FRONTEND=noninteractive"));
+
+    // remoteEnv is NOT in the Dockerfile
+    assert!(!config.dockerfile.contains("EDITOR=code"));
+
+    // remoteEnv IS in the environment HashMap (runtime-only)
+    assert_eq!(
+        config.environment.get("EDITOR").map(String::as_str),
+        Some("code")
+    );
+}
+
+/// Gap 2: forwardPorts in compose mode are merged with compose service ports, with deduplication.
+#[tokio::test]
+async fn forward_ports_merged_and_deduped_in_compose() {
+    // compose-mode fixture has compose ports [3000, 9229] and forwardPorts [3000, 5173]
+    let config = DevcontainerResolver::resolve(&fixture_path("compose-mode"))
+        .await
+        .unwrap();
+
+    // 3000 appears in both compose ports and forwardPorts — should NOT be duplicated
+    assert_eq!(config.forwarded_ports, vec![3000, 9229, 5173]);
+}
+
+/// Gap 3: build.target is parsed and exposed in dockerfile mode.
+#[tokio::test]
+async fn build_target_in_dockerfile_mode() {
+    let config = DevcontainerResolver::resolve(&fixture_path("dockerfile-mode"))
+        .await
+        .unwrap();
+
+    assert_eq!(config.build_target.as_deref(), Some("dev"));
+}
+
+/// Gap 4: forwardPorts string formats ("host:container", "port") are parsed correctly.
+#[tokio::test]
+async fn forward_ports_string_formats() {
+    // image-only fixture has forwardPorts: [3000, "8080:80", "9090"]
+    let config = DevcontainerResolver::resolve(&fixture_path("image-only"))
+        .await
+        .unwrap();
+
+    // 3000 is a plain number
+    assert!(config.forwarded_ports.contains(&3000));
+    // "8080:80" extracts container port 80
+    assert!(config.forwarded_ports.contains(&80));
+    // "9090" is parsed as a plain port number
+    assert!(config.forwarded_ports.contains(&9090));
+    // host port 8080 should NOT appear (only container port matters)
+    assert!(!config.forwarded_ports.contains(&8080));
+
+    assert_eq!(config.forwarded_ports, vec![3000, 80, 9090]);
 }
 
 /// Verify compose_files is empty for non-compose modes.

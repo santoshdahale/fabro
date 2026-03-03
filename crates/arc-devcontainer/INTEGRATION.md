@@ -11,6 +11,7 @@ pub struct DevcontainerConfig {
     pub dockerfile: String,            // Generated Dockerfile content
     pub build_context: PathBuf,        // Directory for docker build
     pub build_args: HashMap<String, String>, // docker build --build-arg flags
+    pub build_target: Option<String>,        // docker build --target
     pub initialize_commands: Vec<Command>,   // Host-side pre-build commands
     pub on_create_commands: Vec<Command>,    // Container after first creation
     pub post_create_commands: Vec<Command>,  // Container post-creation setup
@@ -36,9 +37,9 @@ pub struct DevcontainerConfig {
 
 ### Environment Variables
 
-`config.environment` contains the merged `remoteEnv` values (with variables already substituted). `config.container_env` contains `containerEnv` values (also baked into the generated Dockerfile as `ENV` directives).
+`config.environment` contains the `remoteEnv` values (with variables already substituted). These are runtime-only environment variables, not baked into the Dockerfile. `config.container_env` contains `containerEnv` values (baked into the generated Dockerfile as `ENV` directives).
 
-- Pass `config.environment` as environment variables when creating the sandbox.
+- Pass `config.environment` as runtime environment variables when starting the sandbox.
 - `containerEnv` values are already in the Dockerfile; `config.container_env` is available for reference.
 
 ### Workspace Folder
@@ -187,4 +188,4 @@ async fn create_sandbox_from_devcontainer(repo_path: &Path) -> Result<Sandbox> {
 - **No `updateContentCommand`**: This lifecycle hook is not parsed.
 - **No `postAttachCommand`**: Not parsed. Attach-time hooks would need to run on each user session connection.
 - **`${containerEnv:VAR}` not supported**: Variable substitution only covers host-side variables. Container-side env vars require a running container.
-- **Port forwarding is numeric only**: String port formats (e.g., `"label:3000"`) in `forwardPorts` are filtered out; only numeric values are extracted.
+- **Port forwarding**: Both numeric and string port formats (e.g., `"8080:80"`, `"9090"`) are supported in `forwardPorts`. In compose mode, `forwardPorts` are merged with compose service ports.
