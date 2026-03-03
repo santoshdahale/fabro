@@ -1,4 +1,5 @@
 import { redirect } from "react-router";
+import { getAppConfig } from "../lib/config.server";
 import { getGitHubOAuth } from "../lib/github.server";
 import { getSession, commitSession } from "../lib/session.server";
 import type { Route } from "./+types/auth-callback";
@@ -41,6 +42,11 @@ export async function loader({ request }: Route.LoaderArgs) {
     verified: boolean;
   }>;
   const primaryEmail = emails.find((e) => e.primary && e.verified)?.email ?? "";
+
+  const { allowed_usernames } = getAppConfig().auth;
+  if (allowed_usernames.length > 0 && !allowed_usernames.includes(profile.login)) {
+    throw redirect("/auth/login?error=unauthorized");
+  }
 
   const session = await getSession(request);
   session.set("userUrl", `https://api.github.com/user/${profile.id}`);

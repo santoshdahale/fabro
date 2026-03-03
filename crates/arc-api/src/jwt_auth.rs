@@ -26,28 +26,30 @@ pub enum AuthMode {
     Disabled,
 }
 
-/// Resolve the authentication mode from environment variables.
+/// Resolve the authentication mode from the API config section.
 ///
 /// Call this once at startup before serving requests. Panics if the
-/// configuration is invalid (no public key and insecure mode not enabled).
-pub fn resolve_auth_mode() -> AuthMode {
-    if let Ok(pem) = std::env::var("ARC_JWT_PUBLIC_KEY") {
-        let key = DecodingKey::from_ed_pem(pem.as_bytes())
-            .expect("ARC_JWT_PUBLIC_KEY contains an invalid Ed25519 PEM public key");
-        AuthMode::Jwt(Arc::new(key))
-    } else if std::env::var("ARC_INSECURE_DISABLE_AUTHENTICATION")
-        .ok()
-        .as_deref()
-        == Some("true")
-    {
-        warn!("JWT authentication disabled");
-        AuthMode::Disabled
-    } else {
-        panic!(
-            "ARC_JWT_PUBLIC_KEY is not set. Either provide an Ed25519 public key in PEM \
-             format or set ARC_INSECURE_DISABLE_AUTHENTICATION=true to allow \
-             unauthenticated access (development only)."
-        );
+/// configuration is invalid (JWT strategy but no public key).
+pub fn resolve_auth_mode(api_config: &crate::app_config::ApiConfig) -> AuthMode {
+    use crate::app_config::ApiAuthenticationStrategy;
+
+    match api_config.authentication_strategy {
+        ApiAuthenticationStrategy::InsecureDisabled => {
+            warn!("JWT authentication disabled");
+            AuthMode::Disabled
+        }
+        ApiAuthenticationStrategy::Jwt => {
+            let pem = std::env::var("ARC_JWT_PUBLIC_KEY").unwrap_or_else(|_| {
+                panic!(
+                    "ARC_JWT_PUBLIC_KEY is not set. Either provide an Ed25519 public key in PEM \
+                     format or set authentication_strategy = \"insecure_disabled\" in \
+                     ~/.arc/arc.toml to allow unauthenticated access (development only)."
+                )
+            });
+            let key = DecodingKey::from_ed_pem(pem.as_bytes())
+                .expect("ARC_JWT_PUBLIC_KEY contains an invalid Ed25519 PEM public key");
+            AuthMode::Jwt(Arc::new(key))
+        }
     }
 }
 
@@ -242,6 +244,17 @@ mod tests {
 
         let response = app.oneshot(req).await.unwrap();
         assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    }
+
+    #[test]
+    fn resolve_auth_mode_insecure_disabled() {
+        use crate::app_config::{ApiAuthenticationStrategy, ApiConfig};
+
+        let config = ApiConfig {
+            authentication_strategy: ApiAuthenticationStrategy::InsecureDisabled,
+            ..ApiConfig::default()
+        };
+        assert!(matches!(resolve_auth_mode(&config), AuthMode::Disabled));
     }
 
     #[tokio::test]

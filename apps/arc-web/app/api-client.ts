@@ -1,6 +1,6 @@
 import { importPKCS8, SignJWT } from "jose";
+import { getAppConfig } from "./lib/config.server";
 
-const ARC_API_BASE_URL = process.env.ARC_API_BASE_URL ?? "http://localhost:3000";
 const ARC_JWT_PRIVATE_KEY = process.env.ARC_JWT_PRIVATE_KEY;
 
 let cachedKey: CryptoKey | null = null;
@@ -30,9 +30,7 @@ export async function apiFetch(
   path: string,
   init?: RequestInit
 ): Promise<Response> {
-  if (!ARC_API_BASE_URL) {
-    throw new Error("ARC_API_BASE_URL environment variable is not set");
-  }
+  const { base_url } = getAppConfig().api;
 
   const headers = new Headers(init?.headers);
   if (ARC_JWT_PRIVATE_KEY) {
@@ -40,7 +38,7 @@ export async function apiFetch(
     headers.set("Authorization", `Bearer ${token}`);
   }
 
-  return fetch(`${ARC_API_BASE_URL}${path}`, {
+  return fetch(`${base_url}${path}`, {
     ...init,
     headers,
   });
