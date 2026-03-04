@@ -13,7 +13,7 @@ use semver::Version;
 // Core types
 // ---------------------------------------------------------------------------
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum CheckStatus {
     Pass,
     Warning,
@@ -142,21 +142,19 @@ impl DoctorReport {
 // System dependency types and parsers
 // ---------------------------------------------------------------------------
 
-struct DepSpec {
-    name: &'static str,
+pub struct DepSpec {
+    pub name: &'static str,
     command: &'static [&'static str],
-    required: bool,
-    min_version: Version,
+    pub required: bool,
+    pub min_version: Version,
     pattern: &'static LazyLock<Regex>,
 }
 
-pub struct DepProbeResult {
-    pub name: &'static str,
-    pub required: bool,
-    pub found: bool,
-    pub success: bool,
-    pub version: Option<Version>,
-    pub min_version: Version,
+#[derive(Debug, Clone, PartialEq)]
+pub enum ProbeOutcome {
+    NotFound,
+    Failed,
+    Ok { version: Option<Version> },
 }
 
 static OPENSSL_RE: LazyLock<Regex> =
@@ -184,7 +182,7 @@ const DEP_SPECS: &[DepSpec] = &[
     DepSpec { name: "dot", command: &["dot", "-V"], required: false, min_version: Version::new(2, 0, 0), pattern: &DOT_RE },
 ];
 
-pub fn probe_system_deps() -> Vec<DepProbeResult> {
+pub fn probe_system_deps() -> Vec<ProbeOutcome> {
     DEP_SPECS
         .iter()
         .map(|spec| {
@@ -193,73 +191,51 @@ pub fn probe_system_deps() -> Vec<DepProbeResult> {
                 .output()
                 .ok();
 
-            let found = result.is_some();
-            let success = result.as_ref().is_some_and(|o| o.status.success());
-
-            let version = result.and_then(|o| {
-                let stdout = String::from_utf8_lossy(&o.stdout);
-                let stderr = String::from_utf8_lossy(&o.stderr);
-                parse_version(spec.pattern, &stdout)
-                    .or_else(|| parse_version(spec.pattern, &stderr))
-            });
-
-            DepProbeResult {
-                name: spec.name,
-                required: spec.required,
-                found,
-                success,
-                version,
-                min_version: spec.min_version.clone(),
+            match result {
+                None => ProbeOutcome::NotFound,
+                Some(o) if !o.status.success() => ProbeOutcome::Failed,
+                Some(o) => {
+                    let stdout = String::from_utf8_lossy(&o.stdout);
+                    let stderr = String::from_utf8_lossy(&o.stderr);
+                    let version = parse_version(spec.pattern, &stdout)
+                        .or_else(|| parse_version(spec.pattern, &stderr));
+                    ProbeOutcome::Ok { version }
+                }
             }
         })
         .collect()
 }
 
-pub fn check_system_deps(deps: &[DepProbeResult]) -> CheckResult {
+fn dep_issue(name: &str, issue: &str, required: bool) -> (CheckStatus, String) {
+    let severity = if required { "required" } else { "optional" };
+    let status = if required { CheckStatus::Error } else { CheckStatus::Warning };
+    (status, format!("{name}: {issue} ({severity})"))
+}
+
+pub fn check_system_deps(specs: &[DepSpec], outcomes: &[ProbeOutcome]) -> CheckResult {
     let mut details = Vec::new();
     let mut worst_status = CheckStatus::Pass;
 
-    for dep in deps {
-        let (status, text) = match (dep.found, dep.success, &dep.version) {
-            (false, _, _) => {
-                if dep.required {
-                    (CheckStatus::Error, format!("{}: not found (required)", dep.name))
-                } else {
-                    (CheckStatus::Warning, format!("{}: not found (optional)", dep.name))
-                }
+    for (spec, outcome) in specs.iter().zip(outcomes) {
+        let (status, text) = match outcome {
+            ProbeOutcome::NotFound => dep_issue(spec.name, "not found", spec.required),
+            ProbeOutcome::Failed => dep_issue(spec.name, "command failed", spec.required),
+            ProbeOutcome::Ok { version: None } => {
+                (CheckStatus::Pass, format!("{}: version unknown", spec.name))
             }
-            (true, false, _) => {
-                if dep.required {
-                    (CheckStatus::Error, format!("{}: command failed (required)", dep.name))
-                } else {
-                    (CheckStatus::Warning, format!("{}: command failed (optional)", dep.name))
-                }
-            }
-            (true, true, None) => {
-                (CheckStatus::Pass, format!("{}: version unknown", dep.name))
-            }
-            (true, true, Some(v)) => {
-                if v < &dep.min_version {
+            ProbeOutcome::Ok { version: Some(v) } => {
+                if v < &spec.min_version {
                     (
                         CheckStatus::Warning,
-                        format!(
-                            "{}: {v} (minimum {})",
-                            dep.name,
-                            dep.min_version,
-                        ),
+                        format!("{}: {v} (minimum {})", spec.name, spec.min_version),
                     )
                 } else {
-                    (CheckStatus::Pass, format!("{}: {v}", dep.name))
+                    (CheckStatus::Pass, format!("{}: {v}", spec.name))
                 }
             }
         };
 
-        if status == CheckStatus::Error
-            || (status == CheckStatus::Warning && worst_status != CheckStatus::Error)
-        {
-            worst_status = status;
-        }
-
+        worst_status = worst_status.max(status);
         details.push(CheckDetail { text });
     }
 
@@ -617,7 +593,18 @@ pub fn check_github_app(status: &GithubAppStatus) -> CheckResult {
 
 pub struct ApiStatus {
     pub base_url: String,
-    pub authentication_strategies: String,
+    pub authentication_strategies: Vec<ApiAuthStrategy>,
+}
+
+fn format_auth_strategies(strategies: &[ApiAuthStrategy]) -> String {
+    strategies
+        .iter()
+        .map(|s| match s {
+            ApiAuthStrategy::Jwt => "jwt",
+            ApiAuthStrategy::Mtls => "mtls",
+        })
+        .collect::<Vec<_>>()
+        .join(", ")
 }
 
 pub fn check_api(
@@ -629,7 +616,7 @@ pub fn check_api(
             text: format!("Base URL: {}", status.base_url),
         },
         CheckDetail {
-            text: format!("Authentication: {}", status.authentication_strategies),
+            text: format!("Authentication: {}", format_auth_strategies(&status.authentication_strategies)),
         },
     ];
 
@@ -650,8 +637,15 @@ pub fn check_api(
 
 pub struct WebStatus {
     pub url: String,
-    pub auth_provider: String,
+    pub auth_provider: AuthProvider,
     pub allowed_usernames_count: usize,
+}
+
+fn format_auth_provider(provider: &AuthProvider) -> &'static str {
+    match provider {
+        AuthProvider::Github => "github",
+        AuthProvider::InsecureDisabled => "insecure_disabled",
+    }
 }
 
 pub fn check_web(
@@ -663,7 +657,7 @@ pub fn check_web(
             text: format!("URL: {}", status.url),
         },
         CheckDetail {
-            text: format!("Auth provider: {}", status.auth_provider),
+            text: format!("Auth provider: {}", format_auth_provider(&status.auth_provider)),
         },
         CheckDetail {
             text: format!("Allowed usernames: {}", status.allowed_usernames_count),
@@ -1001,24 +995,12 @@ pub async fn run_doctor(verbose: bool, live: bool) -> i32 {
 
     let api_status = ApiStatus {
         base_url: server_config.api.base_url.clone(),
-        authentication_strategies: server_config
-            .api
-            .authentication_strategies
-            .iter()
-            .map(|s| match s {
-                ApiAuthStrategy::Jwt => "jwt",
-                ApiAuthStrategy::Mtls => "mtls",
-            })
-            .collect::<Vec<_>>()
-            .join(", "),
+        authentication_strategies: server_config.api.authentication_strategies.clone(),
     };
 
     let web_status = WebStatus {
         url: server_config.web.url.clone(),
-        auth_provider: match server_config.web.auth.provider {
-            AuthProvider::Github => "github".to_string(),
-            AuthProvider::InsecureDisabled => "insecure_disabled".to_string(),
-        },
+        auth_provider: server_config.web.auth.provider.clone(),
         allowed_usernames_count: server_config.web.auth.allowed_usernames.len(),
     };
 
@@ -1132,7 +1114,7 @@ pub async fn run_doctor(verbose: bool, live: bool) -> i32 {
     let report = DoctorReport {
         checks: vec![
             check_config(if config_exists { config_path } else { None }),
-            check_system_deps(&dep_results),
+            check_system_deps(DEP_SPECS, &dep_results),
             check_api(&api_status, api_live_result.as_ref()),
             check_web(&web_status, web_live_result.as_ref()),
             check_llm_providers(&llm_statuses, llm_live_results.as_deref()),
@@ -1536,7 +1518,7 @@ mod tests {
     fn check_api_shows_base_url() {
         let status = ApiStatus {
             base_url: "http://localhost:3000".to_string(),
-            authentication_strategies: "jwt".to_string(),
+            authentication_strategies: vec![ApiAuthStrategy::Jwt],
         };
         let result = check_api(&status, None);
         assert_eq!(result.status, CheckStatus::Pass);
@@ -1547,7 +1529,7 @@ mod tests {
     fn check_api_details_show_auth_strategy() {
         let status = ApiStatus {
             base_url: "https://api.example.com".to_string(),
-            authentication_strategies: "jwt".to_string(),
+            authentication_strategies: vec![ApiAuthStrategy::Jwt],
         };
         let result = check_api(&status, None);
         assert!(result.details.iter().any(|d| d.text.contains("jwt")));
@@ -1561,7 +1543,7 @@ mod tests {
     fn check_api_live_ok() {
         let status = ApiStatus {
             base_url: "http://localhost:3000".to_string(),
-            authentication_strategies: "jwt".to_string(),
+            authentication_strategies: vec![ApiAuthStrategy::Jwt],
         };
         let live = Ok(());
         let result = check_api(&status, Some(&live));
@@ -1573,7 +1555,7 @@ mod tests {
     fn check_api_live_error() {
         let status = ApiStatus {
             base_url: "http://localhost:3000".to_string(),
-            authentication_strategies: "jwt".to_string(),
+            authentication_strategies: vec![ApiAuthStrategy::Jwt],
         };
         let live = Err("connection refused".to_string());
         let result = check_api(&status, Some(&live));
@@ -1587,7 +1569,7 @@ mod tests {
     fn check_web_shows_url() {
         let status = WebStatus {
             url: "http://localhost:5173".to_string(),
-            auth_provider: "github".to_string(),
+            auth_provider: AuthProvider::Github,
             allowed_usernames_count: 0,
         };
         let result = check_web(&status, None);
@@ -1599,7 +1581,7 @@ mod tests {
     fn check_web_details_show_auth() {
         let status = WebStatus {
             url: "https://arc.example.com".to_string(),
-            auth_provider: "github".to_string(),
+            auth_provider: AuthProvider::Github,
             allowed_usernames_count: 3,
         };
         let result = check_web(&status, None);
@@ -1618,7 +1600,7 @@ mod tests {
     fn check_web_live_ok() {
         let status = WebStatus {
             url: "http://localhost:5173".to_string(),
-            auth_provider: "github".to_string(),
+            auth_provider: AuthProvider::Github,
             allowed_usernames_count: 0,
         };
         let live = Ok(());
@@ -1631,7 +1613,7 @@ mod tests {
     fn check_web_live_error() {
         let status = WebStatus {
             url: "http://localhost:5173".to_string(),
-            auth_provider: "github".to_string(),
+            auth_provider: AuthProvider::Github,
             allowed_usernames_count: 0,
         };
         let live = Err("connection refused".to_string());
@@ -1697,57 +1679,60 @@ mod tests {
 
     // -- check_system_deps --
 
-    fn dep(
-        name: &'static str,
-        required: bool,
-        found: bool,
-        success: bool,
-        version: Option<Version>,
-        min_version: Version,
-    ) -> DepProbeResult {
-        DepProbeResult {
+    static TEST_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"unused").unwrap());
+
+    fn spec(name: &'static str, required: bool, min_version: Version) -> DepSpec {
+        DepSpec {
             name,
+            command: &["true"],
             required,
-            found,
-            success,
-            version,
             min_version,
+            pattern: &TEST_RE,
         }
     }
 
     #[test]
     fn check_system_deps_all_present() {
-        let deps = vec![
-            dep("openssl", true, true, true, Some(Version::new(3, 4, 1)), Version::new(3, 0, 0)),
-            dep("node", true, true, true, Some(Version::new(22, 14, 0)), Version::new(20, 0, 0)),
-            dep("gh", false, true, true, Some(Version::new(2, 67, 0)), Version::new(2, 0, 0)),
-            dep("dot", false, true, true, Some(Version::new(12, 2, 1)), Version::new(2, 0, 0)),
+        let specs = [
+            spec("openssl", true, Version::new(3, 0, 0)),
+            spec("node", true, Version::new(20, 0, 0)),
+            spec("gh", false, Version::new(2, 0, 0)),
+            spec("dot", false, Version::new(2, 0, 0)),
         ];
-        let result = check_system_deps(&deps);
+        let outcomes = [
+            ProbeOutcome::Ok { version: Some(Version::new(3, 4, 1)) },
+            ProbeOutcome::Ok { version: Some(Version::new(22, 14, 0)) },
+            ProbeOutcome::Ok { version: Some(Version::new(2, 67, 0)) },
+            ProbeOutcome::Ok { version: Some(Version::new(12, 2, 1)) },
+        ];
+        let result = check_system_deps(&specs, &outcomes);
         assert_eq!(result.status, CheckStatus::Pass);
         assert_eq!(result.summary, "all found");
     }
 
     #[test]
     fn check_system_deps_required_missing_is_error() {
-        let deps = vec![dep("openssl", true, false, false, None, Version::new(3, 0, 0))];
-        let result = check_system_deps(&deps);
+        let specs = [spec("openssl", true, Version::new(3, 0, 0))];
+        let outcomes = [ProbeOutcome::NotFound];
+        let result = check_system_deps(&specs, &outcomes);
         assert_eq!(result.status, CheckStatus::Error);
         assert!(result.details[0].text.contains("not found (required)"));
     }
 
     #[test]
     fn check_system_deps_optional_missing_is_warning() {
-        let deps = vec![dep("gh", false, false, false, None, Version::new(2, 0, 0))];
-        let result = check_system_deps(&deps);
+        let specs = [spec("gh", false, Version::new(2, 0, 0))];
+        let outcomes = [ProbeOutcome::NotFound];
+        let result = check_system_deps(&specs, &outcomes);
         assert_eq!(result.status, CheckStatus::Warning);
         assert!(result.details[0].text.contains("not found (optional)"));
     }
 
     #[test]
     fn check_system_deps_outdated_is_warning() {
-        let deps = vec![dep("openssl", true, true, true, Some(Version::new(1, 1, 1)), Version::new(3, 0, 0))];
-        let result = check_system_deps(&deps);
+        let specs = [spec("openssl", true, Version::new(3, 0, 0))];
+        let outcomes = [ProbeOutcome::Ok { version: Some(Version::new(1, 1, 1)) }];
+        let result = check_system_deps(&specs, &outcomes);
         assert_eq!(result.status, CheckStatus::Warning);
         assert!(result.details[0].text.contains("1.1.1"));
         assert!(result.details[0].text.contains("minimum 3.0.0"));
@@ -1755,35 +1740,39 @@ mod tests {
 
     #[test]
     fn check_system_deps_unparseable_success_is_pass() {
-        let deps = vec![dep("openssl", true, true, true, None, Version::new(3, 0, 0))];
-        let result = check_system_deps(&deps);
+        let specs = [spec("openssl", true, Version::new(3, 0, 0))];
+        let outcomes = [ProbeOutcome::Ok { version: None }];
+        let result = check_system_deps(&specs, &outcomes);
         assert_eq!(result.status, CheckStatus::Pass);
         assert!(result.details[0].text.contains("version unknown"));
     }
 
     #[test]
     fn check_system_deps_required_command_failed_is_error() {
-        let deps = vec![dep("node", true, true, false, None, Version::new(20, 0, 0))];
-        let result = check_system_deps(&deps);
+        let specs = [spec("node", true, Version::new(20, 0, 0))];
+        let outcomes = [ProbeOutcome::Failed];
+        let result = check_system_deps(&specs, &outcomes);
         assert_eq!(result.status, CheckStatus::Error);
         assert!(result.details[0].text.contains("command failed (required)"));
     }
 
     #[test]
     fn check_system_deps_optional_command_failed_is_warning() {
-        let deps = vec![dep("gh", false, true, false, None, Version::new(2, 0, 0))];
-        let result = check_system_deps(&deps);
+        let specs = [spec("gh", false, Version::new(2, 0, 0))];
+        let outcomes = [ProbeOutcome::Failed];
+        let result = check_system_deps(&specs, &outcomes);
         assert_eq!(result.status, CheckStatus::Warning);
         assert!(result.details[0].text.contains("command failed (optional)"));
     }
 
     #[test]
     fn check_system_deps_error_beats_warning() {
-        let deps = vec![
-            dep("openssl", true, false, false, None, Version::new(3, 0, 0)),
-            dep("gh", false, false, false, None, Version::new(2, 0, 0)),
+        let specs = [
+            spec("openssl", true, Version::new(3, 0, 0)),
+            spec("gh", false, Version::new(2, 0, 0)),
         ];
-        let result = check_system_deps(&deps);
+        let outcomes = [ProbeOutcome::NotFound, ProbeOutcome::NotFound];
+        let result = check_system_deps(&specs, &outcomes);
         assert_eq!(result.status, CheckStatus::Error);
     }
 
