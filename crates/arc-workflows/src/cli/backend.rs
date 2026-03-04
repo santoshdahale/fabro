@@ -363,18 +363,14 @@ impl CodergenBackend for AgentApiBackend {
 
         // Print session summary to stderr.
         if self.verbose {
-            let total_tokens = total_usage.input_tokens + total_usage.output_tokens;
-            let token_str = if total_tokens >= 1000 {
-                format!("{}k tokens", total_tokens / 1000)
-            } else {
-                format!("{total_tokens} tokens")
-            };
+            let total_tokens = (total_usage.input_tokens + total_usage.output_tokens) as u64;
             let reuse_label = if is_reused { " (reused session)" } else { "" };
             eprintln!(
                 "{}",
                 self.styles.dim.apply_to(format!(
-                    "[{}] Done ({turn_count} turns, {tool_call_count} tool calls, {token_str}{reuse_label})",
+                    "[{}] Done ({turn_count} turns, {tool_call_count} tool calls, {} tokens{reuse_label})",
                     node.id,
+                    indicatif::HumanCount(total_tokens),
                 )),
             );
         }

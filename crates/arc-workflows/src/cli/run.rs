@@ -27,9 +27,12 @@ use super::backend::AgentApiBackend;
 use super::cli_backend::{BackendRouter, AgentCliBackend};
 use super::run_config;
 use super::run_config::{RunDefaults, WorkflowRunConfig};
+use indicatif::{HumanCount, HumanDuration};
+use std::time::Duration;
+
 use super::{
-    compute_stage_cost, format_cost, format_duration_human,
-    format_event_summary, format_tokens_human, print_diagnostics, read_dot_file,
+    compute_stage_cost, format_cost,
+    format_event_summary, print_diagnostics, read_dot_file,
     SandboxProvider, RunArgs,
 };
 
@@ -374,19 +377,19 @@ pub async fn run_command(
                 ..  // node_id and other fields
             } => {
                 let mut line = format!(
-                    "Stage \"{name}\" completed ({status}) in {duration}",
-                    duration = format_duration_human(*duration_ms),
+                    "Stage \"{name}\" completed ({status}) in {}",
+                    HumanDuration(Duration::from_millis(*duration_ms)),
                 );
                 if let Some(u) = usage {
-                    let total = u.input_tokens + u.output_tokens;
-                    let tokens_str = format_tokens_human(total);
+                    let total = (u.input_tokens + u.output_tokens) as u64;
                     if let Some(cost) = compute_stage_cost(u) {
                         line.push_str(&format!(
-                            " \u{2014} {tokens_str} tokens ({})",
+                            " \u{2014} {} tokens ({})",
+                            HumanCount(total),
                             format_cost(cost)
                         ));
                     } else {
-                        line.push_str(&format!(" \u{2014} {tokens_str} tokens"));
+                        line.push_str(&format!(" \u{2014} {} tokens", HumanCount(total)));
                     }
                 }
                 eprintln!("{}", styles.dim.apply_to(line));
@@ -719,7 +722,7 @@ pub async fn run_command(
         "Status: {}",
         status_color.apply_to(&status_str),
     );
-    eprintln!("Duration: {}", format_duration_human(run_duration_ms));
+    eprintln!("Duration: {}", HumanDuration(Duration::from_millis(run_duration_ms)));
 
     let acc = accumulator.lock().unwrap();
     let total_tokens = acc.total_input_tokens + acc.total_output_tokens;
@@ -728,18 +731,18 @@ pub async fn run_command(
             eprintln!(
                 "Cost: {} ({} tokens)",
                 format_cost(acc.total_cost),
-                format_tokens_human(total_tokens)
+                HumanCount(total_tokens as u64)
             );
         } else {
-            eprintln!("Tokens: {}", format_tokens_human(total_tokens));
+            eprintln!("Tokens: {}", HumanCount(total_tokens as u64));
         }
         if acc.total_cache_read_tokens > 0 {
             eprintln!(
                 "{}",
                 styles.dim.apply_to(format!(
                     "Cache: {} read, {} write",
-                    format_tokens_human(acc.total_cache_read_tokens),
-                    format_tokens_human(acc.total_cache_write_tokens),
+                    HumanCount(acc.total_cache_read_tokens as u64),
+                    HumanCount(acc.total_cache_write_tokens as u64),
                 )),
             );
         }
@@ -748,7 +751,7 @@ pub async fn run_command(
                 "{}",
                 styles.dim.apply_to(format!(
                     "Reasoning: {} tokens",
-                    format_tokens_human(acc.total_reasoning_tokens),
+                    HumanCount(acc.total_reasoning_tokens as u64),
                 )),
             );
         }
@@ -1045,7 +1048,7 @@ async fn run_from_branch(
     );
     eprintln!(
         "Duration: {}",
-        super::format_duration_human(run_duration_ms)
+        HumanDuration(Duration::from_millis(run_duration_ms))
     );
     eprintln!(
         "{} {}",

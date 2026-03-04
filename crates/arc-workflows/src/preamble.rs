@@ -88,14 +88,7 @@ fn format_value(val: &serde_json::Value) -> String {
 }
 
 fn format_token_count(tokens: i64) -> String {
-    if tokens >= 1000 {
-        let k = tokens as f64 / 1000.0;
-        // One decimal place, strip trailing zero after decimal
-        let formatted = format!("{k:.1}");
-        format!("{formatted}k")
-    } else {
-        tokens.to_string()
-    }
+    indicatif::HumanCount(tokens as u64).to_string()
 }
 
 /// Returns the set of context keys that are rendered inline under a stage's
@@ -841,7 +834,7 @@ mod tests {
             "should show model name"
         );
         assert!(
-            preamble.contains("1.2k tokens in"),
+            preamble.contains("1,234 tokens in"),
             "should show token count"
         );
         assert!(
@@ -1507,7 +1500,7 @@ mod tests {
             preamble.contains("Model: claude-sonnet-4-20250514"),
             "should show model"
         );
-        assert!(preamble.contains("1.5k in"), "should show formatted tokens");
+        assert!(preamble.contains("1,500 in"), "should show formatted tokens");
         assert!(
             preamble.contains("Files touched: src/lib.rs"),
             "should show files"
@@ -1588,10 +1581,10 @@ mod tests {
     fn format_token_count_formatting() {
         assert_eq!(format_token_count(500), "500");
         assert_eq!(format_token_count(999), "999");
-        assert_eq!(format_token_count(1000), "1.0k");
-        assert_eq!(format_token_count(1234), "1.2k");
-        assert_eq!(format_token_count(1500), "1.5k");
-        assert_eq!(format_token_count(10000), "10.0k");
+        assert_eq!(format_token_count(1000), "1,000");
+        assert_eq!(format_token_count(1234), "1,234");
+        assert_eq!(format_token_count(1500), "1,500");
+        assert_eq!(format_token_count(10000), "10,000");
     }
 
     // --- is_context_key_excluded ---

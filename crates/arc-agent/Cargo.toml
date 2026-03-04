@@ -37,6 +37,7 @@ tokio-util.workspace = true
 tracing.workspace = true
 dirs = "6"
 glob = "0.3"
+indicatif.workspace = true
 shell-escape = "0.1"
 htmd = "0.5"
 bollard = { workspace = true, optional = true }

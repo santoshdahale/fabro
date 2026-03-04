@@ -9,6 +9,7 @@ use std::path::Path;
 
 use arc_util::terminal::Styles;
 use clap::{Args, Parser, Subcommand, ValueEnum};
+use indicatif::{HumanBytes, HumanCount};
 use std::fmt;
 use std::path::PathBuf;
 use std::str::FromStr;
@@ -168,26 +169,6 @@ pub fn print_diagnostics(diagnostics: &[Diagnostic], styles: &Styles) {
     }
 }
 
-/// Format milliseconds into a human-readable duration string.
-///
-/// - < 1000ms: `123ms`
-/// - < 60s: `12.3s`
-/// - >= 60s: `1m 23s`
-#[must_use]
-pub fn format_duration_human(ms: u64) -> String {
-    if ms < 1000 {
-        format!("{ms}ms")
-    } else if ms < 60_000 {
-        let secs = ms as f64 / 1000.0;
-        format!("{secs:.1}s")
-    } else {
-        let total_secs = ms / 1000;
-        let minutes = total_secs / 60;
-        let secs = total_secs % 60;
-        format!("{minutes}m {secs}s")
-    }
-}
-
 /// One-line summary of a workflow run event for `-v` output (dimmed).
 #[must_use]
 pub fn format_event_summary(event: &WorkflowRunEvent, styles: &Styles) -> String {
@@ -254,12 +235,11 @@ pub fn format_event_summary(event: &WorkflowRunEvent, styles: &Styles) -> String
                 ));
             }
             if let Some(u) = usage {
-                let total = u.input_tokens + u.output_tokens;
-                let tokens_str = format_tokens_human(total);
+                let total = (u.input_tokens + u.output_tokens) as u64;
                 if let Some(cost) = compute_stage_cost(u) {
-                    s.push_str(&format!(" tokens={tokens_str} cost={}", format_cost(cost)));
+                    s.push_str(&format!(" tokens={} cost={}", HumanCount(total), format_cost(cost)));
                 } else {
-                    s.push_str(&format!(" tokens={tokens_str}"));
+                    s.push_str(&format!(" tokens={}", HumanCount(total)));
                 }
             }
             if let Some(ref f) = failure {
@@ -385,14 +365,13 @@ pub fn format_event_summary(event: &WorkflowRunEvent, styles: &Styles) -> String
                 tool_call_count,
                 ..
             } => {
-                let total = usage.input_tokens + usage.output_tokens;
-                let tokens_str = format_tokens_human(total);
-                let mut s = format!("[ASSISTANT_MESSAGE] stage={stage} model={model} tokens={tokens_str} tool_calls={tool_call_count}");
+                let total = (usage.input_tokens + usage.output_tokens) as u64;
+                let mut s = format!("[ASSISTANT_MESSAGE] stage={stage} model={model} tokens={} tool_calls={tool_call_count}", HumanCount(total));
                 if let Some(cache_read) = usage.cache_read_tokens {
-                    s.push_str(&format!(" cache_read={}", format_tokens_human(cache_read)));
+                    s.push_str(&format!(" cache_read={}", HumanCount(cache_read as u64)));
                 }
                 if let Some(reasoning) = usage.reasoning_tokens {
-                    s.push_str(&format!(" reasoning={}", format_tokens_human(reasoning)));
+                    s.push_str(&format!(" reasoning={}", HumanCount(reasoning as u64)));
                 }
                 s
             }
@@ -558,7 +537,7 @@ pub fn format_event_summary(event: &WorkflowRunEvent, styles: &Styles) -> String
             format!("[STALL_WATCHDOG_TIMEOUT] node={node} idle_seconds={idle_seconds}")
         }
         WorkflowRunEvent::AssetsCaptured { node_id, files_copied, total_bytes, files_skipped } => {
-            format!("[ASSETS_CAPTURED] node={node_id} files_copied={files_copied} total_bytes={total_bytes} files_skipped={files_skipped}")
+            format!("[ASSETS_CAPTURED] node={node_id} files_copied={files_copied} total_bytes={} files_skipped={files_skipped}", HumanBytes(*total_bytes))
         }
     };
     format!("{}", styles.dim.apply_to(body))
@@ -582,15 +561,6 @@ pub fn format_cost(cost: f64) -> String {
     format!("${cost:.2}")
 }
 
-/// Format a token count for human display (e.g. `"15.2k"` or `"850"`).
-#[must_use]
-pub fn format_tokens_human(tokens: i64) -> String {
-    if tokens >= 1000 {
-        format!("{:.1}k", tokens as f64 / 1000.0)
-    } else {
-        tokens.to_string()
-    }
-}
 
 #[cfg(test)]
 mod tests {
