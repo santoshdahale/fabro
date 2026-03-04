@@ -52,7 +52,7 @@ export async function loader({ request }: Route.LoaderArgs) {
   session.set("userUrl", `https://github.com/${profile.login}`);
   session.set("githubId", profile.id);
   session.set("githubNodeId", profile.node_id);
-  session.set("githubLogin", profile.login);
+  session.set("login", profile.login);
   session.set("name", profile.name ?? profile.login);
   session.set("email", primaryEmail);
   session.set("avatarUrl", profile.avatar_url);

@@ -29,18 +29,21 @@ import type { Route } from "./+types/app-shell";
 
 const DEMO_USER = {
   userUrl: "",
-  githubLogin: "demo",
+  login: "demo",
   name: "Demo User",
   email: "demo@example.com",
   avatarUrl: "https://github.githubassets.com/assets/GitHub-Mark-ea2971cee799.png",
 };
 
 export async function loader({ request }: Route.LoaderArgs) {
-  const authDisabled = getAppConfig().web.auth.provider === "insecure_disabled";
-  if (!authDisabled && !isGitHubAppConfigured()) {
+  const { provider } = getAppConfig().web.auth;
+  if (provider === "insecure_disabled") {
+    return { user: DEMO_USER };
+  }
+  if (provider === "github" && !isGitHubAppConfigured()) {
     throw redirect("/setup");
   }
-  const user = authDisabled ? DEMO_USER : await requireUser(request);
+  const user = await requireUser(request);
   return { user };
 }
 

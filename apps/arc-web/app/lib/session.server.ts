@@ -1,11 +1,12 @@
 import { redirect } from "react-router";
+import { getAppConfig } from "./config.server";
 import { createSqliteSessionStorage } from "./session-storage.server";
 
 interface SessionData {
   userUrl: string;
   githubId: number;
   githubNodeId: string;
-  githubLogin: string;
+  login: string;
   name: string;
   email: string;
   avatarUrl: string;
@@ -36,13 +37,27 @@ export async function destroySession(session: Awaited<ReturnType<typeof getSessi
 }
 
 export async function getUser(request: Request) {
+  const { provider, allowed_usernames } = getAppConfig().web.auth;
+
+  if (provider === "tailscale") {
+    const login = request.headers.get("Tailscale-User-Login");
+    if (!login || !allowed_usernames.includes(login)) return null;
+    return {
+      userUrl: `tailscale:${login}`,
+      login,
+      name: request.headers.get("Tailscale-User-Name") ?? login,
+      email: login,
+      avatarUrl: request.headers.get("Tailscale-User-Profile-Pic") ?? "",
+    };
+  }
+
   const session = await getSession(request);
-  const githubLogin = session.get("githubLogin");
-  if (!githubLogin) return null;
+  const login = session.get("login");
+  if (!login) return null;
   return {
     userUrl: session.get("userUrl") ?? "",
-    githubLogin,
-    name: session.get("name") ?? githubLogin,
+    login,
+    name: session.get("name") ?? login,
     email: session.get("email") ?? "",
     avatarUrl: session.get("avatarUrl") ?? "",
   };
