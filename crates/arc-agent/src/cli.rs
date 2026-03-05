@@ -57,13 +57,15 @@ struct Cli {
     args: AgentArgs,
 }
 
-#[derive(Clone, Copy, Debug, ValueEnum)]
+#[derive(Clone, Copy, Debug, PartialEq, ValueEnum, serde::Deserialize)]
+#[serde(rename_all = "kebab-case")]
 pub enum OutputFormat {
     Text,
     Json,
 }
 
-#[derive(Clone, Copy, Debug, ValueEnum)]
+#[derive(Clone, Copy, Debug, PartialEq, ValueEnum, serde::Deserialize)]
+#[serde(rename_all = "kebab-case")]
 pub enum PermissionLevel {
     ReadOnly,
     ReadWrite,
@@ -76,32 +78,20 @@ impl AgentArgs {
         &mut self,
         provider: Option<&str>,
         model: Option<&str>,
-        permissions: Option<&str>,
-        output_format: Option<&str>,
+        permissions: Option<PermissionLevel>,
+        output_format: Option<OutputFormat>,
     ) {
-        if self.provider.is_none() {
-            self.provider = Some(
-                provider
-                    .map(String::from)
-                    .unwrap_or_else(|| "anthropic".to_string()),
-            );
-        }
-        if self.model.is_none() {
-            self.model = model.map(String::from);
-        }
-        if self.permissions.is_none() {
-            self.permissions = Some(match permissions {
-                Some("read-only") => PermissionLevel::ReadOnly,
-                Some("full") => PermissionLevel::Full,
-                _ => PermissionLevel::ReadWrite,
-            });
-        }
-        if self.output_format.is_none() {
-            self.output_format = Some(match output_format {
-                Some("json") => OutputFormat::Json,
-                _ => OutputFormat::Text,
-            });
-        }
+        self.provider = self
+            .provider
+            .take()
+            .or_else(|| provider.map(String::from))
+            .or_else(|| Some("anthropic".to_string()));
+        self.model = self.model.take().or_else(|| model.map(String::from));
+        self.permissions = self.permissions.or(permissions).or(Some(PermissionLevel::ReadWrite));
+        self.output_format = self
+            .output_format
+            .or(output_format)
+            .or(Some(OutputFormat::Text));
     }
 }
 
@@ -627,7 +617,9 @@ pub async fn run_with_args(args: AgentArgs) -> anyhow::Result<()> {
 pub async fn run() -> anyhow::Result<()> {
     let _ = dotenvy::dotenv();
     let cli = Cli::parse();
-    run_with_args(cli.args).await
+    let mut args = cli.args;
+    args.apply_cli_defaults(None, None, None, None);
+    run_with_args(args).await
 }
 
 #[cfg(test)]

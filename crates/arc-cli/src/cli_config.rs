@@ -1,5 +1,6 @@
 use std::path::Path;
 
+use arc_agent::cli::{OutputFormat, PermissionLevel};
 use serde::Deserialize;
 use tracing::debug;
 
@@ -7,8 +8,8 @@ use tracing::debug;
 pub struct AgentDefaults {
     pub provider: Option<String>,
     pub model: Option<String>,
-    pub permissions: Option<String>,
-    pub output_format: Option<String>,
+    pub permissions: Option<PermissionLevel>,
+    pub output_format: Option<OutputFormat>,
 }
 
 #[derive(Clone, Debug, Default, Deserialize, PartialEq)]
@@ -18,9 +19,7 @@ pub struct LlmDefaults {
 
 #[derive(Clone, Debug, Default, Deserialize, PartialEq)]
 pub struct CliConfig {
-    #[serde(default)]
     pub agent: Option<AgentDefaults>,
-    #[serde(default)]
     pub llm: Option<LlmDefaults>,
 }
 
@@ -72,8 +71,8 @@ model = "claude-sonnet-4-5"
         let agent = config.agent.unwrap();
         assert_eq!(agent.provider.as_deref(), Some("anthropic"));
         assert_eq!(agent.model.as_deref(), Some("claude-opus-4-6"));
-        assert_eq!(agent.permissions.as_deref(), Some("read-write"));
-        assert_eq!(agent.output_format.as_deref(), Some("text"));
+        assert_eq!(agent.permissions, Some(PermissionLevel::ReadWrite));
+        assert_eq!(agent.output_format, Some(OutputFormat::Text));
         let llm = config.llm.unwrap();
         assert_eq!(llm.model.as_deref(), Some("claude-sonnet-4-5"));
     }
