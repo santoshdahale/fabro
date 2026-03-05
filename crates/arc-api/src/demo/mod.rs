@@ -11,7 +11,7 @@ use axum::Json;
 
 use crate::error::ApiError;
 use crate::jwt_auth::AuthenticatedService;
-use crate::server::{AppState, PaginationParams};
+use crate::server::{AppState, ListResponse, PaginationParams};
 
 fn paginated_response<T: serde::Serialize>(items: Vec<T>, pagination: &PaginationParams) -> Response {
     let limit = pagination.limit.clamp(1, 100) as usize;
@@ -23,7 +23,7 @@ fn paginated_response<T: serde::Serialize>(items: Vec<T>, pagination: &Paginatio
 }
 
 fn list_response<T: serde::Serialize>(items: T) -> Response {
-    (StatusCode::OK, Json(json!({ "data": items, "meta": { "has_more": false } }))).into_response()
+    (StatusCode::OK, Json(ListResponse::new(items))).into_response()
 }
 
 // ── Runs ───────────────────────────────────────────────────────────────

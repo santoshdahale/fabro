@@ -12,7 +12,6 @@ use tokio::sync::broadcast;
 use tokio_stream::wrappers::BroadcastStream;
 use tokio_stream::StreamExt;
 
-use serde_json::json;
 use tracing::{error, info};
 
 use arc_agent::LocalSandbox;
@@ -43,6 +42,22 @@ pub struct PaginationParams {
     pub limit: u32,
     #[serde(rename = "page[offset]", default)]
     pub offset: u32,
+}
+
+/// Non-paginated list response wrapper with `has_more: false`.
+#[derive(serde::Serialize)]
+pub struct ListResponse<T: serde::Serialize> {
+    data: T,
+    meta: PaginationMeta,
+}
+
+impl<T: serde::Serialize> ListResponse<T> {
+    pub fn new(data: T) -> Self {
+        Self {
+            data,
+            meta: PaginationMeta { has_more: false },
+        }
+    }
 }
 
 /// Snapshot of a managed run.
@@ -645,7 +660,7 @@ async fn get_questions(
         Some(managed_run) => {
             let interviewer = match &managed_run.interviewer {
                 Some(i) => i,
-                None => return (StatusCode::OK, Json(json!({ "data": Vec::<ApiQuestion>::new(), "meta": { "has_more": false } }))).into_response(),
+                None => return (StatusCode::OK, Json(ListResponse::new(Vec::<ApiQuestion>::new()))).into_response(),
             };
             let pending = interviewer.pending_questions();
             let questions: Vec<ApiQuestion> = pending
@@ -666,7 +681,7 @@ async fn get_questions(
                     allow_freeform: pq.question.allow_freeform,
                 })
                 .collect();
-            (StatusCode::OK, Json(json!({ "data": questions, "meta": { "has_more": false } }))).into_response()
+            (StatusCode::OK, Json(ListResponse::new(questions))).into_response()
         }
         None => ApiError::not_found("Run not found.").into_response(),
     }
