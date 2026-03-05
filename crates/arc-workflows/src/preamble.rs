@@ -2,7 +2,7 @@ use std::collections::{HashMap, HashSet};
 
 use crate::artifact::{artifact_path, format_artifact_reference};
 use crate::context::Context;
-use crate::graph::{Graph, Node};
+use crate::graph::{is_llm_handler_type, Graph, Node};
 use crate::outcome::Outcome;
 
 /// Build a fidelity-appropriate preamble string for non-full context modes.
@@ -157,7 +157,7 @@ fn render_compact_stage_details(
             }
             lines
         }
-        Some("agent") | Some("agent_loop") | Some("prompt") | Some("one_shot") => {
+        h if is_llm_handler_type(h) => {
             let mut lines = Vec::new();
             if let Some(usage) = &outcome.usage {
                 let input = format_token_count(usage.input_tokens);
@@ -234,7 +234,7 @@ fn render_summary_high_stage_section(
                 }
             }
         }
-        Some("agent") | Some("agent_loop") | Some("prompt") | Some("one_shot") => {
+        h if is_llm_handler_type(h) => {
             if let Some(usage) = &outcome.usage {
                 lines.push(format!("- Model: {}", usage.model));
                 lines.push(format!(
@@ -497,7 +497,7 @@ fn build_summary_preamble(
                                     }
                                 }
                             }
-                            Some("agent") | Some("agent_loop") | Some("prompt") | Some("one_shot") => {
+                            h if is_llm_handler_type(h) => {
                                 if let Some(usage) = &outcome.usage {
                                     parts.push(format!("  - Model: {}", usage.model));
                                 }

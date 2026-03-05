@@ -67,6 +67,12 @@ impl AttrValue {
     }
 }
 
+/// Returns true if the handler type is an LLM-based handler (agent or prompt, including legacy aliases).
+#[must_use]
+pub fn is_llm_handler_type(handler_type: Option<&str>) -> bool {
+    matches!(handler_type, Some("agent") | Some("agent_loop") | Some("prompt") | Some("one_shot"))
+}
+
 /// Maps Graphviz shapes to handler type strings (Section 2.8).
 #[must_use]
 pub fn shape_to_handler_type(shape: &str) -> Option<&'static str> {
@@ -478,6 +484,17 @@ mod tests {
         assert_eq!(shape_to_handler_type("house"), Some("stack.manager_loop"));
         assert_eq!(shape_to_handler_type("insulator"), Some("wait"));
         assert_eq!(shape_to_handler_type("unknown"), None);
+    }
+
+    #[test]
+    fn is_llm_handler_type_checks() {
+        assert!(is_llm_handler_type(Some("agent")));
+        assert!(is_llm_handler_type(Some("agent_loop")));
+        assert!(is_llm_handler_type(Some("prompt")));
+        assert!(is_llm_handler_type(Some("one_shot")));
+        assert!(!is_llm_handler_type(Some("command")));
+        assert!(!is_llm_handler_type(Some("human")));
+        assert!(!is_llm_handler_type(None));
     }
 
     #[test]

@@ -114,8 +114,8 @@ impl HandlerRegistry {
 
 /// Build a [`HandlerRegistry`] with all built-in handler types registered.
 ///
-/// The `make_backend` closure is called once per handler that needs a backend
-/// (`AgentHandler` default, explicit `"agent"`, and `"parallel.fan_in"`).
+/// The `make_backend` closure is called for each handler that needs a backend
+/// (default, `"agent"`, `"agent_loop"`, `"prompt"`, `"one_shot"`, and `"parallel.fan_in"`).
 #[must_use]
 pub fn default_registry(
     interviewer: Arc<dyn Interviewer>,

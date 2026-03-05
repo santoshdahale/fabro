@@ -2,7 +2,7 @@ use std::collections::{HashSet, VecDeque};
 use std::str::FromStr;
 
 use crate::condition::parse_condition;
-use crate::graph::{AttrValue, Graph};
+use crate::graph::{is_llm_handler_type, AttrValue, Graph};
 
 use super::{Diagnostic, LintRule, Severity};
 
@@ -620,7 +620,7 @@ impl LintRule for PromptOnLlmNodesRule {
     fn apply(&self, graph: &Graph) -> Vec<Diagnostic> {
         let mut diagnostics = Vec::new();
         for node in graph.nodes.values() {
-            if matches!(node.handler_type(), Some("agent") | Some("agent_loop") | Some("prompt") | Some("one_shot")) {
+            if is_llm_handler_type(node.handler_type()) {
                 let has_prompt = node.prompt().is_some_and(|p| !p.is_empty());
                 let has_label = node
                     .attrs
