@@ -101,8 +101,8 @@ fn format_token_count(tokens: i64) -> String {
 /// handler-specific details, so they can be skipped in the trailing context section.
 fn stage_rendered_keys(node_id: &str, outcome: &Outcome) -> HashSet<String> {
     let candidates = [
-        "script.output".to_string(),
-        "script.stderr".to_string(),
+        "command.output".to_string(),
+        "command.stderr".to_string(),
         "last_stage".to_string(),
         "last_response".to_string(),
         format!("response.{node_id}"),
@@ -133,7 +133,7 @@ fn render_compact_stage_details(
                     lines.push(format!("  - Script: `{cmd}`"));
                 }
             }
-            if let Some(stdout_val) = outcome.context_updates.get("script.output") {
+            if let Some(stdout_val) = outcome.context_updates.get("command.output") {
                 let stdout = format_value(stdout_val);
                 if stdout.trim().is_empty() {
                     lines.push("  - Stdout: (empty)".to_string());
@@ -144,7 +144,7 @@ fn render_compact_stage_details(
                     lines.push("    ```".to_string());
                 }
             }
-            if let Some(stderr_val) = outcome.context_updates.get("script.stderr") {
+            if let Some(stderr_val) = outcome.context_updates.get("command.stderr") {
                 let stderr = format_value(stderr_val);
                 if stderr.trim().is_empty() {
                     lines.push("  - Stderr: (empty)".to_string());
@@ -203,7 +203,7 @@ fn render_summary_high_stage_section(
                     lines.push(format!("- Script: `{cmd}`"));
                 }
             }
-            if let Some(stdout_val) = outcome.context_updates.get("script.output") {
+            if let Some(stdout_val) = outcome.context_updates.get("command.output") {
                 if let Some(path) = artifact_path(stdout_val) {
                     lines.push(format!("- Stdout: {}", format_artifact_reference(path)));
                 } else {
@@ -218,7 +218,7 @@ fn render_summary_high_stage_section(
                     }
                 }
             }
-            if let Some(stderr_val) = outcome.context_updates.get("script.stderr") {
+            if let Some(stderr_val) = outcome.context_updates.get("command.stderr") {
                 if let Some(path) = artifact_path(stderr_val) {
                     lines.push(format!("- Stderr: {}", format_artifact_reference(path)));
                 } else {
@@ -777,12 +777,12 @@ mod tests {
         let mut node_outcomes: HashMap<String, Outcome> = HashMap::new();
         let mut outcome = Outcome::success();
         outcome.context_updates.insert(
-            "script.output".to_string(),
+            "command.output".to_string(),
             serde_json::json!("10 passed\n"),
         );
         outcome
             .context_updates
-            .insert("script.stderr".to_string(), serde_json::json!(""));
+            .insert("command.stderr".to_string(), serde_json::json!(""));
         node_outcomes.insert("run_tests".to_string(), outcome);
 
         let preamble = build_preamble(
@@ -909,18 +909,18 @@ mod tests {
         graph.nodes.insert("step".to_string(), step);
 
         let context = Context::new();
-        // script.output is set in context (the engine copies context_updates to context)
-        context.set("script.output", serde_json::json!("hi\n"));
-        context.set("script.stderr", serde_json::json!(""));
+        // command.output is set in context (the engine copies context_updates to context)
+        context.set("command.output", serde_json::json!("hi\n"));
+        context.set("command.stderr", serde_json::json!(""));
         let completed_nodes = vec!["step".to_string()];
         let mut node_outcomes: HashMap<String, Outcome> = HashMap::new();
         let mut outcome = Outcome::success();
         outcome
             .context_updates
-            .insert("script.output".to_string(), serde_json::json!("hi\n"));
+            .insert("command.output".to_string(), serde_json::json!("hi\n"));
         outcome
             .context_updates
-            .insert("script.stderr".to_string(), serde_json::json!(""));
+            .insert("command.stderr".to_string(), serde_json::json!(""));
         node_outcomes.insert("step".to_string(), outcome);
 
         let preamble = build_preamble(
@@ -931,12 +931,12 @@ mod tests {
             &node_outcomes,
         );
 
-        // script.output should NOT appear in the Context section
+        // command.output should NOT appear in the Context section
         // because it's already rendered inline under the stage
         let context_section = preamble.split("## Context").nth(1).unwrap_or("");
         assert!(
-            !context_section.contains("script.output"),
-            "script.output should be deduplicated from context section"
+            !context_section.contains("command.output"),
+            "command.output should be deduplicated from context section"
         );
     }
 
@@ -1037,7 +1037,7 @@ mod tests {
         let mut node_outcomes: HashMap<String, Outcome> = HashMap::new();
         let mut outcome = Outcome::fail_classify("exit code 1");
         outcome.context_updates.insert(
-            "script.output".to_string(),
+            "command.output".to_string(),
             serde_json::json!("test failed"),
         );
         node_outcomes.insert("run_tests".to_string(), outcome);
@@ -1214,12 +1214,12 @@ mod tests {
         let mut node_outcomes: HashMap<String, Outcome> = HashMap::new();
         let mut outcome = Outcome::success();
         outcome.context_updates.insert(
-            "script.output".to_string(),
+            "command.output".to_string(),
             serde_json::json!("All tests passed\n"),
         );
         outcome
             .context_updates
-            .insert("script.stderr".to_string(), serde_json::json!(""));
+            .insert("command.stderr".to_string(), serde_json::json!(""));
         node_outcomes.insert("run_tests".to_string(), outcome);
 
         let preamble = build_preamble(
@@ -1239,7 +1239,7 @@ mod tests {
             "should show stdout via compact renderer"
         );
         assert!(
-            !preamble.contains("set script.output"),
+            !preamble.contains("set command.output"),
             "should not dump raw context updates"
         );
     }
@@ -1427,11 +1427,11 @@ mod tests {
         let mut node_outcomes: HashMap<String, Outcome> = HashMap::new();
         let mut outcome = Outcome::success();
         outcome.context_updates.insert(
-            "script.output".to_string(),
+            "command.output".to_string(),
             serde_json::json!("All tests passed\n"),
         );
         outcome.context_updates.insert(
-            "script.stderr".to_string(),
+            "command.stderr".to_string(),
             serde_json::json!("warning: unused var\n"),
         );
         node_outcomes.insert("run_tests".to_string(), outcome);
@@ -1619,7 +1619,7 @@ mod tests {
         assert!(is_context_key_excluded("preferred_label"));
         assert!(!is_context_key_excluded("user.name"));
         assert!(!is_context_key_excluded("custom.key"));
-        assert!(!is_context_key_excluded("script.output"));
+        assert!(!is_context_key_excluded("command.output"));
     }
 
     // --- unknown fidelity mode ---

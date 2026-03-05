@@ -494,7 +494,7 @@ Otherwise set preferred_next_label to \"Ready for build\"."
         shape=box,
         class="opus",
         fidelity="full",
-        prompt="The build or smoke tests failed. The build output is in context key script.output. Diagnose the compilation errors or test failures and fix them.
+        prompt="The build or smoke tests failed. The build output is in context key command.output. Diagnose the compilation errors or test failures and fix them.
 
 Read the relevant source files, identify the issue, and write corrected versions. Common issues:
 - Missing includes

@@ -1,5 +1,193 @@
 ---
 title: "Context"
-description: "Providing context to workflow runs"
+description: "How data flows between workflow stages"
 ---
 
+Every workflow run has a **context** — a shared key-value store that carries data between stages. When an agent writes code, a command captures test output, or a human makes a selection, the results are recorded as context updates. Downstream nodes can read these values to make decisions, build prompts, and route execution.
+
+## How context flows
+
+The context starts empty at the beginning of a run. As each stage completes, its outcome includes a set of **context updates** — key-value pairs that are merged into the shared context. Later stages see all updates from earlier stages.
+
+```
+Start → Plan → Implement → Test → Exit
+         │         │          │
+         │         │          └─ sets command.output, command.stderr
+         │         └─ sets response.implement, last_response
+         └─ sets response.plan, last_response
+```
+
+Context is thread-safe and shared across the entire run. Parallel branches receive an isolated **deep copy** of the context at the point of fan-out, so branches can't interfere with each other. When branches merge, the fan-in handler records the results under `parallel.fan_in.*` keys.
+
+## Keys set by handlers
+
+Each handler type writes specific keys into the context after execution:
+
+### Agent and prompt nodes
+
+| Key | Value |
+|---|---|
+| `last_stage` | The node ID of the stage that just completed |
+| `last_response` | Truncated LLM response (first 200 characters) |
+| `response.{node_id}` | Full LLM response text |
+
+Agents can also emit arbitrary context updates by including a JSON object with a `context_updates` field in their response. See [Transitions](/workflows/transitions#agent-transitions).
+
+### Command nodes
+
+| Key | Value |
+|---|---|
+| `command.output` | The command's stdout |
+| `command.stderr` | The command's stderr |
+
+### Human gates
+
+| Key | Value |
+|---|---|
+| `human.gate.selected` | The accelerator key (e.g. `"A"`) or `"freeform"` |
+| `human.gate.label` | The full label of the selected edge |
+| `human.gate.text` | The user's freeform text (if applicable) |
+
+### Parallel merge (fan-in)
+
+| Key | Value |
+|---|---|
+| `parallel.fan_in.best_id` | Node ID of the best-performing branch |
+| `parallel.fan_in.best_outcome` | Status of the best branch |
+| `parallel.fan_in.best_head_sha` | Git SHA from the best branch (if applicable) |
+
+### Engine-managed keys
+
+The engine sets several keys automatically. These are prefixed with `internal.` and are excluded from preambles:
+
+| Key | Value |
+|---|---|
+| `internal.run_id` | Unique identifier for this run |
+| `internal.work_dir` | Working directory path |
+| `internal.fidelity` | The resolved fidelity mode for the current node |
+| `internal.thread_id` | Thread ID for shared-conversation nodes (or null) |
+| `internal.node_visit_count` | How many times the current node has been visited |
+| `internal.retry_count.{node_id}` | Number of retry attempts used by a node |
+| `outcome` | Status of the last completed stage (`success`, `fail`, etc.) |
+| `failure_class` | Classification of the last failure (if any) |
+| `failure_signature` | Deduplication signature for the last failure |
+| `preferred_label` | Label selected by a human gate or agent routing directive |
+| `current_node` | ID of the node currently executing |
+| `graph.goal` | The workflow's goal attribute |
+| `graph.{attr}` | All graph-level attributes, mirrored into context |
+
+## Using context in conditions
+
+Edge [conditions](/workflows/transitions#conditions) can read context values to route execution:
+
+```dot
+gate -> deploy [condition="outcome=success && context.tests_passed=true"]
+gate -> fix    [condition="outcome=fail"]
+```
+
+The `context.` prefix is optional — `tests_passed=true` and `context.tests_passed=true` are equivalent.
+
+## Fidelity: Controlling agent context
+
+When a new agent or prompt node starts, Arc assembles a **preamble** — a summary of what happened in prior stages. The **fidelity** setting controls how detailed this preamble is.
+
+| Fidelity | Behavior |
+|---|---|
+| `full` | No preamble. The agent continues in the same conversation thread, seeing complete prior context. |
+| `compact` | Nested-bullet summary with handler-specific details (default). |
+| `summary:high` | Detailed per-stage Markdown report. |
+| `summary:medium` | Moderate detail with outcomes and notable findings (~1500 token target). |
+| `summary:low` | Brief summary with just outcomes per stage (~600 token target). |
+| `truncate` | Minimal — only the goal and run ID. |
+
+### Setting fidelity
+
+Fidelity can be set at three levels. The first match wins:
+
+1. **Edge attribute** — Set `fidelity` on an edge to control the transition into a specific node:
+   ```dot
+   plan -> implement [fidelity="full"]
+   ```
+
+2. **Node attribute** — Set `fidelity` on a node to control all transitions into it:
+   ```dot
+   implement [fidelity="full"]
+   ```
+
+3. **Graph default** — Set `default_fidelity` on the graph for a run-wide default:
+   ```dot
+   digraph Example {
+       graph [default_fidelity="summary:medium"]
+   }
+   ```
+
+If none of these are set, fidelity defaults to `compact`.
+
+### Full fidelity and threads
+
+`full` fidelity is typically used with `thread_id` to create a shared conversation across multiple nodes. Nodes with the same `thread_id` share a single LLM session, preserving full context continuity:
+
+```dot
+subgraph cluster_impl {
+    node [fidelity="full", thread_id="impl"]
+    plan      [label="Plan"]
+    implement [label="Implement"]
+    review    [label="Review"]
+}
+```
+
+In this example, the implement node sees the plan node's entire conversation, and the review node sees both.
+
+### Fidelity on resume
+
+When a run is resumed from a checkpoint, the first node after resume degrades `full` fidelity to `summary:high`. This prevents the resumed node from expecting a conversation thread that no longer exists in memory.
+
+## Preamble construction
+
+For non-`full` fidelity modes, Arc builds a preamble from runtime data and prepends it to the node's prompt.
+
+<Accordion title="Example compact preamble">
+Given a plan-test-implement workflow where the plan and test stages have completed, the `implement` node would receive a preamble like this prepended to its prompt:
+
+```markdown
+Goal: Add a /health endpoint to the API server
+
+## Completed stages
+- **plan**: success
+  - Model: claude-sonnet-4-5, 12.4k tokens in / 3.2k out
+  - Files: docs/plan.md
+- **test**: success
+  - Script: `cargo test 2>&1 || true`
+  - Stdout:
+    ```
+    running 42 tests ... 41 passed, 1 failed
+    ```
+  - Stderr: (empty)
+
+## Context
+- tests_passed: false
+```
+</Accordion>
+
+The preamble includes:
+
+- The workflow goal
+- A summary of completed stages (format depends on fidelity level)
+- Handler-specific details:
+  - **Command nodes** — the script that ran, stdout, and stderr
+  - **Agent/prompt nodes** — the model used, token counts, and files touched
+- Non-internal context values that weren't already rendered inline
+
+Internal keys (prefixed with `internal.`, `current`, `graph.`, `thread.`, `response.`) are excluded from preambles to avoid noise.
+
+## Artifact offloading
+
+When a stage produces a large output (over 100KB of serialized JSON), Arc automatically offloads it to the **artifact store** on disk rather than keeping it in the in-memory context. The context value is replaced with a `file://` pointer:
+
+```
+response.plan → file:///tmp/logs/artifacts/values/response.plan.json
+```
+
+The preamble renderer resolves these pointers and displays a reference to the file path. For remote sandboxes (Docker, Daytona), Arc syncs artifact files to the sandbox at `{working_directory}/.arc/artifacts/` so agents can read them.
+
+This keeps the context lean — large LLM responses, test output, and file listings don't bloat checkpoint files or overwhelm preamble summaries.

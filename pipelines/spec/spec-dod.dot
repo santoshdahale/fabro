@@ -168,7 +168,7 @@ Otherwise set preferred_next_label to \"Re-audit\"."
         label="Fix Build Errors",
         shape=box,
         class="fix",
-        prompt="The build or smoke tests failed. Read the build output from context (script.output key). Diagnose the compilation errors or test failures and fix them.
+        prompt="The build or smoke tests failed. Read the build output from context (command.output key). Diagnose the compilation errors or test failures and fix them.
 
 Read the relevant source files, identify the issue, and write corrected versions. Common issues:
 - Missing includes

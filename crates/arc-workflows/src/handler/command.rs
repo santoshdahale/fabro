@@ -129,10 +129,10 @@ impl Handler for CommandHandler {
                     let mut outcome = Outcome::success();
                     outcome
                         .context_updates
-                        .insert("script.output".to_string(), serde_json::json!(stdout));
+                        .insert("command.output".to_string(), serde_json::json!(stdout));
                     outcome
                         .context_updates
-                        .insert("script.stderr".to_string(), serde_json::json!(stderr));
+                        .insert("command.stderr".to_string(), serde_json::json!(stderr));
                     outcome.notes = Some(format!("Script completed: {script}"));
                     Ok(outcome)
                 } else {
@@ -151,10 +151,10 @@ impl Handler for CommandHandler {
                     let mut outcome = Outcome::fail_classify(reason);
                     outcome
                         .context_updates
-                        .insert("script.output".to_string(), serde_json::json!(stdout));
+                        .insert("command.output".to_string(), serde_json::json!(stdout));
                     outcome
                         .context_updates
-                        .insert("script.stderr".to_string(), serde_json::json!(stderr));
+                        .insert("command.stderr".to_string(), serde_json::json!(stderr));
                     Ok(outcome)
                 }
             }
@@ -219,10 +219,10 @@ mod tests {
             .unwrap();
         assert_eq!(outcome.status, StageStatus::Success);
         assert!(outcome.notes.as_deref().unwrap().contains("echo hello"));
-        let script_output = outcome.context_updates.get("script.output").unwrap();
-        assert!(script_output.as_str().unwrap().contains("hello"));
-        let script_stderr = outcome.context_updates.get("script.stderr").unwrap();
-        assert_eq!(script_stderr.as_str().unwrap(), "");
+        let command_output = outcome.context_updates.get("command.output").unwrap();
+        assert!(command_output.as_str().unwrap().contains("hello"));
+        let command_stderr = outcome.context_updates.get("command.stderr").unwrap();
+        assert_eq!(command_stderr.as_str().unwrap(), "");
     }
 
     #[tokio::test]
@@ -486,8 +486,8 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(outcome.status, StageStatus::Success);
-        let script_output = outcome.context_updates.get("script.output").unwrap();
-        assert!(script_output
+        let command_output = outcome.context_updates.get("command.output").unwrap();
+        assert!(command_output
             .as_str()
             .unwrap()
             .contains("hello from python"));
@@ -560,8 +560,8 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(outcome.status, StageStatus::Success);
-        let script_output = outcome.context_updates.get("script.output").unwrap();
-        assert!(script_output.as_str().unwrap().contains("legacy"));
+        let command_output = outcome.context_updates.get("command.output").unwrap();
+        assert!(command_output.as_str().unwrap().contains("legacy"));
     }
 
     #[tokio::test]
@@ -581,11 +581,11 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(outcome.status, StageStatus::Success);
-        let script_stderr = outcome.context_updates.get("script.stderr").unwrap();
+        let command_stderr = outcome.context_updates.get("command.stderr").unwrap();
         assert!(
-            script_stderr.as_str().unwrap().contains("err"),
-            "script.stderr should contain 'err', got: {:?}",
-            script_stderr
+            command_stderr.as_str().unwrap().contains("err"),
+            "command.stderr should contain 'err', got: {:?}",
+            command_stderr
         );
     }
 
@@ -606,7 +606,7 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(outcome.status, StageStatus::Success);
-        assert!(outcome.context_updates.contains_key("script.output"));
+        assert!(outcome.context_updates.contains_key("command.output"));
         assert!(
             !outcome.context_updates.contains_key("tool.output"),
             "tool.output should not be emitted"
@@ -661,7 +661,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn script_handler_failure_sets_script_output() {
+    async fn script_handler_failure_sets_command_output() {
         let handler = CommandHandler;
         let mut node = Node::new("script_node");
         node.attrs.insert(
@@ -677,13 +677,13 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(outcome.status, StageStatus::Fail);
-        let script_output = outcome
+        let command_output = outcome
             .context_updates
-            .get("script.output")
-            .expect("script.output should be set on failure");
+            .get("command.output")
+            .expect("command.output should be set on failure");
         assert!(
-            script_output.as_str().unwrap().contains("build output"),
-            "script.output should contain stdout, got: {script_output:?}"
+            command_output.as_str().unwrap().contains("build output"),
+            "command.output should contain stdout, got: {command_output:?}"
         );
     }
 }

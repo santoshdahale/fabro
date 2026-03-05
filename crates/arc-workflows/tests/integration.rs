@@ -1895,11 +1895,11 @@ async fn tool_handler_e2e() {
     assert_eq!(outcome.status, StageStatus::Success);
 
     let cp = Checkpoint::load(&dir.path().join("checkpoint.json")).unwrap();
-    let script_output = cp
+    let command_output = cp
         .context_values
-        .get("script.output")
-        .expect("script.output should exist");
-    assert!(script_output
+        .get("command.output")
+        .expect("command.output should exist");
+    assert!(command_output
         .as_str()
         .unwrap()
         .contains("hello-from-script"));
@@ -2237,11 +2237,11 @@ async fn scenario_ship_a_feature() {
     assert_eq!(outcome.status, StageStatus::Success);
 
     let cp = Checkpoint::load(&dir.path().join("checkpoint.json")).unwrap();
-    let script_output = cp
+    let command_output = cp
         .context_values
-        .get("script.output")
-        .expect("script.output");
-    assert!(script_output.as_str().unwrap().contains("PASS"));
+        .get("command.output")
+        .expect("command.output");
+    assert!(command_output.as_str().unwrap().contains("PASS"));
     assert!(cp.completed_nodes.contains(&"plan".to_string()));
     assert!(cp.completed_nodes.contains(&"implement".to_string()));
     assert!(cp.completed_nodes.contains(&"test".to_string()));
