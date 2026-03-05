@@ -140,6 +140,26 @@ impl SdkError {
         }
     }
 
+    /// Whether this error is eligible for provider-level failover.
+    ///
+    /// Transient provider issues (rate limits, server errors, quota, timeouts,
+    /// network, stream) can be retried on a different provider. Deterministic
+    /// errors (auth, invalid request, context length, content filter) and
+    /// non-provider errors (abort, configuration) cannot.
+    #[must_use]
+    pub const fn failover_eligible(&self) -> bool {
+        match self {
+            Self::Provider { kind, .. } => matches!(
+                kind,
+                ProviderErrorKind::RateLimit
+                    | ProviderErrorKind::Server
+                    | ProviderErrorKind::QuotaExceeded
+            ),
+            Self::RequestTimeout { .. } | Self::Network { .. } | Self::Stream { .. } => true,
+            _ => false,
+        }
+    }
+
     #[must_use]
     pub fn failure_signature_hint(&self) -> String {
         let provider = self.provider_name();
@@ -802,6 +822,104 @@ mod tests {
             message: "refused".into(),
         };
         assert_eq!(err.provider_name(), "unknown");
+    }
+
+    #[test]
+    fn failover_eligible_transient_provider_errors() {
+        let detail = || Box::new(ProviderErrorDetail::new("error", "openai"));
+
+        assert!(SdkError::Provider {
+            kind: ProviderErrorKind::RateLimit,
+            detail: detail(),
+        }
+        .failover_eligible());
+
+        assert!(SdkError::Provider {
+            kind: ProviderErrorKind::Server,
+            detail: detail(),
+        }
+        .failover_eligible());
+
+        assert!(SdkError::Provider {
+            kind: ProviderErrorKind::QuotaExceeded,
+            detail: detail(),
+        }
+        .failover_eligible());
+    }
+
+    #[test]
+    fn failover_eligible_transient_non_provider_errors() {
+        assert!(SdkError::RequestTimeout {
+            message: "timed out".into()
+        }
+        .failover_eligible());
+
+        assert!(SdkError::Network {
+            message: "refused".into()
+        }
+        .failover_eligible());
+
+        assert!(SdkError::Stream {
+            message: "broken".into()
+        }
+        .failover_eligible());
+    }
+
+    #[test]
+    fn failover_not_eligible_deterministic_errors() {
+        let detail = || Box::new(ProviderErrorDetail::new("error", "openai"));
+
+        assert!(!SdkError::Provider {
+            kind: ProviderErrorKind::Authentication,
+            detail: detail(),
+        }
+        .failover_eligible());
+
+        assert!(!SdkError::Provider {
+            kind: ProviderErrorKind::InvalidRequest,
+            detail: detail(),
+        }
+        .failover_eligible());
+
+        assert!(!SdkError::Provider {
+            kind: ProviderErrorKind::ContextLength,
+            detail: detail(),
+        }
+        .failover_eligible());
+
+        assert!(!SdkError::Provider {
+            kind: ProviderErrorKind::ContentFilter,
+            detail: detail(),
+        }
+        .failover_eligible());
+    }
+
+    #[test]
+    fn failover_not_eligible_non_provider_errors() {
+        assert!(!SdkError::Configuration {
+            message: "bad".into()
+        }
+        .failover_eligible());
+
+        assert!(!SdkError::Abort {
+            message: "cancelled".into()
+        }
+        .failover_eligible());
+
+        assert!(!SdkError::InvalidToolCall {
+            message: "bad".into()
+        }
+        .failover_eligible());
+
+        assert!(!SdkError::NoObjectGenerated {
+            message: "none".into()
+        }
+        .failover_eligible());
+
+        assert!(!SdkError::UnsupportedToolChoice {
+            message: "nope".into()
+        }
+        .failover_eligible());
     }
 
     #[test]

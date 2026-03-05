@@ -25,6 +25,8 @@ pub struct WorkflowRunConfig {
 pub struct LlmConfig {
     pub model: Option<String>,
     pub provider: Option<String>,
+    #[serde(default)]
+    pub fallbacks: Option<HashMap<String, Vec<String>>>,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq)]
@@ -69,6 +71,9 @@ impl WorkflowRunConfig {
                 }
                 if task.provider.is_none() {
                     task.provider = default.provider.clone();
+                }
+                if task.fallbacks.is_none() {
+                    task.fallbacks = default.fallbacks.clone();
                 }
             }
             (None, Some(_)) => self.llm = defaults.llm.clone(),
@@ -535,6 +540,7 @@ graph = "w.dot"
             llm: Some(LlmConfig {
                 model: Some("default-model".into()),
                 provider: Some("anthropic".into()),
+                fallbacks: None,
             }),
             ..RunDefaults::default()
         };
@@ -560,6 +566,7 @@ model = "task-model"
             llm: Some(LlmConfig {
                 model: Some("default-model".into()),
                 provider: None,
+                fallbacks: None,
             }),
             ..RunDefaults::default()
         };
@@ -633,6 +640,7 @@ model = "haiku"
             llm: Some(LlmConfig {
                 model: None,
                 provider: Some("anthropic".into()),
+                fallbacks: None,
             }),
             ..RunDefaults::default()
         };
@@ -926,6 +934,111 @@ auto_stop_interval = 60
         assert_eq!(snapshot.name, "default-snap");
         assert_eq!(snapshot.cpu, Some(4));
         assert_eq!(snapshot.memory, Some(8));
+    }
+
+    #[test]
+    fn parse_toml_with_fallbacks() {
+        let toml = r#"
+version = 1
+goal = "Run tests"
+graph = "workflow.dot"
+
+[llm]
+model = "claude-opus-4-6"
+provider = "anthropic"
+
+[llm.fallbacks]
+anthropic = ["gemini", "openai"]
+gemini = ["anthropic", "openai"]
+"#;
+        let config = parse_run_config(toml).unwrap();
+        let llm = config.llm.unwrap();
+        let fallbacks = llm.fallbacks.unwrap();
+        assert_eq!(fallbacks["anthropic"], vec!["gemini", "openai"]);
+        assert_eq!(fallbacks["gemini"], vec!["anthropic", "openai"]);
+    }
+
+    #[test]
+    fn parse_toml_without_fallbacks() {
+        let toml = r#"
+version = 1
+goal = "Run tests"
+graph = "workflow.dot"
+
+[llm]
+model = "claude-opus-4-6"
+provider = "anthropic"
+"#;
+        let config = parse_run_config(toml).unwrap();
+        let llm = config.llm.unwrap();
+        assert!(llm.fallbacks.is_none());
+    }
+
+    #[test]
+    fn apply_defaults_fallbacks_task_wins() {
+        let mut cfg = parse_run_config(
+            r#"
+version = 1
+goal = "test"
+graph = "w.dot"
+
+[llm]
+model = "opus"
+
+[llm.fallbacks]
+anthropic = ["gemini"]
+"#,
+        )
+        .unwrap();
+        let defaults = RunDefaults {
+            llm: Some(LlmConfig {
+                model: None,
+                provider: Some("anthropic".into()),
+                fallbacks: Some(HashMap::from([(
+                    "anthropic".into(),
+                    vec!["openai".into()],
+                )])),
+            }),
+            ..RunDefaults::default()
+        };
+        cfg.apply_defaults(&defaults);
+        let llm = cfg.llm.unwrap();
+        assert_eq!(
+            llm.fallbacks.unwrap()["anthropic"],
+            vec!["gemini"]
+        );
+    }
+
+    #[test]
+    fn apply_defaults_fallbacks_inherited() {
+        let mut cfg = parse_run_config(
+            r#"
+version = 1
+goal = "test"
+graph = "w.dot"
+
+[llm]
+model = "opus"
+"#,
+        )
+        .unwrap();
+        let defaults = RunDefaults {
+            llm: Some(LlmConfig {
+                model: None,
+                provider: Some("anthropic".into()),
+                fallbacks: Some(HashMap::from([(
+                    "anthropic".into(),
+                    vec!["openai".into()],
+                )])),
+            }),
+            ..RunDefaults::default()
+        };
+        cfg.apply_defaults(&defaults);
+        let llm = cfg.llm.unwrap();
+        assert_eq!(
+            llm.fallbacks.unwrap()["anthropic"],
+            vec!["openai"]
+        );
     }
 
     #[tokio::test]

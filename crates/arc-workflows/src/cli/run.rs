@@ -151,6 +151,29 @@ fn resolve_daytona_config(
         })
 }
 
+/// Resolve the fallback chain from config: task config wins, then run defaults.
+fn resolve_fallback_chain(
+    provider: Provider,
+    model: &str,
+    run_cfg: Option<&WorkflowRunConfig>,
+    run_defaults: &RunDefaults,
+) -> Vec<arc_llm::catalog::FallbackTarget> {
+    let fallbacks = run_cfg
+        .and_then(|c| c.llm.as_ref())
+        .and_then(|l| l.fallbacks.as_ref())
+        .or_else(|| {
+            run_defaults
+                .llm
+                .as_ref()
+                .and_then(|l| l.fallbacks.as_ref())
+        });
+
+    match fallbacks {
+        Some(map) => arc_llm::catalog::build_fallback_chain(provider.as_str(), model, map),
+        None => Vec::new(),
+    }
+}
+
 /// Accumulates token usage and cost across all workflow stages.
 #[derive(Default)]
 struct CostAccumulator {
@@ -600,12 +623,20 @@ pub async fn run_command(
         .map_err(|e| anyhow::anyhow!("{e}"))?
         .unwrap_or(Provider::Anthropic);
 
+    // Resolve fallback chain from config
+    let fallback_chain = resolve_fallback_chain(
+        provider_enum,
+        &model,
+        run_cfg.as_ref(),
+        &run_defaults,
+    );
+
     // 7. Build engine
     let registry = default_registry(interviewer.clone(), || {
         if dry_run_mode {
             None
         } else {
-            let api = AgentApiBackend::new(model.clone(), provider_enum);
+            let api = AgentApiBackend::new(model.clone(), provider_enum, fallback_chain.clone());
             let cli = AgentCliBackend::new(model.clone(), provider_enum);
             Some(Box::new(BackendRouter::new(Box::new(api), cli)))
         }
@@ -988,11 +1019,14 @@ async fn run_from_branch(
         .map_err(|e| anyhow::anyhow!("{e}"))?
         .unwrap_or(arc_llm::provider::Provider::Anthropic);
 
+    // No fallback config available for branch resume; use empty chain.
+    let fallback_chain = Vec::new();
+
     let registry = crate::handler::default_registry(interviewer.clone(), || {
         if dry_run_mode {
             None
         } else {
-            let api = AgentApiBackend::new(model.clone(), provider_enum);
+            let api = AgentApiBackend::new(model.clone(), provider_enum, fallback_chain.clone());
             let cli = AgentCliBackend::new(model.clone(), provider_enum);
             Some(Box::new(BackendRouter::new(Box::new(api), cli)))
         }
@@ -1529,6 +1563,7 @@ mod tests {
             llm: Some(run_config::LlmConfig {
                 model: Some("toml-model".to_string()),
                 provider: Some("openai".to_string()),
+                fallbacks: None,
             }),
             setup: None,
             sandbox: None,
@@ -1567,6 +1602,7 @@ mod tests {
             llm: Some(run_config::LlmConfig {
                 model: Some("toml-model".to_string()),
                 provider: Some("openai".to_string()),
+                fallbacks: None,
             }),
             setup: None,
             sandbox: None,
@@ -1612,6 +1648,7 @@ mod tests {
             llm: Some(run_config::LlmConfig {
                 model: Some("default-model".to_string()),
                 provider: Some("openai".to_string()),
+                fallbacks: None,
             }),
             ..RunDefaults::default()
         };
@@ -1627,6 +1664,7 @@ mod tests {
             llm: Some(run_config::LlmConfig {
                 model: Some("default-model".to_string()),
                 provider: Some("anthropic".to_string()),
+                fallbacks: None,
             }),
             ..RunDefaults::default()
         };
@@ -1638,6 +1676,7 @@ mod tests {
             llm: Some(run_config::LlmConfig {
                 model: Some("toml-model".to_string()),
                 provider: Some("openai".to_string()),
+                fallbacks: None,
             }),
             setup: None,
             sandbox: None,

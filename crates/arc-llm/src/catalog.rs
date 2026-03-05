@@ -1,5 +1,7 @@
-use crate::types::ModelInfo;
+use std::collections::HashMap;
 use std::sync::LazyLock;
+
+use crate::types::ModelInfo;
 
 /// Built-in model catalog loaded from catalog.json (Section 2.9).
 /// The catalog is advisory, not restrictive -- unknown model strings pass through.
@@ -50,6 +52,72 @@ pub fn list_models(provider: Option<&str>) -> Vec<ModelInfo> {
                 .collect()
         },
     )
+}
+
+/// Find the closest model on a target provider that matches the reference model's capabilities.
+///
+/// Hard-filters on `supports_tools`, `supports_vision`, and `supports_reasoning`.
+/// Among matches, picks the closest by `input_cost_per_million` (absolute diff).
+/// Returns `None` if no model on the target provider matches all capabilities.
+#[must_use]
+pub fn closest_model(target_provider: &str, reference: &ModelInfo) -> Option<ModelInfo> {
+    BUILT_IN_MODELS
+        .iter()
+        .filter(|m| {
+            m.provider == target_provider
+                && m.supports_tools == reference.supports_tools
+                && m.supports_vision == reference.supports_vision
+                && m.supports_reasoning == reference.supports_reasoning
+        })
+        .min_by(|a, b| {
+            let ref_cost = reference.input_cost_per_million.unwrap_or(0.0);
+            let cost_a = (a.input_cost_per_million.unwrap_or(0.0) - ref_cost).abs();
+            let cost_b = (b.input_cost_per_million.unwrap_or(0.0) - ref_cost).abs();
+            cost_a.partial_cmp(&cost_b).unwrap_or(std::cmp::Ordering::Equal)
+        })
+        .cloned()
+}
+
+/// A resolved fallback target: provider name + model ID.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FallbackTarget {
+    pub provider: String,
+    pub model: String,
+}
+
+/// Build an ordered fallback chain for a primary provider/model.
+///
+/// Looks up the primary model in the catalog, then for each fallback provider
+/// in the configured order, finds the closest matching model. Providers where
+/// no capability match exists are skipped.
+///
+/// Returns an empty vec if the primary model is unknown or the provider is not
+/// in the fallback map.
+#[must_use]
+pub fn build_fallback_chain(
+    primary_provider: &str,
+    primary_model: &str,
+    fallbacks: &HashMap<String, Vec<String>>,
+) -> Vec<FallbackTarget> {
+    let reference = match get_model_info(primary_model) {
+        Some(info) => info,
+        None => return Vec::new(),
+    };
+
+    let fallback_providers = match fallbacks.get(primary_provider) {
+        Some(providers) => providers,
+        None => return Vec::new(),
+    };
+
+    fallback_providers
+        .iter()
+        .filter_map(|provider| {
+            closest_model(provider, &reference).map(|m| FallbackTarget {
+                provider: provider.clone(),
+                model: m.id,
+            })
+        })
+        .collect()
 }
 
 #[cfg(test)]
@@ -241,6 +309,105 @@ mod tests {
     #[test]
     fn mercury_alias_resolves_to_mercury_2() {
         assert_eq!(get_model_info("mercury").unwrap().id, "mercury-2");
+    }
+
+    #[test]
+    fn closest_model_opus_to_gemini() {
+        let opus = get_model_info("claude-opus-4-6").unwrap();
+        let result = closest_model("gemini", &opus).unwrap();
+        // Opus ($15) → closest reasoning+vision+tools gemini model by cost
+        assert_eq!(result.id, "gemini-3.1-pro-preview");
+    }
+
+    #[test]
+    fn closest_model_sonnet_to_gemini() {
+        let sonnet = get_model_info("claude-sonnet-4-5").unwrap();
+        let result = closest_model("gemini", &sonnet).unwrap();
+        // Sonnet ($3) → gemini-3.1-pro ($2) is closer than gemini-3-flash ($0.50)
+        assert_eq!(result.id, "gemini-3.1-pro-preview");
+    }
+
+    #[test]
+    fn closest_model_haiku_to_openai_none() {
+        let haiku = get_model_info("claude-haiku-4-5").unwrap();
+        // Haiku has reasoning=false; all openai models have reasoning=true
+        assert!(closest_model("openai", &haiku).is_none());
+    }
+
+    #[test]
+    fn closest_model_haiku_to_kimi() {
+        let haiku = get_model_info("claude-haiku-4-5").unwrap();
+        let result = closest_model("kimi", &haiku).unwrap();
+        // kimi-k2.5: no reasoning, vision, tools — matches haiku's caps
+        assert_eq!(result.id, "kimi-k2.5");
+    }
+
+    #[test]
+    fn closest_model_unknown_provider() {
+        let opus = get_model_info("claude-opus-4-6").unwrap();
+        assert!(closest_model("nonexistent", &opus).is_none());
+    }
+
+    #[test]
+    fn closest_model_no_capability_match() {
+        // glm-4.7 has tools=true, vision=false, reasoning=false
+        // No gemini model matches vision=false (all gemini models have vision=true)
+        let glm = get_model_info("glm-4.7").unwrap();
+        assert!(closest_model("gemini", &glm).is_none());
+    }
+
+    #[test]
+    fn build_fallback_chain_opus_anthropic() {
+        let fallbacks = HashMap::from([(
+            "anthropic".to_string(),
+            vec!["gemini".to_string(), "openai".to_string()],
+        )]);
+        let chain = build_fallback_chain("anthropic", "claude-opus-4-6", &fallbacks);
+        assert_eq!(chain.len(), 2);
+        assert_eq!(chain[0].provider, "gemini");
+        assert_eq!(chain[0].model, "gemini-3.1-pro-preview");
+        assert_eq!(chain[1].provider, "openai");
+        assert_eq!(chain[1].model, "gpt-5.2");
+    }
+
+    #[test]
+    fn build_fallback_chain_provider_not_in_map() {
+        let fallbacks = HashMap::from([(
+            "openai".to_string(),
+            vec!["anthropic".to_string()],
+        )]);
+        let chain = build_fallback_chain("anthropic", "claude-opus-4-6", &fallbacks);
+        assert!(chain.is_empty());
+    }
+
+    #[test]
+    fn build_fallback_chain_skips_no_capability_match() {
+        // Haiku (no reasoning) → openai should be skipped (all have reasoning)
+        let fallbacks = HashMap::from([(
+            "anthropic".to_string(),
+            vec!["openai".to_string(), "kimi".to_string()],
+        )]);
+        let chain = build_fallback_chain("anthropic", "claude-haiku-4-5", &fallbacks);
+        assert_eq!(chain.len(), 1);
+        assert_eq!(chain[0].provider, "kimi");
+        assert_eq!(chain[0].model, "kimi-k2.5");
+    }
+
+    #[test]
+    fn build_fallback_chain_empty_map() {
+        let fallbacks = HashMap::new();
+        let chain = build_fallback_chain("anthropic", "claude-opus-4-6", &fallbacks);
+        assert!(chain.is_empty());
+    }
+
+    #[test]
+    fn build_fallback_chain_unknown_primary_model() {
+        let fallbacks = HashMap::from([(
+            "anthropic".to_string(),
+            vec!["gemini".to_string()],
+        )]);
+        let chain = build_fallback_chain("anthropic", "unknown-model-xyz", &fallbacks);
+        assert!(chain.is_empty());
     }
 
     #[test]

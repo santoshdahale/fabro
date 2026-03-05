@@ -8,11 +8,13 @@ use arc_agent::{
     AgentEvent, AnthropicProfile, GeminiProfile, OpenAiProfile, ProviderProfile, Sandbox, Session,
     SessionConfig, Turn,
 };
+use arc_llm::catalog::FallbackTarget;
 use arc_llm::client::Client;
 use arc_llm::provider::Provider;
 
 use crate::context::Context;
 use crate::error::ArcError;
+use crate::event::WorkflowRunEvent;
 use crate::graph::Node;
 use crate::handler::codergen::{CodergenBackend, CodergenResult};
 use crate::outcome::StageUsage;
@@ -24,15 +26,17 @@ use crate::outcome::StageUsage;
 pub struct AgentApiBackend {
     model: String,
     provider: Provider,
+    fallback_chain: Vec<FallbackTarget>,
     sessions: Mutex<HashMap<String, Session>>,
 }
 
 impl AgentApiBackend {
     #[must_use]
-    pub fn new(model: String, provider: Provider) -> Self {
+    pub fn new(model: String, provider: Provider, fallback_chain: Vec<FallbackTarget>) -> Self {
         Self {
             model,
             provider,
+            fallback_chain,
             sessions: Mutex::new(HashMap::new()),
         }
     }
@@ -150,7 +154,74 @@ impl CodergenBackend for AgentApiBackend {
             let _ = tokio::fs::write(stage_dir.join("api_request.json"), json).await;
         }
 
-        let response = client.complete(&request).await.map_err(ArcError::Llm)?;
+        // Build per-request fallback chain: if the node overrides the provider,
+        // compute a fresh chain for that provider; otherwise use the backend's.
+        let fallback_chain = if node.llm_provider().is_some() {
+            // Node-level override: build fallback chain if we have fallback config
+            // For node overrides without explicit fallbacks, no failover is available.
+            Vec::new()
+        } else {
+            self.fallback_chain.clone()
+        };
+
+        let result = client.complete(&request).await;
+
+        let (response, actual_model, actual_provider) = match result {
+            Ok(resp) => (
+                resp,
+                request.model.clone(),
+                request.provider.clone().unwrap_or_else(|| "anthropic".to_string()),
+            ),
+            Err(sdk_err) if sdk_err.failover_eligible() && !fallback_chain.is_empty() => {
+                let error_msg = sdk_err.to_string();
+                let from_provider = request.provider.clone().unwrap_or_else(|| "anthropic".to_string());
+                let from_model = request.model.clone();
+
+                let mut last_err = sdk_err;
+                let mut found = None;
+
+                for target in &fallback_chain {
+                    tracing::warn!(
+                        stage = node.id.as_str(),
+                        from_provider = from_provider.as_str(),
+                        from_model = from_model.as_str(),
+                        to_provider = target.provider.as_str(),
+                        to_model = target.model.as_str(),
+                        error = error_msg.as_str(),
+                        "LLM provider failover (one_shot)"
+                    );
+
+                    let max_tokens = node.max_tokens().or_else(|| {
+                        arc_llm::catalog::get_model_info(&target.model)
+                            .and_then(|m| m.max_output)
+                    });
+
+                    let fallback_request = arc_llm::types::Request {
+                        model: target.model.clone(),
+                        provider: Some(target.provider.clone()),
+                        max_tokens,
+                        ..request.clone()
+                    };
+
+                    match client.complete(&fallback_request).await {
+                        Ok(resp) => {
+                            found = Some((resp, target.model.clone(), target.provider.clone()));
+                            break;
+                        }
+                        Err(err) if err.failover_eligible() => {
+                            last_err = err;
+                        }
+                        Err(err) => return Err(ArcError::Llm(err)),
+                    }
+                }
+
+                match found {
+                    Some(triple) => triple,
+                    None => return Err(ArcError::Llm(last_err)),
+                }
+            }
+            Err(sdk_err) => return Err(ArcError::Llm(sdk_err)),
+        };
 
         if let Ok(json) = serde_json::to_string_pretty(&response) {
             let _ = tokio::fs::write(stage_dir.join("api_response.json"), json).await;
@@ -158,15 +229,15 @@ impl CodergenBackend for AgentApiBackend {
 
         let provider_used = serde_json::json!({
             "mode": "one_shot",
-            "provider": request.provider.as_deref().unwrap_or("anthropic"),
-            "model": &request.model,
+            "provider": &actual_provider,
+            "model": &actual_model,
         });
         if let Ok(json) = serde_json::to_string_pretty(&provider_used) {
             let _ = tokio::fs::write(stage_dir.join("provider_used.json"), json).await;
         }
 
         let mut stage_usage = StageUsage {
-            model: model.to_string(),
+            model: actual_model,
             input_tokens: response.usage.input_tokens,
             output_tokens: response.usage.output_tokens,
             cache_read_tokens: response.usage.cache_read_tokens,
@@ -291,14 +362,103 @@ impl CodergenBackend for AgentApiBackend {
             session.initialize().await;
         }
 
-        let result = session.process_input(prompt).await.map_err(|e| {
-            use arc_agent::AgentError;
-            match e {
-                AgentError::Llm(sdk_err) => ArcError::Llm(sdk_err),
-                AgentError::Aborted => ArcError::Cancelled,
-                other => ArcError::handler(format!("Agent session failed: {other}")),
+        let result = session.process_input(prompt).await;
+
+        // On failover-eligible error, try fallback providers.
+        let result = match result {
+            Ok(()) => Ok(()),
+            Err(arc_agent::AgentError::Llm(ref sdk_err))
+                if sdk_err.failover_eligible() && !self.fallback_chain.is_empty() =>
+            {
+                let error_msg = sdk_err.to_string();
+                let from_provider = self.provider.as_str().to_string();
+                let from_model = self.model.clone();
+
+                let mut last_err = ArcError::Llm(sdk_err.clone());
+                let mut succeeded = false;
+
+                for target in &self.fallback_chain {
+                    emitter.emit(&WorkflowRunEvent::Failover {
+                        stage: node.id.clone(),
+                        from_provider: from_provider.clone(),
+                        from_model: from_model.clone(),
+                        to_provider: target.provider.clone(),
+                        to_model: target.model.clone(),
+                        error: error_msg.clone(),
+                    });
+
+                    let target_provider: Provider = match target.provider.parse() {
+                        Ok(p) => p,
+                        Err(_) => continue,
+                    };
+
+                    // Create a temporary backend with fallback provider/model for session creation
+                    let fallback_backend = AgentApiBackend::new(
+                        target.model.clone(),
+                        target_provider,
+                        Vec::new(),
+                    );
+                    let new_session = match fallback_backend.create_session(node, sandbox).await {
+                        Ok(s) => s,
+                        Err(e) => {
+                            last_err = e;
+                            continue;
+                        }
+                    };
+                    session = new_session;
+
+                    // Re-subscribe to forward events from the new session
+                    let node_id2 = node.id.clone();
+                    let emitter2 = Arc::clone(emitter);
+                    let mut rx2 = session.subscribe();
+                    tokio::spawn(async move {
+                        while let Ok(event) = rx2.recv().await {
+                            if !matches!(
+                                &event.event,
+                                AgentEvent::SessionStarted
+                                    | AgentEvent::SessionEnded
+                                    | AgentEvent::AssistantTextStart
+                                    | AgentEvent::TextDelta { .. }
+                                    | AgentEvent::ToolCallOutputDelta { .. }
+                                    | AgentEvent::SkillExpanded { .. }
+                            ) {
+                                emitter2.emit(&WorkflowRunEvent::Agent {
+                                    stage: node_id2.clone(),
+                                    event: event.event.clone(),
+                                });
+                            }
+                        }
+                    });
+
+                    session.initialize().await;
+                    match session.process_input(prompt).await {
+                        Ok(()) => {
+                            succeeded = true;
+                            break;
+                        }
+                        Err(arc_agent::AgentError::Llm(err)) if err.failover_eligible() => {
+                            last_err = ArcError::Llm(err);
+                        }
+                        Err(arc_agent::AgentError::Llm(err)) => return Err(ArcError::Llm(err)),
+                        Err(arc_agent::AgentError::Aborted) => return Err(ArcError::Cancelled),
+                        Err(other) => {
+                            return Err(ArcError::handler(format!(
+                                "Agent session failed: {other}"
+                            )));
+                        }
+                    }
+                }
+
+                if succeeded {
+                    Ok(())
+                } else {
+                    Err(last_err)
+                }
             }
-        });
+            Err(arc_agent::AgentError::Llm(sdk_err)) => Err(ArcError::Llm(sdk_err)),
+            Err(arc_agent::AgentError::Aborted) => Err(ArcError::Cancelled),
+            Err(other) => Err(ArcError::handler(format!("Agent session failed: {other}"))),
+        };
 
         // On error, drop the session (don't cache failed state).
         result?;
@@ -375,20 +535,20 @@ mod tests {
 
     #[test]
     fn agent_backend_stores_config() {
-        let backend = AgentApiBackend::new("claude-opus-4-6".to_string(), Provider::OpenAi);
+        let backend = AgentApiBackend::new("claude-opus-4-6".to_string(), Provider::OpenAi, Vec::new());
         assert_eq!(backend.model, "claude-opus-4-6");
         assert_eq!(backend.provider, Provider::OpenAi);
     }
 
     #[test]
     fn agent_backend_initializes_empty_sessions() {
-        let backend = AgentApiBackend::new("claude-opus-4-6".to_string(), Provider::Anthropic);
+        let backend = AgentApiBackend::new("claude-opus-4-6".to_string(), Provider::Anthropic, Vec::new());
         assert!(backend.sessions.lock().unwrap().is_empty());
     }
 
     #[test]
     fn build_profile_can_register_subagent_tools() {
-        let backend = AgentApiBackend::new("claude-opus-4-6".to_string(), Provider::Anthropic);
+        let backend = AgentApiBackend::new("claude-opus-4-6".to_string(), Provider::Anthropic, Vec::new());
         let mut profile = backend.build_profile();
         let manager = Arc::new(tokio::sync::Mutex::new(SubAgentManager::new(1)));
         let factory: SessionFactory = Arc::new(|| {

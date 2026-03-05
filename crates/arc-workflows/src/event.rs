@@ -190,6 +190,14 @@ pub enum WorkflowRunEvent {
     SshAccessReady {
         ssh_command: String,
     },
+    Failover {
+        stage: String,
+        from_provider: String,
+        from_model: String,
+        to_provider: String,
+        to_model: String,
+        error: String,
+    },
 }
 
 impl WorkflowRunEvent {
@@ -449,6 +457,24 @@ impl WorkflowRunEvent {
             }
             Self::SshAccessReady { ssh_command } => {
                 info!(ssh_command, "SSH access ready");
+            }
+            Self::Failover {
+                stage,
+                from_provider,
+                from_model,
+                to_provider,
+                to_model,
+                error,
+            } => {
+                warn!(
+                    stage,
+                    from_provider,
+                    from_model,
+                    to_provider,
+                    to_model,
+                    error,
+                    "LLM provider failover"
+                );
             }
         }
     }
