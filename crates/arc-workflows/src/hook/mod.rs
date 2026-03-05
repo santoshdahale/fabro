@@ -3,6 +3,6 @@ pub mod executor;
 pub mod runner;
 pub mod types;
 
-pub use config::{HookConfig, HookDefinition, HookType};
+pub use config::{HookConfig, HookDefinition, HookType, TlsMode};
 pub use runner::HookRunner;
 pub use types::{HookContext, HookDecision, HookEvent};

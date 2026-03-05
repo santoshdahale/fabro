@@ -2,6 +2,19 @@ use serde::Deserialize;
 
 use super::types::HookEvent;
 
+/// TLS verification mode for HTTP hooks.
+#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum TlsMode {
+    /// Require `https://` and verify certificates (default).
+    #[default]
+    Verify,
+    /// Require `https://` but skip certificate verification.
+    NoVerify,
+    /// Allow `http://`; skip certificate verification for `https://`.
+    Off,
+}
+
 /// How a hook is executed.
 #[derive(Debug, Clone, Deserialize, PartialEq)]
 #[serde(tag = "type", rename_all = "snake_case")]
@@ -12,6 +25,8 @@ pub enum HookType {
         headers: Option<std::collections::HashMap<String, String>>,
         #[serde(default)]
         allowed_env_vars: Vec<String>,
+        #[serde(default)]
+        tls: TlsMode,
     },
 }
 
@@ -194,6 +209,7 @@ Authorization = "Bearer $API_KEY"
                 url,
                 headers,
                 allowed_env_vars,
+                ..
             } => {
                 assert_eq!(url, "https://hooks.example.com/start");
                 assert_eq!(allowed_env_vars, vec!["API_KEY", "SECRET"]);
@@ -405,6 +421,56 @@ sandbox = false
         let merged = a.merge(b);
         assert_eq!(merged.hooks.len(), 1);
         assert_eq!(merged.hooks[0].event, HookEvent::RunComplete);
+    }
+
+    #[test]
+    fn parse_http_hook_tls_defaults_to_verify() {
+        let toml = r#"
+[[hooks]]
+event = "run_complete"
+type = "http"
+url = "https://hooks.example.com/done"
+"#;
+        let config: HookConfig = toml::from_str(toml).unwrap();
+        let hook = &config.hooks[0];
+        match hook.resolved_hook_type().unwrap() {
+            HookType::Http { tls, .. } => assert_eq!(tls, TlsMode::Verify),
+            _ => panic!("expected Http hook type"),
+        }
+    }
+
+    #[test]
+    fn parse_http_hook_tls_no_verify() {
+        let toml = r#"
+[[hooks]]
+event = "run_complete"
+type = "http"
+url = "https://hooks.example.com/done"
+tls = "no_verify"
+"#;
+        let config: HookConfig = toml::from_str(toml).unwrap();
+        let hook = &config.hooks[0];
+        match hook.resolved_hook_type().unwrap() {
+            HookType::Http { tls, .. } => assert_eq!(tls, TlsMode::NoVerify),
+            _ => panic!("expected Http hook type"),
+        }
+    }
+
+    #[test]
+    fn parse_http_hook_tls_off() {
+        let toml = r#"
+[[hooks]]
+event = "run_complete"
+type = "http"
+url = "http://localhost:8080/done"
+tls = "off"
+"#;
+        let config: HookConfig = toml::from_str(toml).unwrap();
+        let hook = &config.hooks[0];
+        match hook.resolved_hook_type().unwrap() {
+            HookType::Http { tls, .. } => assert_eq!(tls, TlsMode::Off),
+            _ => panic!("expected Http hook type"),
+        }
     }
 
     #[test]

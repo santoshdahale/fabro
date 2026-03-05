@@ -6,7 +6,7 @@ use async_trait::async_trait;
 
 use arc_agent::Sandbox;
 
-use super::config::{HookDefinition, HookType};
+use super::config::{HookDefinition, HookType, TlsMode};
 use super::types::{HookContext, HookDecision, HookResult};
 
 /// Trait for executing hooks via different transports.
@@ -171,11 +171,28 @@ impl HookExecutorImpl {
         url: &str,
         headers: &Option<HashMap<String, String>>,
         allowed_env_vars: &[String],
+        tls: &TlsMode,
         context: &HookContext,
         timeout: std::time::Duration,
     ) -> HookDecision {
+        // Enforce URL scheme based on TLS mode
+        match tls {
+            TlsMode::Verify | TlsMode::NoVerify => {
+                if !url.starts_with("https://") {
+                    return HookDecision::Block {
+                        reason: Some(format!(
+                            "HTTP hook URL must use https:// (tls mode is {tls:?})"
+                        )),
+                    };
+                }
+            }
+            TlsMode::Off => {}
+        }
+
+        let accept_invalid = matches!(tls, TlsMode::NoVerify | TlsMode::Off);
         let client = reqwest::Client::builder()
             .timeout(timeout)
+            .danger_accept_invalid_certs(accept_invalid)
             .build()
             .unwrap_or_default();
 
@@ -246,8 +263,9 @@ impl HookExecutor for HookExecutorImpl {
                 ref url,
                 ref headers,
                 ref allowed_env_vars,
+                ref tls,
             }) => {
-                Self::execute_http(url, headers, allowed_env_vars, context, definition.timeout())
+                Self::execute_http(url, headers, allowed_env_vars, tls, context, definition.timeout())
                     .await
             }
             None => HookDecision::Block {
@@ -503,6 +521,7 @@ mod tests {
             &format!("{}/hook", server.url()),
             &None,
             &[],
+            &TlsMode::Off,
             &make_context(),
             std::time::Duration::from_secs(5),
         )
@@ -531,6 +550,7 @@ mod tests {
             &format!("{}/hook", server.url()),
             &None,
             &[],
+            &TlsMode::Off,
             &make_context(),
             std::time::Duration::from_secs(5),
         )
@@ -554,6 +574,7 @@ mod tests {
             &format!("{}/hook", server.url()),
             &None,
             &[],
+            &TlsMode::Off,
             &make_context(),
             std::time::Duration::from_secs(5),
         )
@@ -569,6 +590,7 @@ mod tests {
             "http://127.0.0.1:1",
             &None,
             &[],
+            &TlsMode::Off,
             &make_context(),
             std::time::Duration::from_secs(1),
         )
@@ -598,6 +620,7 @@ mod tests {
             &format!("{}/hook", server.url()),
             &Some(headers),
             &["ARC_TEST_TOKEN".to_string()],
+            &TlsMode::Off,
             &make_context(),
             std::time::Duration::from_secs(5),
         )
@@ -606,6 +629,62 @@ mod tests {
         mock.assert_async().await;
         assert_eq!(decision, HookDecision::Proceed);
         std::env::remove_var("ARC_TEST_TOKEN");
+    }
+
+    // --- TLS mode enforcement tests ---
+
+    #[tokio::test]
+    async fn http_hook_rejects_http_url_when_tls_verify() {
+        let decision = HookExecutorImpl::execute_http(
+            "http://example.com/hook",
+            &None,
+            &[],
+            &TlsMode::Verify,
+            &make_context(),
+            std::time::Duration::from_secs(5),
+        )
+        .await;
+
+        assert!(matches!(decision, HookDecision::Block { .. }));
+    }
+
+    #[tokio::test]
+    async fn http_hook_rejects_http_url_when_tls_no_verify() {
+        let decision = HookExecutorImpl::execute_http(
+            "http://example.com/hook",
+            &None,
+            &[],
+            &TlsMode::NoVerify,
+            &make_context(),
+            std::time::Duration::from_secs(5),
+        )
+        .await;
+
+        assert!(matches!(decision, HookDecision::Block { .. }));
+    }
+
+    #[tokio::test]
+    async fn http_hook_allows_http_url_when_tls_off() {
+        let mut server = mockito::Server::new_async().await;
+        let mock = server
+            .mock("POST", "/hook")
+            .with_status(200)
+            .with_body("")
+            .create_async()
+            .await;
+
+        let decision = HookExecutorImpl::execute_http(
+            &format!("{}/hook", server.url()),
+            &None,
+            &[],
+            &TlsMode::Off,
+            &make_context(),
+            std::time::Duration::from_secs(5),
+        )
+        .await;
+
+        mock.assert_async().await;
+        assert_eq!(decision, HookDecision::Proceed);
     }
 
     #[tokio::test]
@@ -627,6 +706,7 @@ mod tests {
                 url: format!("{}/hook", server.url()),
                 headers: None,
                 allowed_env_vars: vec![],
+                tls: TlsMode::Off,
             }),
             matcher: None,
             blocking: None,
