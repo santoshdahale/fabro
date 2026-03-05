@@ -45,16 +45,21 @@ struct ManagedRun {
     logs_root: Option<std::path::PathBuf>,
 }
 
+/// Per-model usage totals.
+#[derive(Default)]
+struct ModelUsageTotals {
+    stages: i64,
+    input_tokens: i64,
+    output_tokens: i64,
+    cost: f64,
+}
+
 /// In-memory aggregate usage counters, reset on server restart.
 #[derive(Default)]
 struct AggregateUsageTotals {
     total_runs: i64,
-    total_input_tokens: i64,
-    total_output_tokens: i64,
-    total_cost: f64,
     total_runtime_secs: f64,
-    /// model -> (stages, input_tokens, output_tokens, cost)
-    by_model: HashMap<String, (i64, i64, i64, f64)>,
+    by_model: HashMap<String, ModelUsageTotals>,
 }
 
 /// Shared application state for the server.
@@ -243,19 +248,19 @@ async fn get_aggregate_usage(
     let by_model: Vec<arc_types::UsageByModel> = agg
         .by_model
         .iter()
-        .map(|(model, (stages, input, output, cost))| arc_types::UsageByModel {
+        .map(|(model, totals)| arc_types::UsageByModel {
             model: model.clone(),
-            stages: *stages,
-            input_tokens: *input,
-            output_tokens: *output,
-            cost: *cost,
+            stages: totals.stages,
+            input_tokens: totals.input_tokens,
+            output_tokens: totals.output_tokens,
+            cost: totals.cost,
         })
         .collect();
     let response = arc_types::AggregateUsage {
         total_runs: agg.total_runs,
-        total_input_tokens: agg.total_input_tokens,
-        total_output_tokens: agg.total_output_tokens,
-        total_cost: agg.total_cost,
+        total_input_tokens: by_model.iter().map(|m| m.input_tokens).sum(),
+        total_output_tokens: by_model.iter().map(|m| m.output_tokens).sum(),
+        total_cost: by_model.iter().map(|m| m.cost).sum(),
         total_runtime_secs: agg.total_runtime_secs,
         by_model,
     };
@@ -419,16 +424,11 @@ async fn start_run(
             let mut run_runtime: f64 = 0.0;
             for (node_id, outcome) in &cp.node_outcomes {
                 if let Some(usage) = &outcome.usage {
-                    agg.total_input_tokens += usage.input_tokens;
-                    agg.total_output_tokens += usage.output_tokens;
-                    if let Some(cost) = usage.cost {
-                        agg.total_cost += cost;
-                    }
-                    let entry = agg.by_model.entry(usage.model.clone()).or_insert((0, 0, 0, 0.0));
-                    entry.0 += 1;
-                    entry.1 += usage.input_tokens;
-                    entry.2 += usage.output_tokens;
-                    entry.3 += usage.cost.unwrap_or(0.0);
+                    let entry = agg.by_model.entry(usage.model.clone()).or_default();
+                    entry.stages += 1;
+                    entry.input_tokens += usage.input_tokens;
+                    entry.output_tokens += usage.output_tokens;
+                    entry.cost += usage.cost.unwrap_or(0.0);
                 }
                 let duration_ms = stage_durations.get(node_id).copied().unwrap_or(0);
                 run_runtime += duration_ms as f64 / 1000.0;
