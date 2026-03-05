@@ -308,29 +308,6 @@ impl LintRule for ConditionSyntaxRule {
             if condition.is_empty() {
                 continue;
             }
-            for clause in condition.split("&&") {
-                let clause = clause.trim();
-                if clause.is_empty() {
-                    continue;
-                }
-                // A clause must contain = or != operator, or be a bare key (truthy check)
-                let has_operator = clause.contains("!=") || clause.contains('=');
-                if !has_operator && clause.contains(' ') && !clause.starts_with("context.") {
-                    diagnostics.push(Diagnostic {
-                        rule: self.name().to_string(),
-                        severity: Severity::Error,
-                        message: format!(
-                            "Invalid condition clause '{clause}' on edge {} -> {}",
-                            edge.from, edge.to
-                        ),
-                        node_id: None,
-                        edge: Some((edge.from.clone(), edge.to.clone())),
-                        fix: Some("Use key=value or key!=value syntax".to_string()),
-                    });
-                }
-            }
-            // Also validate via the condition parser to catch malformed expressions
-            // that pass the static check (e.g. empty key like "=value")
             if let Err(e) = parse_condition(condition) {
                 diagnostics.push(Diagnostic {
                     rule: self.name().to_string(),
@@ -341,7 +318,11 @@ impl LintRule for ConditionSyntaxRule {
                     ),
                     node_id: None,
                     edge: Some((edge.from.clone(), edge.to.clone())),
-                    fix: Some("Fix the condition expression syntax".to_string()),
+                    fix: Some(
+                        "Use key=value, key!=value, key>value, key contains value, \
+                         key matches pattern, or bare key syntax"
+                            .to_string(),
+                    ),
                 });
             }
         }
@@ -1967,7 +1948,7 @@ mod tests {
         assert!(d.is_empty());
     }
 
-    // --- condition_syntax: context-prefixed clause with spaces is valid ---
+    // --- condition_syntax: context-prefixed clause with spaces is rejected ---
 
     #[test]
     fn condition_syntax_rule_context_prefix_with_space() {
@@ -1980,8 +1961,9 @@ mod tests {
         g.edges = vec![edge];
         let rule = ConditionSyntaxRule;
         let d = rule.apply(&g);
-        // context.-prefixed clauses are allowed even with spaces
-        assert!(d.is_empty());
+        // "context.foo bar" has an unexpected trailing word — parse error
+        assert_eq!(d.len(), 1);
+        assert_eq!(d[0].severity, Severity::Error);
     }
 
     // --- terminal_node: by "Exit" capitalized id ---
@@ -2632,7 +2614,7 @@ mod tests {
         g.edges = vec![edge];
         let rule = ConditionSyntaxRule;
         let d = rule.apply(&g);
-        // Static check passes (has '=' operator) but parse_condition catches empty key
+        // parse_condition catches empty key
         assert_eq!(d.len(), 1);
         assert_eq!(d[0].severity, Severity::Error);
         assert!(d[0].message.contains("failed parse"));
@@ -2650,6 +2632,79 @@ mod tests {
         let rule = ConditionSyntaxRule;
         let d = rule.apply(&g);
         assert!(d.is_empty());
+    }
+
+    // --- condition_syntax: new operators accepted ---
+
+    #[test]
+    fn condition_syntax_rule_accepts_or() {
+        let mut g = minimal_graph();
+        let mut edge = Edge::new("start", "exit");
+        edge.attrs.insert(
+            "condition".to_string(),
+            AttrValue::String("outcome=success || outcome=fail".to_string()),
+        );
+        g.edges = vec![edge];
+        let rule = ConditionSyntaxRule;
+        let d = rule.apply(&g);
+        assert!(d.is_empty());
+    }
+
+    #[test]
+    fn condition_syntax_rule_accepts_not() {
+        let mut g = minimal_graph();
+        let mut edge = Edge::new("start", "exit");
+        edge.attrs.insert(
+            "condition".to_string(),
+            AttrValue::String("!outcome=fail".to_string()),
+        );
+        g.edges = vec![edge];
+        let rule = ConditionSyntaxRule;
+        let d = rule.apply(&g);
+        assert!(d.is_empty());
+    }
+
+    #[test]
+    fn condition_syntax_rule_accepts_contains() {
+        let mut g = minimal_graph();
+        let mut edge = Edge::new("start", "exit");
+        edge.attrs.insert(
+            "condition".to_string(),
+            AttrValue::String("context.x contains y".to_string()),
+        );
+        g.edges = vec![edge];
+        let rule = ConditionSyntaxRule;
+        let d = rule.apply(&g);
+        assert!(d.is_empty());
+    }
+
+    #[test]
+    fn condition_syntax_rule_accepts_numeric() {
+        let mut g = minimal_graph();
+        let mut edge = Edge::new("start", "exit");
+        edge.attrs.insert(
+            "condition".to_string(),
+            AttrValue::String("context.score > 80".to_string()),
+        );
+        g.edges = vec![edge];
+        let rule = ConditionSyntaxRule;
+        let d = rule.apply(&g);
+        assert!(d.is_empty());
+    }
+
+    #[test]
+    fn condition_syntax_rule_rejects_invalid_regex() {
+        let mut g = minimal_graph();
+        let mut edge = Edge::new("start", "exit");
+        edge.attrs.insert(
+            "condition".to_string(),
+            AttrValue::String("context.x matches [bad".to_string()),
+        );
+        g.edges = vec![edge];
+        let rule = ConditionSyntaxRule;
+        let d = rule.apply(&g);
+        assert_eq!(d.len(), 1);
+        assert_eq!(d[0].severity, Severity::Error);
     }
 
     // script_absolute_cd rule tests
