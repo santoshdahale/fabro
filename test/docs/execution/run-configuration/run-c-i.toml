@@ -1,0 +1,8 @@
+version = 1
+goal = "Run tests for $repo_name"
+graph = "c-i.dot"
+
+[vars]
+language = "test-language"
+repo_name = "test-repo_name"
+repo_url = "test-repo_url"

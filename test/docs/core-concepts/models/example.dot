@@ -1,0 +1,19 @@
+digraph Example {
+    graph [
+        goal="Demonstrate model stylesheet",
+        model_stylesheet="
+            *        { llm_model: claude-haiku-4-5; }
+            .coding  { llm_model: claude-sonnet-4-5; reasoning_effort: high; }
+            #review  { llm_model: gemini-3.1-pro-preview; }
+        "
+    ]
+
+    start [shape=Mdiamond, label="Start"]
+    exit  [shape=Msquare, label="Exit"]
+
+    spec     [label="Write Spec"]
+    implement [label="Implement", class="coding"]
+    review   [label="Review"]
+
+    start -> spec -> implement -> review -> exit
+}

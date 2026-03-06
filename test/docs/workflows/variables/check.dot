@@ -1,0 +1,11 @@
+digraph Check {
+    graph [goal="Run tests for $repo_name"]
+
+    start [shape=Mdiamond, label="Start"]
+    exit  [shape=Msquare, label="Exit"]
+
+    clone [label="Clone", shape=parallelogram, script="git clone $repo_url repo"]
+    test  [label="Test", prompt="Run the $language test suite in the repo/ directory."]
+
+    start -> clone -> test -> exit
+}

@@ -1,0 +1,18 @@
+// Assembled from docs/core-concepts/agents.mdx snippets
+// Tests backend attribute and inline vs external prompts
+
+digraph BackendDemo {
+    graph [goal="Exercise agent backend and prompt patterns from the agents docs page"]
+
+    start [shape=Mdiamond, label="Start"]
+    exit  [shape=Msquare, label="Exit"]
+
+    // Line 47: CLI backend with explicit provider
+    implement [label="Implement", backend="cli", llm_provider="anthropic"]
+
+    // Line 95-96: Inline prompt
+    plan [label="Plan", prompt="Analyze the codebase and write a step-by-step plan."]
+
+    // Wiring
+    start -> plan -> implement -> exit
+}

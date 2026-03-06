@@ -1,0 +1,46 @@
+digraph NLSpecConformance {
+    graph [
+        goal="Implement a conformant system from a natural language specification",
+        model_stylesheet="
+            *      { llm_model: claude-haiku-4-5; llm_provider: anthropic; }
+            .impl  { llm_model: claude-sonnet-4-5; reasoning_effort: high; }
+        "
+    ]
+    rankdir=LR
+
+    start [shape=Mdiamond, label="Start"]
+    exit  [shape=Msquare, label="Exit"]
+
+    // Phase 1: Read spec and plan
+    plan [label="Plan", class="impl", prompt="@prompts/plan.md"]
+
+    // Phase 2: Build the initial implementation
+    subgraph cluster_impl {
+        label = "Implement & Conform"
+        node [thread_id="impl", fidelity="full"]
+
+        implement [label="Implement", class="impl", prompt="@prompts/implement.md"]
+        fix       [label="Fix Failures", class="impl", prompt="@prompts/fix.md", max_visits=5]
+    }
+
+    // Phase 3: Quick conformance loop
+    test_quick [label="Quick Conformance", shape=parallelogram, script="make conformance-quick 2>&1 || true"]
+    gate_quick [shape=diamond, label="Quick suite passing?"]
+
+    // Phase 4: Full conformance
+    test_full [label="Full Conformance", shape=parallelogram, script="make conformance-full 2>&1 || true", goal_gate=true]
+    gate_full [shape=diamond, label="All tests passing?"]
+
+    // Wiring
+    start -> plan -> implement -> test_quick -> gate_quick
+
+    gate_quick -> test_full  [label="Pass", condition="outcome=success"]
+    gate_quick -> fix        [label="Fix"]
+
+    fix -> test_quick
+
+    test_full -> gate_full
+
+    gate_full -> exit [label="Pass", condition="outcome=success"]
+    gate_full -> fix  [label="Fix"]
+}

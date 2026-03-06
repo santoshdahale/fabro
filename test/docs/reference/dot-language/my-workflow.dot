@@ -1,0 +1,12 @@
+digraph MyWorkflow {
+    graph [goal="Describe the project"]
+    rankdir=LR
+
+    start [shape=Mdiamond, label="Start"]
+    exit  [shape=Msquare, label="Exit"]
+
+    scan    [label="Scan Files", shape=parallelogram, script="find . -type f | head -30"]
+    analyze [label="Analyze", shape=tab, prompt="Summarize the project structure."]
+
+    start -> scan -> analyze -> exit
+}

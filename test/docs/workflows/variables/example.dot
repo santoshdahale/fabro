@@ -1,0 +1,10 @@
+digraph Example {
+    graph [goal="Implement the login feature"]
+
+    start [shape=Mdiamond, label="Start"]
+    exit  [shape=Msquare, label="Exit"]
+
+    plan [label="Plan", prompt="Create a plan for: $goal"]
+
+    start -> plan -> exit
+}

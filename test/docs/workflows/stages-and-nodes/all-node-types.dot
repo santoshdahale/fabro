@@ -1,0 +1,69 @@
+// Assembled from docs/workflows/stages-and-nodes.mdx snippets
+// Tests every node type documented on that page
+
+digraph AllNodeTypes {
+    graph [goal="Exercise every node type from the stages-and-nodes docs page"]
+
+    // Line 23: Start node
+    start [shape=Mdiamond, label="Start"]
+
+    // Line 33: Exit node
+    exit [shape=Msquare, label="Exit"]
+
+    // Line 43: Agent node
+    implement [label="Implement", prompt="Read plan.md and implement every step."]
+
+    // Line 74-81: Subgraph cluster with thread_id
+    subgraph cluster_impl {
+        node [fidelity="full", thread_id="impl"]
+        plan_thread      [label="Plan Thread"]
+        implement_thread [label="Implement Thread"]
+        review_thread    [label="Review Thread"]
+    }
+
+    // Line 90: Prompt (tab) node
+    spec [label="Write Spec", shape=tab, prompt="Write a brief spec for a string utility module."]
+
+    // Line 102: Command (parallelogram) node
+    test [label="Run Tests", shape=parallelogram, script="echo 'tests passed' 2>&1 || true"]
+
+    // Line 117-120: Human (hexagon) node
+    approve [shape=hexagon, label="Approve Plan"]
+
+    // Line 132: Wait (insulator) node
+    cooldown [label="Wait 1s", shape=insulator, duration="1s"]
+
+    // Line 146-149: Conditional (diamond) node
+    gate [shape=diamond, label="Tests passing?"]
+
+    // Line 161-165: Parallel (component) fan-out node
+    fork [label="Fan Out", shape=component, join_policy="wait_all", error_policy="continue"]
+
+    // Line 198-203: Merge (tripleoctagon) fan-in node
+    merge [label="Merge Results", shape=tripleoctagon]
+
+    // Branches for fan-out
+    security     [label="Security", prompt="Check for security issues."]
+    architecture [label="Architecture", prompt="Check architecture."]
+
+    // Wiring
+    start -> spec -> implement -> test -> gate
+
+    gate -> approve    [label="Pass", condition="outcome=success"]
+    gate -> implement  [label="Fix"]
+
+    approve -> plan_thread [label="[A] Approve"]
+    approve -> implement   [label="[R] Revise"]
+
+    plan_thread -> implement_thread -> review_thread -> cooldown
+
+    cooldown -> fork
+
+    fork -> security
+    fork -> architecture
+
+    security     -> merge
+    architecture -> merge
+
+    merge -> exit
+}

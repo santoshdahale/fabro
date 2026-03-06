@@ -1,0 +1,33 @@
+// Assembled from docs/agents/outputs.mdx snippets
+// Tests output context keys and routing directives
+
+digraph OutputPatterns {
+    graph [goal="Exercise output and routing patterns from the outputs docs page"]
+
+    start [shape=Mdiamond, label="Start"]
+    exit  [shape=Msquare, label="Exit"]
+
+    // Line 25-29: Context keys from prior stages
+    plan      [label="Plan", prompt="Create an implementation plan."]
+    implement [label="Implement", prompt="Implement the plan."]
+
+    // Line 68-78: Review node with routing directives
+    review [
+        label="Review",
+        shape=tab,
+        prompt="Review the implementation. If changes are needed, \
+            respond with: {\"preferred_next_label\": \"fix\"}. \
+            If everything looks good, respond with: \
+            {\"preferred_next_label\": \"approve\"}."
+    ]
+
+    fix [label="Fix", prompt="Fix the issues found."]
+
+    // Wiring
+    start -> plan -> implement -> review
+
+    review -> fix  [label="Fix"]
+    review -> exit [label="Approve"]
+
+    fix -> review
+}

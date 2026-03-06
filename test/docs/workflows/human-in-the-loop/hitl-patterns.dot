@@ -1,0 +1,40 @@
+// Assembled from docs/workflows/human-in-the-loop.mdx snippets
+// Tests human gates: basic, freeform, and default_choice
+
+digraph HitlPatterns {
+    graph [goal="Exercise human-in-the-loop patterns from the HITL docs page"]
+
+    start [shape=Mdiamond, label="Start"]
+    exit  [shape=Msquare, label="Exit"]
+
+    plan      [label="Plan", prompt="Create an implementation plan."]
+    implement [label="Implement", prompt="Implement the plan."]
+    custom    [label="Custom", prompt="Handle custom input."]
+
+    // Line 13-17: Basic human gate with accelerators
+    approve [shape=hexagon, label="Approve Plan"]
+
+    // Line 39-43: Freeform input on human gate
+    review [shape=hexagon, label="Review Changes"]
+
+    // Line 53: Default choice on timeout
+    deploy_gate [shape=hexagon, label="Deploy?", human.default_choice="approve"]
+
+    // Wiring
+    start -> plan -> approve
+
+    approve -> implement [label="[A] Approve"]
+    approve -> plan      [label="[R] Revise"]
+    approve -> exit      [label="[S] Skip"]
+
+    implement -> review
+
+    review -> deploy_gate [label="[A] Approve"]
+    review -> plan        [label="[R] Revise"]
+    review -> custom      [freeform=true]
+
+    custom -> deploy_gate
+
+    deploy_gate -> exit [label="[A] Approve"]
+    deploy_gate -> plan [label="[R] Revise"]
+}

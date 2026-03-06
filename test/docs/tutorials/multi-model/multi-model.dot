@@ -1,0 +1,21 @@
+digraph MultiModel {
+    graph [
+        goal="Build and review a utility function using multiple models",
+        model_stylesheet="
+            * { llm_model: claude-haiku-4-5; llm_provider: anthropic; reasoning_effort: low; }
+            .coding { llm_model: claude-sonnet-4-5; llm_provider: anthropic; reasoning_effort: high; }
+            #review { llm_model: claude-sonnet-4-5; llm_provider: anthropic; reasoning_effort: high; }
+        "
+    ]
+    rankdir=LR
+
+    start [shape=Mdiamond, label="Start"]
+    exit  [shape=Msquare, label="Exit"]
+
+    spec      [label="Write Spec", prompt="Write a brief spec for a TypeScript string utility module with 3 functions: slugify, truncate, and capitalize. Output the spec only.", shape=tab]
+    implement [label="Implement", prompt="Implement the TypeScript string utility module from the spec. Write it to string-utils.ts.", class="coding"]
+    test      [label="Write Tests", prompt="Write tests for the string utility module using Bun's test runner. Write to string-utils.test.ts.", class="coding"]
+    review    [label="Code Review", prompt="Review the implementation and tests. Check for edge cases, type safety, and correctness. Provide a brief verdict.", shape=tab]
+
+    start -> spec -> implement -> test -> review -> exit
+}

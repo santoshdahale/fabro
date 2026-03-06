@@ -1,0 +1,11 @@
+digraph CI {
+    graph [goal="Run tests for $repo_name"]
+
+    start [shape=Mdiamond, label="Start"]
+    exit  [shape=Msquare, label="Exit"]
+
+    clone [shape=parallelogram, script="git clone $repo_url repo"]
+    test  [label="Test", prompt="Run the $language test suite."]
+
+    start -> clone -> test -> exit
+}

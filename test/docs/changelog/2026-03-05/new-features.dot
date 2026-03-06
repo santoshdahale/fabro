@@ -1,0 +1,28 @@
+// Assembled from docs/changelog/2026-03-05.mdx snippets
+// Tests: condition expressions, model assignment, per-node max_visits,
+//        $$ escape, and simplified handler type names
+
+digraph NewFeatures {
+    graph [goal="Exercise new features from the 2026-03-05 changelog"]
+
+    start [shape=Mdiamond, label="Start"]
+    exit  [shape=Msquare, label="Exit"]
+
+    // Line 85: Model assignment (gpt54-pro)
+    stage_a [model="gpt54-pro", type="agent", prompt="The cost is $$50 and the goal is $goal"]
+
+    // Line 95: Per-node loop limit
+    verify [type="agent", max_visits=20, prompt="Verify the implementation."]
+
+    // Line 128-129: Simplified handler type names
+    stage_b [type="prompt", prompt="Summarize the results."]
+
+    // Wiring with condition expressions (line 31)
+    start -> stage_a -> verify
+
+    verify -> stage_b [label="Pass", condition="outcome=success"]
+    verify -> stage_a [label="Retry", condition="outcome=fail"]
+    verify -> exit    [label="Fallback"]
+
+    stage_b -> exit
+}

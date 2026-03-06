@@ -1,0 +1,25 @@
+digraph Parallel {
+    graph [goal="Perform a multi-perspective code review"]
+    rankdir=LR
+
+    start [shape=Mdiamond, label="Start"]
+    exit  [shape=Msquare, label="Exit"]
+
+    fork [label="Fork Analysis", shape=component, join_policy="wait_all", error_policy="continue"]
+
+    security     [label="Security Audit", prompt="Examine the codebase for security concerns: hardcoded secrets, injection risks, unsafe dependencies. List findings as bullet points.", shape=tab, reasoning_effort="low"]
+    architecture [label="Architecture Review", prompt="Assess the codebase architecture: separation of concerns, dependency structure, modularity. List findings as bullet points.", shape=tab, reasoning_effort="low"]
+    quality      [label="Code Quality", prompt="Check code quality: naming conventions, dead code, test coverage gaps, error handling. List findings as bullet points.", shape=tab, reasoning_effort="low"]
+
+    merge  [label="Merge Findings", shape=tripleoctagon]
+    report [label="Final Report", prompt="Synthesize the security, architecture, and code quality findings into a prioritized summary report with top 5 action items.", shape=tab]
+
+    start -> fork
+    fork -> security
+    fork -> architecture
+    fork -> quality
+    security -> merge
+    architecture -> merge
+    quality -> merge
+    merge -> report -> exit
+}

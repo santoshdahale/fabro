@@ -1,0 +1,48 @@
+digraph ImplementFeature {
+    graph [
+        goal="Implement a feature with tests and code review",
+        model_stylesheet="
+            *        { llm_model: claude-haiku-4-5; llm_provider: anthropic; reasoning_effort: low; }
+            .coding  { llm_model: claude-sonnet-4-5; llm_provider: anthropic; reasoning_effort: high; }
+            #review  { llm_model: claude-sonnet-4-5; llm_provider: anthropic; reasoning_effort: high; }
+        "
+    ]
+    rankdir=LR
+
+    start [shape=Mdiamond, label="Start"]
+    exit  [shape=Msquare, label="Exit"]
+
+    // Planning phase
+    plan [label="Plan", shape=tab, prompt="Create a detailed implementation plan for: $goal"]
+
+    // Human approval
+    approve [shape=hexagon, label="Approve Plan"]
+
+    // Implementation (threaded for context continuity)
+    subgraph cluster_impl {
+        label = "Implementation"
+        node [thread_id="impl", fidelity="full"]
+        implement [label="Implement", class="coding", prompt="Implement the approved plan."]
+        test      [label="Write Tests", class="coding", prompt="Write comprehensive tests."]
+    }
+
+    // Validation
+    validate [label="Run Tests", shape=parallelogram, script="cargo test 2>&1 || true"]
+    gate     [shape=diamond, label="Tests passing?"]
+
+    // Review
+    review [label="Code Review", shape=tab, prompt="Review the implementation for correctness."]
+
+    // Wiring
+    start -> plan -> approve
+
+    approve -> implement [label="[A] Approve"]
+    approve -> plan      [label="[R] Revise"]
+
+    implement -> test -> validate -> gate
+
+    gate -> review    [label="Pass", condition="outcome=success"]
+    gate -> implement [label="Fix"]
+
+    review -> exit
+}

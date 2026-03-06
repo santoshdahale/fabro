@@ -1,0 +1,11 @@
+digraph Example {
+    graph [goal="Test max_node_visits with per-node max_visits", max_node_visits="20"]
+
+    start [shape=Mdiamond, label="Start"]
+    exit  [shape=Msquare, label="Exit"]
+
+    implement [label="Implement", prompt="Implement the feature."]
+    fix [label="Fix", max_visits=3, prompt="Fix the issues."]
+
+    start -> implement -> fix -> exit
+}

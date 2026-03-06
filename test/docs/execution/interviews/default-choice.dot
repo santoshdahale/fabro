@@ -1,0 +1,23 @@
+// Assembled from docs/execution/interviews.mdx snippet
+// Tests human gate with default_choice attribute
+
+digraph DefaultChoice {
+    graph [goal="Exercise human gate with default choice from the interviews docs page"]
+
+    start [shape=Mdiamond, label="Start"]
+    exit  [shape=Msquare, label="Exit"]
+
+    deploy [label="Deploy", prompt="Deploy the changes."]
+    abort  [label="Abort", prompt="Abort the deployment."]
+
+    // Line 114: Human gate with human.default_choice
+    approve [shape=hexagon, label="Approve?", human.default_choice="deploy"]
+
+    start -> approve
+
+    approve -> deploy [label="[A] Deploy"]
+    approve -> abort  [label="[R] Abort"]
+
+    deploy -> exit
+    abort  -> exit
+}

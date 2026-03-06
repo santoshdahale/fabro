@@ -1,0 +1,11 @@
+digraph SubAgent {
+    graph [goal="Research and summarize using a sub-agent"]
+    rankdir=LR
+
+    start [shape=Mdiamond, label="Start"]
+    exit  [shape=Msquare, label="Exit"]
+
+    research [label="Research", prompt="You have a sub-agent available via the spawn_agent tool. Spawn a sub-agent to list the files in the current directory and read the first 10 lines of any README or CLAUDE.md. Then, using the sub-agent's findings, write a 2-sentence summary of the project."]
+
+    start -> research -> exit
+}

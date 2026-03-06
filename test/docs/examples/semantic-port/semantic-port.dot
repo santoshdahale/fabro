@@ -1,0 +1,122 @@
+digraph SemanticPort {
+    graph [
+        goal="Port semantic changes from upstream Python repository to our Go implementation",
+        rankdir=LR,
+        default_max_retry=3,
+        model_stylesheet="
+            *        { llm_model: claude-sonnet-4-5; llm_provider: anthropic; }
+            .hard    { llm_model: claude-opus-4-6;   llm_provider: anthropic; }
+            .analyze { llm_model: gemini-3.1-pro-preview; llm_provider: gemini; }
+        "
+    ]
+
+    start [shape=Mdiamond, label="Start"]
+    exit  [shape=Msquare, label="Exit"]
+
+    // Phase 1: Find the next unprocessed commit
+    fetch [
+        label="Fetch & Identify",
+        prompt="Find the next unprocessed upstream commit.\n\n\
+            1. Run `python3 ledger/manage.py earliest` to get the oldest commit with status=new\n\
+            2. If found, write the commit details to .arc/current_commit.md and respond with:\n\
+               {\"preferred_next_label\": \"process\"}\n\
+            3. If no new commits exist:\n\
+               a. Fetch latest from upstream: cd upstream/ && git fetch && git pull\n\
+               b. Find commits newer than the latest in ledger.tsv\n\
+               c. Add them with `python3 ledger/manage.py add <sha> <timestamp>`\n\
+               d. Try `earliest` again\n\
+               e. If still none, respond with: {\"preferred_next_label\": \"done\"}\n\n\
+            Respond with exactly one of: process or done."
+    ]
+
+    // Phase 2: Analyze the commit and decide port vs. skip
+    analyze [
+        label="Analyze & Decide",
+        class="analyze",
+        prompt="Read .arc/current_commit.md for the commit to process.\n\
+            Examine it with `git show <sha>` in the upstream/ directory.\n\n\
+            Analyze the semantic changes — what functionality changed, not just syntax.\n\
+            Decide if this change is relevant to our Go implementation or if it is\n\
+            Python-specific, docs-only, or not applicable.\n\n\
+            Write .arc/analysis.md with sections:\n\
+            - Commit summary\n\
+            - Semantic analysis\n\
+            - Decision: PORT or ACKNOWLEDGE (with reasoning)\n\
+            - Port plan (if porting): concrete tasks with file:line references\n\n\
+            If decision is ACKNOWLEDGE:\n\
+            1. Update ledger: `python3 ledger/manage.py update <sha> acknowledged`\n\
+            2. Commit: `git add ledger/ && git commit -m \"semport: acknowledge <sha> - <reason>\"`\n\
+            3. Respond with: {\"preferred_next_label\": \"skip\"}\n\n\
+            If decision is PORT:\n\
+            Respond with: {\"preferred_next_label\": \"port\"}"
+    ]
+
+    // Phase 3: Refine the plan
+    plan [
+        label="Finalize Plan",
+        prompt="Read .arc/analysis.md. Perform a final editorial pass.\n\
+            Write .arc/plan.md ensuring each task has:\n\
+            - Concrete file:line references in our Go code\n\
+            - Clear acceptance criteria\n\
+            - Directly executable instructions\n\n\
+            Remove vague language. The plan must be actionable."
+    ]
+
+    // Phase 4: Implement the port
+    implement [
+        label="Implement Port",
+        class="hard",
+        prompt="Follow the plan in .arc/plan.md.\n\
+            Port the semantic changes to the Go codebase.\n\
+            Focus on semantic equivalence, not literal translation.\n\
+            Use Go idioms and respect existing architecture.\n\
+            Log all changes to .arc/implementation_log.md."
+    ]
+
+    // Phase 5: Validate
+    validate [
+        label="Validate",
+        shape=parallelogram,
+        script="cd go-sdk && go build ./... && go test ./... -v 2>&1 || true"
+    ]
+
+    gate [shape=diamond, label="Tests pass?"]
+
+    // Phase 6: Fix failures
+    fix [
+        label="Analyze & Fix",
+        class="hard",
+        max_visits=3,
+        prompt="Tests or build failed. Read the test output from the prior stage.\n\
+            Read .arc/plan.md and .arc/implementation_log.md.\n\
+            Diagnose the root cause, fix the issue, and log the fix."
+    ]
+
+    // Phase 7: Update ledger and commit
+    finalize [
+        label="Finalize",
+        prompt="All tests pass. Finalize this port:\n\
+            1. Update ledger: `python3 ledger/manage.py update <sha> implemented`\n\
+            2. Commit all changes:\n\
+               `git add -A && git commit -m \"semport: implement <sha> - <description>\"`\n\
+            3. Write a brief summary to .arc/implementation_summary.md"
+    ]
+
+    // Wiring
+    start -> fetch
+
+    fetch -> analyze [label="Process", condition="preferred_label=process"]
+    fetch -> exit    [label="Done"]
+
+    analyze -> plan  [label="Port", condition="preferred_label=port"]
+    analyze -> fetch [label="Skip"]
+
+    plan -> implement -> validate -> gate
+
+    gate -> finalize [label="Pass", condition="outcome=success"]
+    gate -> fix      [label="Fail"]
+
+    fix -> validate
+
+    finalize -> fetch
+}

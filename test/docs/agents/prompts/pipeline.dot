@@ -1,0 +1,10 @@
+digraph Pipeline {
+    graph [goal="Add a /health endpoint to the API server"]
+
+    start [shape=Mdiamond, label="Start"]
+    exit  [shape=Msquare, label="Exit"]
+
+    implement [prompt="Implement the following: $goal"]
+
+    start -> implement -> exit
+}

@@ -122,10 +122,10 @@ digraph SemanticPort {
     start -> fetch
 
     fetch -> analyze [label="Process", condition="preferred_label=process"]
-    fetch -> exit    [label="Done",    condition="preferred_label=done"]
+    fetch -> exit    [label="Done"]
 
     analyze -> plan  [label="Port", condition="preferred_label=port"]
-    analyze -> fetch [label="Skip", condition="preferred_label=skip"]
+    analyze -> fetch [label="Skip"]
 
     plan -> implement -> validate -> gate
 

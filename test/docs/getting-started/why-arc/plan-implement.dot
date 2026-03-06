@@ -1,0 +1,16 @@
+digraph PlanImplement {
+    graph [goal="Plan, approve, implement, and simplify a change"]
+
+    start [shape=Mdiamond, label="Start"]
+    exit  [shape=Msquare, label="Exit"]
+
+    plan      [label="Plan", prompt="Analyze the goal and codebase. Write a step-by-step plan.", reasoning_effort="high"]
+    approve   [shape=hexagon, label="Approve Plan"]
+    implement [label="Implement", prompt="Read plan.md and implement every step."]
+    simplify  [label="Simplify", prompt="Review the changes for clarity and correctness."]
+
+    start -> plan -> approve
+    approve -> implement [label="[A] Approve"]
+    approve -> plan      [label="[R] Revise"]
+    implement -> simplify -> exit
+}

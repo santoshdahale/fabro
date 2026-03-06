@@ -1,0 +1,76 @@
+// Assembled from docs/workflows/transitions.mdx snippets
+// Tests conditions, human gates, unconditional edges, weights, and agent routing
+
+digraph TransitionPatterns {
+    graph [goal="Exercise every transition pattern from the transitions docs page"]
+
+    start [shape=Mdiamond, label="Start"]
+    exit  [shape=Msquare, label="Exit"]
+
+    // Line 103-114: Agent transition with routing JSON
+    review [
+        label="Review",
+        shape=tab,
+        prompt="Review the implementation for correctness and \
+            code quality. If changes are needed, respond with: \
+            {\"preferred_next_label\": \"fix\"}. If everything \
+            looks good, respond with: \
+            {\"preferred_next_label\": \"approve\"}."
+    ]
+
+    fix [label="Fix", prompt="Fix the issues found in the review."]
+
+    // Line 32-33: Condition on edges
+    gate [shape=diamond, label="Tests passing?"]
+
+    // Line 60: Boolean flag condition (truthiness check)
+    flag_gate [shape=diamond, label="Flag check"]
+
+    // Line 68-79: Compound conditions
+    deploy_gate [shape=diamond, label="Deploy gate"]
+
+    deploy  [label="Deploy", prompt="Deploy the changes."]
+    proceed [label="Proceed", prompt="Proceed with next step."]
+    retry   [label="Retry", prompt="Retry the operation."]
+
+    // Line 123-128: Human gate transitions
+    approve [shape=hexagon, label="Approve Plan"]
+    plan [label="Plan", prompt="Create a plan."]
+    skip [label="Skip", prompt="Skip this step."]
+
+    // Line 137: Chain syntax (unconditional)
+    start -> plan -> review
+
+    review -> fix     [label="Fix"]
+    review -> gate    [label="Approve"]
+
+    fix -> review
+
+    // Line 32-33: Conditional edges
+    gate -> exit      [label="Pass", condition="outcome=success"]
+    gate -> flag_gate [label="Fix", condition="outcome=fail"]
+    gate -> exit      [label="Fallback"]
+
+    // Line 60: Truthiness check
+    flag_gate -> deploy_gate [condition="outcome=success"]
+    flag_gate -> retry
+
+    // Line 68-70: Compound condition
+    deploy_gate -> deploy  [condition="outcome=success && context.tests_passed=true"]
+    // Line 72: OR condition
+    deploy_gate -> proceed [condition="outcome=success || outcome=partial_success"]
+    deploy_gate -> exit    [label="Fallback"]
+
+    deploy -> approve
+
+    // Line 123-128: Human gate edges
+    approve -> exit [label="[A] Approve"]
+    approve -> plan [label="[R] Revise"]
+    approve -> skip [label="[S] Skip"]
+
+    skip -> exit
+    proceed -> exit
+    retry -> review
+
+    // Line 152-153: Weight tiebreaking (tested on deploy_gate fallback)
+}

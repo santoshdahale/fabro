@@ -1,0 +1,16 @@
+digraph BranchLoop {
+    graph [goal="Create a Python script that passes its test suite"]
+    rankdir=LR
+
+    start [shape=Mdiamond, label="Start"]
+    exit  [shape=Msquare, label="Exit"]
+
+    plan      [label="Plan", prompt="Plan a small Python script (fizzbuzz.py) and a test file (test_fizzbuzz.py) using pytest. Describe what you will create.", shape=tab, reasoning_effort="low"]
+    implement [label="Implement", prompt="Create fizzbuzz.py and test_fizzbuzz.py as planned. Write the files to disk."]
+    validate  [label="Validate", shape=parallelogram, script="python -m pytest test_fizzbuzz.py -v 2>&1 || true"]
+    gate      [shape=diamond, label="Tests passing?"]
+
+    start -> plan -> implement -> validate -> gate
+    gate -> exit      [label="Pass", condition="outcome=success"]
+    gate -> implement [label="Fix"]
+}

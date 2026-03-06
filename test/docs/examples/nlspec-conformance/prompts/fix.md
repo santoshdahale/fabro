@@ -1,0 +1,1 @@
+Stub prompt for testing.

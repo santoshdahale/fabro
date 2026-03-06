@@ -1,0 +1,11 @@
+digraph ToolUse {
+    graph [goal="Explore the current directory using shell tools"]
+    rankdir=LR
+
+    start [shape=Mdiamond, label="Start"]
+    exit  [shape=Msquare, label="Exit"]
+
+    explore [label="Explore", prompt="Use bash to list the files in the current directory, then read the first 5 lines of any README or CLAUDE.md file you find. Summarize what this project is about in 2-3 sentences."]
+
+    start -> explore -> exit
+}

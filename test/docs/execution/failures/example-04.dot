@@ -1,0 +1,10 @@
+digraph Example {
+    graph [goal="Test stall_timeout setting", stall_timeout="300"]
+
+    start [shape=Mdiamond, label="Start"]
+    exit  [shape=Msquare, label="Exit"]
+
+    plan [label="Plan", prompt="Create a plan."]
+
+    start -> plan -> exit
+}

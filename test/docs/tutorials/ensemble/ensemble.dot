@@ -1,0 +1,37 @@
+digraph Ensemble {
+    graph [
+        goal="Get independent opinions from multiple providers, then synthesize",
+        model_stylesheet="
+            #opus    { llm_model: claude-opus-4-6;       llm_provider: anthropic; }
+            #gemini  { llm_model: gemini-3.1-pro-preview; llm_provider: gemini;   }
+            #codex   { llm_model: gpt-5.3-codex;        llm_provider: openai;    }
+            #mercury { llm_model: mercury-2;             llm_provider: inception; }
+            #synth   { llm_model: claude-opus-4-6;       llm_provider: anthropic; reasoning_effort: high; }
+        "
+    ]
+    rankdir=LR
+
+    start [shape=Mdiamond, label="Start"]
+    exit  [shape=Msquare, label="Exit"]
+
+    fork [label="Fan Out", shape=component, join_policy="wait_all", error_policy="continue"]
+
+    opus    [label="Opus",    prompt="Analyze the goal. Provide your independent assessment, recommendations, and any code or prose needed. Be thorough.", shape=tab]
+    gemini  [label="Gemini",  prompt="Analyze the goal. Provide your independent assessment, recommendations, and any code or prose needed. Be thorough.", shape=tab]
+    codex   [label="Codex",   prompt="Analyze the goal. Provide your independent assessment, recommendations, and any code or prose needed. Be thorough.", shape=tab]
+    mercury [label="Mercury", prompt="Analyze the goal. Provide your independent assessment, recommendations, and any code or prose needed. Be thorough.", shape=tab]
+
+    merge [label="Merge", shape=tripleoctagon]
+    synth [label="Synthesize", prompt="You have received independent analyses from four different models (Opus, Gemini, Codex, Mercury). Compare their perspectives: identify consensus, highlight disagreements, and synthesize the strongest ideas into a single coherent recommendation. Note where models agreed and where they diverged.", shape=tab]
+
+    start -> fork
+    fork -> opus
+    fork -> gemini
+    fork -> codex
+    fork -> mercury
+    opus    -> merge
+    gemini  -> merge
+    codex   -> merge
+    mercury -> merge
+    merge -> synth -> exit
+}

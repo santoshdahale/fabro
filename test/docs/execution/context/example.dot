@@ -1,0 +1,10 @@
+digraph Example {
+    graph [goal="Test default fidelity setting", default_fidelity="summary:medium"]
+
+    start [shape=Mdiamond, label="Start"]
+    exit  [shape=Msquare, label="Exit"]
+
+    plan [label="Plan", prompt="Create a plan."]
+
+    start -> plan -> exit
+}
