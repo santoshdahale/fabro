@@ -15,8 +15,7 @@
 
 
 export interface CreateSessionRequest {
-    'project': string;
-    'branch': string;
     'prompt': string;
+    'model'?: string;
 }
 

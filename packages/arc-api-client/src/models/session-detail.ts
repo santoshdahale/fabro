@@ -20,8 +20,9 @@ import type { SessionTurn } from './session-turn';
 export interface SessionDetail {
     'id': string;
     'title': string;
-    'repo': string;
     'model': string;
+    'created_at': string;
+    'updated_at': string;
     'turns': Array<SessionTurn>;
 }
 

@@ -16,5 +16,6 @@
 
 export interface CreateSessionResponse {
     'id': string;
+    'created_at': string;
 }
 

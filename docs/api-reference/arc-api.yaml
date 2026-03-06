@@ -719,6 +719,7 @@ paths:
       operationId: listSessions
       tags: [Sessions]
       summary: List Sessions
+      description: Returns sessions grouped by recency (e.g. "Today", "Yesterday"). Each group contains a flat list of session summaries.
       parameters:
         - $ref: "#/components/parameters/PageLimit"
         - $ref: "#/components/parameters/PageOffset"
@@ -733,6 +734,7 @@ paths:
       operationId: createSession
       tags: [Sessions]
       summary: Create Session
+      description: Start a new interactive chat session. The initial user prompt is required; a model may optionally be specified.
       requestBody:
         required: true
         content:
@@ -752,12 +754,15 @@ paths:
       operationId: retrieveSession
       tags: [Sessions]
       summary: Retrieve Session
+      description: Returns the full session detail including all conversation turns.
       parameters:
         - name: id
           in: path
           required: true
+          description: Unique session identifier.
           schema:
             type: string
+          example: s1
       responses:
         "200":
           description: Session detail
@@ -777,12 +782,15 @@ paths:
       operationId: sendSessionMessage
       tags: [Sessions]
       summary: Send Session Message
+      description: Append a user message to an existing session. The server will process it and produce assistant and tool turns asynchronously via the event stream.
       parameters:
         - name: id
           in: path
           required: true
+          description: Unique session identifier.
           schema:
             type: string
+          example: s1
       requestBody:
         required: true
         content:
@@ -799,6 +807,8 @@ paths:
                 properties:
                   accepted:
                     type: boolean
+                    description: Whether the message was accepted for processing.
+                    example: true
                 required:
                   - accepted
         "404":
@@ -813,12 +823,15 @@ paths:
       operationId: streamSessionEvents
       tags: [Sessions]
       summary: Stream Session Events
+      description: Opens a server-sent event (SSE) stream for real-time session updates. Events include new assistant turns, tool invocations, and completion signals.
       parameters:
         - name: id
           in: path
           required: true
+          description: Unique session identifier.
           schema:
             type: string
+          example: s1
       responses:
         "200":
           description: Server-sent event stream
@@ -1465,6 +1478,7 @@ components:
           type: string
 
     ToolUse:
+      description: A single tool invocation with its arguments and result.
       type: object
       required:
         - tool_name
@@ -1473,10 +1487,16 @@ components:
       properties:
         tool_name:
           type: string
+          description: Name of the tool that was invoked.
+          example: read_file
         args:
           type: string
+          description: JSON-encoded arguments passed to the tool.
+          example: '{ "path": "src/routes/auth.ts" }'
         result:
           type: string
+          description: Output returned by the tool.
+          example: 'import { Router } from "express";'
 
     StageTurn:
       type: object
@@ -2024,23 +2044,28 @@ components:
     # ── Session Schemas ─────────────────────────────────────────────────
 
     SessionListItem:
+      description: Summary of a session shown in list views.
       type: object
       required:
         - id
         - title
-        - repo
-        - time
+        - created_at
       properties:
         id:
           type: string
+          description: Unique session identifier.
+          example: s1
         title:
           type: string
-        repo:
+          description: Short title summarizing the session topic.
+          example: Add rate limiting to auth endpoints
+        created_at:
           type: string
-        time:
-          type: string
+          description: ISO 8601 timestamp when the session was created.
+          example: "2026-03-06T14:30:00Z"
 
     SessionGroup:
+      description: A group of sessions sharing a time-based label (e.g. "Today", "Yesterday").
       type: object
       required:
         - label
@@ -2048,82 +2073,120 @@ components:
       properties:
         label:
           type: string
+          description: Human-readable group heading.
+          example: Today
         sessions:
           type: array
+          description: Sessions belonging to this group, ordered by recency.
           items:
             $ref: "#/components/schemas/SessionListItem"
 
     SessionTurn:
+      description: A single turn in a session conversation — a user message, assistant response, or tool invocation block.
       type: object
       required:
         - kind
       properties:
         kind:
           type: string
+          description: The type of turn.
           enum:
             - user
             - assistant
             - tool
+          example: user
         content:
           type: string
-        date:
+          description: Text content of the turn. Present for user and assistant turns, absent for tool turns.
+          example: Add rate limiting to the auth endpoints using a sliding window approach with Redis.
+        created_at:
           type: string
+          description: ISO 8601 timestamp when the turn was created. Typically present for user turns.
+          example: "2026-02-28T10:00:00Z"
         tools:
           type: array
+          description: Tool invocations for this turn. Present only when kind is "tool".
           items:
             $ref: "#/components/schemas/ToolUse"
 
     SessionDetail:
+      description: Full session record including metadata and the complete conversation history.
       type: object
       required:
         - id
         - title
-        - repo
         - model
+        - created_at
+        - updated_at
         - turns
       properties:
         id:
           type: string
+          description: Unique session identifier.
+          example: s1
         title:
           type: string
-        repo:
-          type: string
+          description: Short title summarizing the session topic.
+          example: Add rate limiting to auth endpoints
         model:
           type: string
+          description: The LLM model used for this session.
+          example: Opus 4.6
+        created_at:
+          type: string
+          description: ISO 8601 timestamp when the session was created.
+          example: "2026-03-06T14:30:00Z"
+        updated_at:
+          type: string
+          description: ISO 8601 timestamp when the session was last updated (e.g. new turn added).
+          example: "2026-03-06T15:45:00Z"
         turns:
           type: array
+          description: Ordered list of conversation turns.
           items:
             $ref: "#/components/schemas/SessionTurn"
 
     CreateSessionRequest:
+      description: Request body for starting a new session.
       type: object
       required:
-        - project
-        - branch
         - prompt
       properties:
-        project:
-          type: string
-        branch:
-          type: string
         prompt:
           type: string
+          description: The initial user message to start the session.
+          example: Add rate limiting to the auth endpoints using a sliding window approach with Redis, 10 requests per minute per IP.
+        model:
+          type: string
+          description: LLM model to use. If omitted, the server default is used.
+          example: Opus 4.6
 
     CreateSessionResponse:
+      description: Response returned after successfully creating a session.
       type: object
       required:
         - id
+        - created_at
       properties:
         id:
           type: string
+          description: Unique identifier for the newly created session.
+          example: s42
+        created_at:
+          type: string
+          description: ISO 8601 timestamp when the session was created.
+          example: "2026-03-06T16:00:00Z"
 
     SendMessageRequest:
+      description: Request body for sending a follow-up message in an existing session.
       type: object
       required:
         - content
       properties:
         content:
           type: string
+          description: The user message text.
+          example: Can you also add a bypass for internal health-check IPs?
 
     # ── Insights Schemas ────────────────────────────────────────────────
 

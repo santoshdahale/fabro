@@ -17,7 +17,6 @@
 export interface SessionListItem {
     'id': string;
     'title': string;
-    'repo': string;
-    'time': string;
+    'created_at': string;
 }
 

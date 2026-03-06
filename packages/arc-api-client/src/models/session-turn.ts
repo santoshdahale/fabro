@@ -20,7 +20,7 @@ import type { ToolUse } from './tool-use';
 export interface SessionTurn {
     'kind': SessionTurnKindEnum;
     'content'?: string;
-    'date'?: string;
+    'created_at'?: string;
     'tools'?: Array<ToolUse>;
 }
 
