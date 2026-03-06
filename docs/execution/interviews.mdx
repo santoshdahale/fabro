@@ -100,24 +100,6 @@ Enable it with the `--auto-approve` flag:
 arc run start workflow.dot --auto-approve
 ```
 
-### Callback
-
-A programmatic interviewer that delegates to a provided function. Useful for testing or building custom integrations:
-
-```rust
-let interviewer = CallbackInterviewer::new(|question| {
-    if question.question_type == QuestionType::YesNo {
-        Answer::yes()
-    } else {
-        Answer::text("custom response")
-    }
-});
-```
-
-### Queue
-
-A lightweight interviewer that pops answers from a pre-filled queue in order. Returns `Skipped` when the queue is empty. Useful for deterministic testing.
-
 ## Timeouts
 
 Questions can have a `timeout_seconds` field. When set, Arc wraps the interviewer call with a timeout:
@@ -132,27 +114,3 @@ The human handler then checks the node's `human.default_choice` attribute. If se
 approve [shape=hexagon, label="Approve?", human.default_choice="deploy"]
 ```
 
-## Recording and replay
-
-The recording interviewer wraps any other interviewer and captures every question-answer pair. Recordings can be serialized to JSON and saved to a file:
-
-```rust
-let recorder = RecordingInterviewer::new(Box::new(ConsoleInterviewer::new(styles)));
-
-// ... run workflow, recorder captures all interactions ...
-
-recorder.save_to_file(Path::new("recordings.json"))?;
-```
-
-The replay interviewer plays back recorded answers in sequence, ignoring the actual question text. When recordings are exhausted, it returns `Skipped`. This enables deterministic re-execution of workflows that originally required human input:
-
-```rust
-let recordings = RecordingInterviewer::load_from_file(Path::new("recordings.json"))?;
-let replayer = ReplayInterviewer::new(recordings);
-```
-
-Together, record and replay make it possible to:
-
-- **Test workflows** that include human gates without manual interaction
-- **Reproduce runs** by replaying the exact same human decisions
-- **Audit decisions** by inspecting the recorded question-answer pairs

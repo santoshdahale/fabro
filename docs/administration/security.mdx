@@ -3,3 +3,54 @@ title: "Security"
 description: "Security model and best practices"
 ---
 
+<Warning>
+Arc is currently a research preview. It has not yet been subject to third-party penetration testing. There may be vulnerabilities. We strongly recommend only deploying Arc on private, self-hosted resources within a controlled networking environment.
+</Warning>
+
+## Security controls not in Arc
+
+Arc is single-tenant software designed for small, trusted teams. The following controls are **not implemented** — plan your deployment accordingly.
+
+| Control | Status |
+|---|---|
+| **Multi-tenancy** | Not supported. Arc is single-tenant only — there is no organization or tenant isolation. |
+| **Roles or ACLs** | Not supported. All authenticated users have identical, full access to every run, workflow, and API endpoint. |
+| **Rate limiting** | Not implemented. The API server does not throttle requests. |
+| **Security headers** | Not configured. The API does not set `Strict-Transport-Security`, `Content-Security-Policy`, `X-Frame-Options`, or similar headers. |
+
+## Security recommendations
+
+### Network
+
+- **Deploy the web app on a private network.** Use a Tailscale tailnet, VPN, or internal network to keep the web UI off the public internet.
+- **Deploy the API on a private network.** Only allow access from expected hosts (the web app, CI runners, developer machines). The API binds to `127.0.0.1` by default — do not expose it with `--host 0.0.0.0` unless it is behind a firewall or private network.
+- **Use Daytona sandboxes with network controls.** When running untrusted or generated code, use the Daytona sandbox provider with `network = "block"` or a CIDR-based allow list to restrict agent egress.
+
+### Authentication
+
+- **Enable authentication.** Arc supports GitHub OAuth and Tailscale header-based auth for the web app. Do not use `insecure_disabled` outside of local development.
+- **Configure a username allowlist.** Both GitHub and Tailscale auth support `allowed_usernames` in `server.toml`. An empty allowlist rejects all requests.
+- **Use JWT to connect the web app to the API.** Configure `ARC_JWT_PRIVATE_KEY` on the web app and `ARC_JWT_PUBLIC_KEY` on the API server. JWT tokens are Ed25519-signed and short-lived (30 seconds).
+- **Use mTLS for machine-to-machine API access.** Configure `[api.tls]` in `server.toml` with server cert, key, and CA. Set client auth to `Required` for programmatic clients (CI, scripts).
+
+### Secrets
+
+- **Keep API keys out of sandboxes.** The local sandbox strips environment variables ending in `_API_KEY`, `_SECRET`, `_TOKEN`, `_PASSWORD`, or `_CREDENTIAL`, but Docker and Daytona sandboxes provide stronger isolation — only explicitly configured variables are passed through.
+- **Use `.env` files for credentials.** Arc loads credentials from `~/.arc/.env` and the project-root `.env`. Do not commit these files to version control.
+- **Rotate the session secret.** The `SESSION_SECRET` environment variable encrypts web app sessions. Rotate it periodically and use a strong random value.
+
+### Execution
+
+- **Use Docker or Daytona for untrusted workflows.** The `local` sandbox offers no filesystem or network isolation — agents have the same access as the host. Use `docker` or `daytona` when running code you haven't reviewed.
+- **Restrict agent permissions.** Use `--permissions read-only` or `--permissions read-write` to limit which tools agents can invoke without approval. In non-interactive mode (`--auto-approve`), tools outside the permission level are denied outright.
+
+## Security reporting
+
+If you discover a security vulnerability in Arc, please report it responsibly:
+
+1. **Email** [security@arc.dev](mailto:security@arc.dev) with a description of the vulnerability, steps to reproduce, and any relevant details.
+2. **Do not** disclose the vulnerability publicly until we have had a chance to investigate and release a fix.
+3. We will acknowledge receipt within 48 hours and aim to provide an initial assessment within 5 business days.
+4. We will work with you to understand the issue and coordinate disclosure timing.
+
+We appreciate the security research community's efforts in helping keep Arc and its users safe.

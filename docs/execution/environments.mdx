@@ -189,24 +189,38 @@ The `auto_stop_interval` setting (in minutes) tells Daytona to stop the sandbox 
 auto_stop_interval = 30
 ```
 
-### Network access
+## Sandboxing
 
-Control outbound network access from the sandbox with the `network` setting. There are three modes:
+Sandboxes isolate agent execution from the host machine. When an agent runs a shell command, edits a file, or searches code, it does so inside a sandbox — preventing unintended side effects and providing a reproducible environment for each run.
 
-| Mode | Description |
-|---|---|
-| `"allow_all"` | Full internet access. This is the Daytona default when `network` is not set. |
-| `"block"` | Block all egress. The sandbox cannot make any outbound connections. |
-| `{ allow_list = [...] }` | Allow egress only to the listed CIDR ranges. |
+### Filesystem
+
+Each provider offers a different level of filesystem isolation:
+
+| Provider | Isolation | What agents can access |
+|---|---|---|
+| `local` | None | The entire host filesystem. Agents can read and modify any file. |
+| `docker` | Container-level | Only the bind-mounted working directory (`/workspace` by default) and whatever is in the container image. Host files outside the mount are inaccessible. |
+| `daytona` | Full machine | A cloud VM with the repository cloned into `/home/daytona/workspace`. The host filesystem is completely inaccessible. |
+
+For `local`, Arc filters sensitive environment variables (those ending in `_API_KEY`, `_SECRET`, `_TOKEN`, `_PASSWORD`, or `_CREDENTIAL`) but does not restrict file access. Use `docker` or `daytona` when running untrusted workflows.
+
+### Network
+
+Each provider handles outbound network access differently:
+
+| Provider | Default | Controls |
+|---|---|---|
+| `local` | Full access | No network isolation. Agents have the same network access as the host. |
+| `docker` | Bridge network | Set via the `network_mode` config option. Supports all Docker network modes (`bridge`, `none`, `host`, etc.). |
+| `daytona` | Full access | Configurable via the `network` setting with three modes: `"allow_all"`, `"block"`, or CIDR-based allow lists. |
+
+For Daytona, network access is configured in the `[sandbox.daytona]` section:
 
 ```toml
 # Block all egress
 [sandbox.daytona]
 network = "block"
-
-# Full access (explicit)
-[sandbox.daytona]
-network = "allow_all"
 
 # Allow only specific CIDRs
 [sandbox.daytona]

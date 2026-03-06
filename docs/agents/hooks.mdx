@@ -1,5 +1,327 @@
 ---
 title: "Hooks"
-description: "Agent lifecycle hooks"
+description: "Run custom logic in response to workflow lifecycle events"
 ---
 
+Hooks let you run custom logic at key points during a workflow — before a stage starts, after a run completes, when a sandbox is ready, and more. Use them for validation, notifications, guardrails, and orchestration without modifying the workflow graph itself.
+
+## Hook types
+
+Arc supports four hook types, from simple shell commands to full agent sessions:
+
+### Command
+
+Run a shell command via `sh -c`. The simplest and most common hook type.
+
+```toml
+[[hooks]]
+event = "stage_start"
+command = "./scripts/pre-check.sh"
+```
+
+### HTTP
+
+POST the event context as JSON to an HTTP endpoint. Useful for webhooks, external APIs, and notification services.
+
+```toml
+[[hooks]]
+event = "run_complete"
+type = "http"
+url = "https://hooks.example.com/done"
+
+[hooks.headers]
+Authorization = "Bearer $API_KEY"
+```
+
+| Field | Description |
+|---|---|
+| `url` | The endpoint to POST to. Must use `https://` unless `tls = "off"`. |
+| `headers` | Optional HTTP headers. Values support `$VAR` interpolation from `allowed_env_vars`. |
+| `allowed_env_vars` | List of environment variable names that may be interpolated into headers. |
+| `tls` | TLS mode: `"verify"` (default), `"no_verify"`, or `"off"`. |
+
+### Prompt
+
+A single-turn LLM call that evaluates the event context and returns an `ok`/`block` decision. The model responds with structured JSON.
+
+```toml
+[[hooks]]
+event = "stage_start"
+type = "prompt"
+prompt = "Should this stage proceed given the current context? Check for any red flags."
+model = "haiku"
+blocking = true
+```
+
+| Field | Description |
+|---|---|
+| `prompt` | Instructions for the LLM evaluator. |
+| `model` | Model alias or ID. Defaults to `haiku`. |
+
+### Agent
+
+A multi-turn agent session with full tool access (shell, file read/write, grep, glob). The agent can investigate the workspace before making a decision.
+
+```toml
+[[hooks]]
+event = "run_complete"
+type = "agent"
+prompt = "Verify that all tests pass and the code compiles. Run the test suite."
+model = "sonnet"
+max_tool_rounds = 10
+blocking = true
+```
+
+| Field | Description |
+|---|---|
+| `prompt` | Task instructions for the agent. |
+| `model` | Model alias or ID. Defaults to `haiku`. |
+| `max_tool_rounds` | Maximum tool call rounds before the agent gives up. Default: `50`. |
+
+## Lifecycle events
+
+Each hook fires on a specific lifecycle event:
+
+| Event | When it fires | Blocking by default |
+|---|---|---|
+| `run_start` | Before the first node executes | Yes |
+| `run_complete` | After the run finishes successfully | No |
+| `run_failed` | After the run fails | No |
+| `stage_start` | Before a node handler begins | Yes |
+| `stage_complete` | After a node handler finishes successfully | No |
+| `stage_failed` | After a node handler fails | No |
+| `stage_retrying` | Before a failed node is retried | No |
+| `edge_selected` | After an edge is chosen for traversal | Yes |
+| `parallel_start` | Before parallel branches fan out | No |
+| `parallel_complete` | After parallel branches merge | No |
+| `sandbox_ready` | After the sandbox environment is created | No |
+| `sandbox_cleanup` | Before the sandbox is torn down | No |
+| `checkpoint_saved` | After a checkpoint is written to disk | No |
+
+## Configuration
+
+Hooks are defined as `[[hooks]]` entries in a [run configuration](/execution/run-configuration) TOML file:
+
+```toml
+[[hooks]]
+name = "pre-check"
+event = "stage_start"
+command = "./scripts/pre-check.sh"
+matcher = "agent"
+blocking = true
+timeout_ms = 30000
+sandbox = false
+```
+
+| Field | Description |
+|---|---|
+| `name` | Optional display name. Auto-generated from event and type if omitted. |
+| `event` | The lifecycle event to listen for (required). |
+| `command` | Shell command shorthand — implies `type = "command"`. |
+| `type` | Explicit hook type: `"command"`, `"http"`, `"prompt"`, or `"agent"`. |
+| `matcher` | Regex pattern to filter which stages trigger this hook. |
+| `blocking` | Whether the hook must complete before execution continues. Defaults vary by event. |
+| `timeout_ms` | Hook timeout in milliseconds. Default: `60000` (60s) for most types, `30000` (30s) for prompt hooks. |
+| `sandbox` | Run inside the sandbox (`true`, default) or on the host (`false`). |
+
+## Blocking vs. non-blocking
+
+Blocking hooks can affect workflow execution. Non-blocking hooks run for side effects only — their decisions are ignored.
+
+**Blocking by default:** `run_start`, `stage_start`, `edge_selected`. These events represent decision points where a hook can prevent or redirect execution.
+
+**Non-blocking by default:** All other events. Override with `blocking = true` if needed.
+
+When multiple blocking hooks match the same event, they run sequentially. If any hook returns a `block` decision, execution short-circuits — remaining hooks are skipped.
+
+## Hook decisions
+
+Blocking hooks return a decision that controls what happens next:
+
+| Decision | Effect |
+|---|---|
+| `proceed` | Continue normal execution. |
+| `skip` | Skip the current stage (with optional reason). |
+| `block` | Stop execution with an error (with optional reason). |
+| `override` | Redirect to a different node by specifying `edge_to`. |
+
+When multiple blocking hooks run, decisions are merged with this precedence: **Block > Skip/Override > Proceed**.
+
+### Command hook decisions
+
+Command hooks communicate decisions via exit code and stdout:
+
+| Exit code | Behavior |
+|---|---|
+| `0` | Proceed. If stdout contains valid JSON decision, use that instead. |
+| `2` | Block/skip. If stdout contains valid JSON decision, use that instead. |
+| Any other | Block with reason "hook exited with code N". |
+
+To return an explicit decision from a command hook, print JSON to stdout:
+
+```bash
+#!/bin/bash
+if [ "$ARC_NODE_ID" = "deploy" ]; then
+  echo '{"decision": "skip", "reason": "deploy disabled in CI"}'
+  exit 0
+fi
+```
+
+### Prompt and agent hook decisions
+
+Prompt and agent hooks return a JSON response:
+
+```json
+{"ok": true}
+```
+
+```json
+{"ok": false, "reason": "Tests are failing, do not proceed"}
+```
+
+If the LLM fails to produce valid JSON, the hook **fails open** (proceeds). This fail-open behavior also applies to timeouts and LLM errors.
+
+## Matchers
+
+The `matcher` field is a regex pattern that filters which stages trigger a hook. It is matched against:
+
+- The **node ID** (e.g., `"implement"`, `"test"`)
+- The **handler type** (e.g., `"agent"`, `"command"`, `"prompt"`)
+- The **edge source** and **edge target** (for `edge_selected` events)
+
+If any of these fields match the regex, the hook fires. If `matcher` is omitted, the hook fires for all stages of the specified event.
+
+```toml
+# Only fire for agent nodes
+[[hooks]]
+event = "stage_start"
+command = "./scripts/agent-guard.sh"
+matcher = "^agent$"
+
+# Fire for any node with "test" in its ID
+[[hooks]]
+event = "stage_complete"
+command = "./scripts/report-test.sh"
+matcher = "test"
+```
+
+## Execution environment
+
+### Sandbox vs. host
+
+By default, command hooks run **inside the sandbox** (`sandbox = true`). This means they execute in the same environment as the agent's tools — same filesystem, same installed packages.
+
+Set `sandbox = false` to run on the host machine. This is useful for hooks that need access to host-only resources (CI systems, local credentials, notification tools).
+
+HTTP, prompt, and agent hooks ignore this setting — HTTP calls are always made from the host, and prompt/agent hooks use the LLM API directly.
+
+### Environment variables
+
+Command hooks receive these environment variables:
+
+| Variable | Value |
+|---|---|
+| `ARC_EVENT` | The event name (e.g., `stage_start`) |
+| `ARC_RUN_ID` | The run's unique identifier |
+| `ARC_WORKFLOW` | The workflow name |
+| `ARC_NODE_ID` | The current node ID (when applicable) |
+| `ARC_HOOK_CONTEXT` | Path to a JSON file containing the full event context (sandbox only) |
+
+### Hook context
+
+The full event context is available as a JSON payload. For command hooks, it is written to a temp file (path in `ARC_HOOK_CONTEXT`) and piped to stdin. For HTTP hooks, it is the POST body.
+
+<Accordion title="Example hook context JSON">
+```json
+{
+  "event": "stage_start",
+  "run_id": "run-abc123",
+  "workflow_name": "ci-pipeline",
+  "cwd": "/workspace",
+  "node_id": "implement",
+  "node_label": "Implement",
+  "handler_type": "agent",
+  "status": null,
+  "edge_from": null,
+  "edge_to": null,
+  "edge_label": null,
+  "failure_reason": null,
+  "attempt": 1,
+  "max_attempts": 3
+}
+```
+</Accordion>
+
+Fields vary by event — `edge_from`/`edge_to`/`edge_label` are only set for `edge_selected`, `failure_reason` for failure events, `attempt`/`max_attempts` for `stage_retrying`, etc. Null fields are omitted from the serialized JSON.
+
+## Timeouts
+
+Each hook type has a default timeout:
+
+| Hook type | Default timeout |
+|---|---|
+| Command | 60 seconds |
+| HTTP | 60 seconds |
+| Prompt | 30 seconds |
+| Agent | 60 seconds |
+
+Override with `timeout_ms` on any hook definition. Prompt and agent hooks **fail open** on timeout — execution proceeds as if the hook returned `ok: true`.
+
+## Fail-open behavior
+
+Hooks are designed to be safe by default. Several failure modes result in the hook proceeding rather than blocking:
+
+- **Prompt/agent LLM call fails** — proceeds
+- **Prompt/agent hook times out** — proceeds
+- **Prompt hook returns unparseable JSON** — proceeds
+- **HTTP hook returns non-2xx** — proceeds
+- **HTTP hook connection fails** — proceeds
+
+Command hooks do **not** fail open. A non-zero exit code (other than 0 or 2) produces a `block` decision.
+
+## Merging hook configs
+
+When both the server config (`~/.arc/server.toml`) and a run config define hooks, they are merged. On name collisions, the run config wins. This lets you define global hooks at the server level and override or extend them per run.
+
+## Full example
+
+```toml
+# Validate environment before the run starts
+[[hooks]]
+name = "env-check"
+event = "run_start"
+command = "./scripts/check-env.sh"
+blocking = true
+sandbox = false
+
+# Notify Slack when a stage completes
+[[hooks]]
+name = "slack-notify"
+event = "stage_complete"
+type = "http"
+url = "https://hooks.slack.com/workflows/T00/B00/abc123"
+tls = "verify"
+blocking = false
+
+# LLM guardrail before agent stages
+[[hooks]]
+name = "safety-check"
+event = "stage_start"
+type = "prompt"
+prompt = "Review the event context. Is there any reason this stage should not proceed?"
+model = "haiku"
+matcher = "^agent$"
+blocking = true
+timeout_ms = 15000
+
+# Post-run verification agent
+[[hooks]]
+name = "verify"
+event = "run_complete"
+type = "agent"
+prompt = "Run the test suite and verify all tests pass. Report any failures."
+model = "sonnet"
+max_tool_rounds = 20
+blocking = true
+timeout_ms = 120000
+```

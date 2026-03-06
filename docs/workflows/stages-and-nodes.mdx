@@ -122,6 +122,20 @@ approve -> plan      [label="[R] Revise"]
 
 In the web UI, human gates appear as interactive prompts. From the CLI, they appear as a menu.
 
+### Wait
+
+**Shape:** `insulator`
+
+Pauses the workflow for a configured duration before proceeding. Useful for rate limiting between API calls or waiting for external processes to complete.
+
+```dot
+cooldown [label="Wait 30s", shape=insulator, duration="30s"]
+```
+
+| Attribute | Description |
+|---|---|
+| `duration` | How long to pause (required). Supports `ms`, `s`, and `m` suffixes (e.g. `"500ms"`, `"30s"`, `"2m"`) |
+
 ### Conditional
 
 **Shape:** `diamond`

@@ -1,5 +1,166 @@
 ---
 title: "MCP"
-description: "Model Context Protocol integration"
+description: "Extend agents with Model Context Protocol servers"
 ---
 
+<Warning>
+MCP support is under active development and not yet available. This page describes the planned design and configuration. We'll update this page when MCP support ships.
+</Warning>
+
+MCP ([Model Context Protocol](https://modelcontextprotocol.io/)) lets you connect external tool servers to Arc agents. An MCP server exposes tools over a standardized protocol — databases, APIs, file systems, custom services — and Arc discovers and registers them automatically. Agents call MCP tools the same way they call built-in tools.
+
+## How it works
+
+When an agent session starts with MCP servers configured, Arc:
+
+1. **Connects** to each server using the configured transport (stdio or HTTP)
+2. **Performs the MCP handshake** — exchanging protocol versions and capabilities
+3. **Discovers tools** — calls `tools/list` to get every tool the server exposes
+4. **Registers tools** — each MCP tool is added to the agent's tool registry with a qualified name
+
+Once registered, MCP tools are indistinguishable from built-in tools to the LLM. The agent sees them in its tool list and can call them during its session.
+
+## Tool naming
+
+MCP tools are registered with a qualified name that combines the server name and original tool name:
+
+```
+mcp__{server}__{tool}
+```
+
+For example, a server named `filesystem` exposing a `read_file` tool becomes `mcp__filesystem__read_file`. Special characters in server or tool names (hyphens, dots, etc.) are replaced with underscores.
+
+## Configuration
+
+MCP servers are configured in the `SessionConfig` and passed to the agent session. Each server entry specifies a name, transport, and optional timeouts.
+
+### Stdio transport
+
+The most common transport. Arc spawns a child process and communicates over stdin/stdout:
+
+```json
+{
+  "name": "filesystem",
+  "transport": {
+    "type": "stdio",
+    "command": "npx",
+    "args": ["-y", "@modelcontextprotocol/server-filesystem", "/workspace"],
+    "env": {}
+  },
+  "startup_timeout_secs": 10,
+  "tool_timeout_secs": 120
+}
+```
+
+| Field | Description |
+|---|---|
+| `name` | Unique identifier for this server. Used in qualified tool names. |
+| `transport.type` | Must be `"stdio"`. |
+| `transport.command` | The executable to spawn. |
+| `transport.args` | Command-line arguments passed to the process. |
+| `transport.env` | Additional environment variables for the child process. |
+| `startup_timeout_secs` | Max seconds to wait for the MCP handshake. Default: `10`. |
+| `tool_timeout_secs` | Max seconds to wait for a single tool call. Default: `120`. |
+
+### HTTP transport
+
+For remote MCP servers accessible over Streamable HTTP:
+
+```json
+{
+  "name": "remote-api",
+  "transport": {
+    "type": "http",
+    "url": "https://mcp.example.com",
+    "headers": {
+      "Authorization": "Bearer token"
+    }
+  },
+  "startup_timeout_secs": 30,
+  "tool_timeout_secs": 60
+}
+```
+
+| Field | Description |
+|---|---|
+| `transport.type` | Must be `"http"`. |
+| `transport.url` | The MCP server endpoint URL. |
+| `transport.headers` | Optional HTTP headers (e.g., for authentication). |
+
+## Lifecycle
+
+### Startup
+
+Each MCP server is started sequentially during session initialization. The startup sequence for each server is:
+
+1. **Spawn / connect** — For stdio, spawn the child process. For HTTP, create the HTTP client.
+2. **Handshake** — Perform the MCP protocol handshake within the `startup_timeout_secs` window.
+3. **Tool discovery** — Call `tools/list` to enumerate available tools.
+4. **Registration** — Add each tool to the agent's registry with its qualified name.
+
+If a server fails to start (process crash, timeout, handshake error), it is logged and skipped. Other servers continue starting normally. The agent session proceeds with whatever tools were successfully registered.
+
+### Tool execution
+
+When the LLM calls an MCP tool:
+
+1. Arc looks up the qualified name in the connection manager
+2. The call is routed to the correct server using the original (unqualified) tool name
+3. The server executes the tool and returns a result
+4. The result is converted to text and returned to the LLM as a tool result
+
+Tool calls are subject to the `tool_timeout_secs` configured on the server. If a call exceeds the timeout, it fails with a timeout error.
+
+### Content handling
+
+MCP tool results can contain multiple content blocks. Arc converts them to text:
+
+| Content type | Conversion |
+|---|---|
+| Text | Used as-is |
+| Image | Replaced with `[image content]` |
+| Audio | Replaced with `[audio content]` |
+| Resource | Replaced with `[resource content]` |
+
+If the server marks the result as an error (`is_error: true`), the tool result is returned to the LLM as an error.
+
+## Example: filesystem server
+
+A complete example connecting an agent to the MCP filesystem server:
+
+```json
+{
+  "name": "fs",
+  "transport": {
+    "type": "stdio",
+    "command": "npx",
+    "args": ["-y", "@modelcontextprotocol/server-filesystem", "/workspace"],
+    "env": {
+      "NODE_ENV": "production"
+    }
+  },
+  "startup_timeout_secs": 15,
+  "tool_timeout_secs": 90
+}
+```
+
+After startup, the agent would see tools like:
+- `mcp__fs__read_file`
+- `mcp__fs__write_file`
+- `mcp__fs__list_directory`
+
+The agent can call these alongside built-in tools like `shell`, `grep`, and `glob`.
+
+<Note>
+MCP servers that fail to start do not block the agent session. The agent proceeds with its built-in tools plus any MCP tools from servers that started successfully.
+</Note>
+
+## Protocol details
+
+Arc implements the MCP client side using the `rmcp` SDK (protocol version `2025-03-26`). The client identifies itself as `arc-mcp` and supports:
+
+- Tool listing and invocation
+- Server logging notifications (routed to Arc's tracing system)
+- Progress notifications
+- Resource update notifications
+- Cancellation notifications

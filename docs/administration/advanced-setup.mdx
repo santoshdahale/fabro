@@ -1,5 +1,283 @@
 ---
 title: "Advanced Setup"
-description: "Advanced Arc configuration"
+description: "Server configuration, environment variables, production deployment, and troubleshooting"
 ---
 
+## Server configuration
+
+The server config file at `~/.arc/server.toml` controls how `arc serve` behaves — API binding, authentication, run defaults, and more. The [Quick Start](/getting-started/quick-start) doesn't require one, but production deployments should configure it explicitly.
+
+### Full reference
+
+```toml
+# Maximum concurrent workflow runs (default: 5)
+max_concurrent_runs = 8
+
+# Override the default data directory (default: ~/.arc)
+data_dir = "/var/lib/arc"
+
+[api]
+base_url = "https://arc.example.com"
+
+[api.tls]
+cert = "/etc/arc/tls/cert.pem"
+key = "/etc/arc/tls/key.pem"
+ca = "/etc/arc/tls/ca.pem"
+
+# Authentication strategies (array of Jwt or Mtls)
+[[api.authentication_strategies]]
+type = "Jwt"
+
+[web]
+url = "https://arc-web.example.com"
+
+[web.auth]
+provider = "Github"
+allowed_usernames = ["alice", "bob"]
+
+[git]
+provider = "Github"
+app_id = "123456"
+client_id = "Iv1.abc123"
+
+# Run defaults — applied to every run unless overridden by the run config
+[llm]
+model = "claude-sonnet-4-5"
+provider = "anthropic"
+
+[llm.fallbacks]
+anthropic = ["gemini", "openai"]
+
+[setup]
+commands = ["npm install"]
+timeout_ms = 120000
+
+[sandbox]
+provider = "daytona"
+
+[sandbox.daytona]
+auto_stop_interval = 60
+
+[sandbox.daytona.labels]
+team = "platform"
+
+[vars]
+default_branch = "main"
+```
+
+### CLI overrides
+
+Several `server.toml` settings can be overridden via `arc serve` flags:
+
+| Flag | Default | Description |
+|---|---|---|
+| `--port` | `3000` | Port to listen on |
+| `--host` | `127.0.0.1` | Host address to bind to |
+| `--model` | — | Override default LLM model |
+| `--provider` | — | Override default LLM provider |
+| `--sandbox` | — | Override default sandbox provider |
+| `--max-concurrent-runs` | `5` | Maximum concurrent run executions |
+| `--config` | `~/.arc/server.toml` | Path to server config file |
+| `--demo` | — | Serve static demo data (disables auth, read-only) |
+| `--dry-run` | — | Execute with simulated LLM backend |
+
+CLI flags take precedence over `server.toml` values. See [Run Configuration — Precedence](/execution/run-configuration#precedence) for the full resolution order.
+
+### Run defaults
+
+The `[llm]`, `[setup]`, `[sandbox]`, and `[vars]` sections in `server.toml` act as defaults for every run. A run config TOML can override any of these. For `[vars]` and Daytona labels, values are **merged** — the run config wins on key collisions. All other fields use "first non-empty wins" precedence.
+
+## Environment variables
+
+Arc reads environment variables from a `.env` file in the working directory (if present) and from the shell environment. Provider API keys are required for the models you want to use; everything else is optional.
+
+### LLM provider keys
+
+| Variable | Provider |
+|---|---|
+| `ANTHROPIC_API_KEY` | Anthropic (Claude) |
+| `OPENAI_API_KEY` | OpenAI (GPT) |
+| `GEMINI_API_KEY` or `GOOGLE_API_KEY` | Google (Gemini) |
+| `KIMI_API_KEY` | Kimi |
+| `ZAI_API_KEY` | Zai (GLM) |
+| `MINIMAX_API_KEY` | Minimax |
+| `INCEPTION_API_KEY` | Inception (Mercury) |
+
+### Sandbox and tools
+
+| Variable | Description |
+|---|---|
+| `DAYTONA_API_KEY` | Daytona cloud sandbox API key |
+| `BRAVE_SEARCH_API_KEY` | Brave Search API key (for the `web_search` tool) |
+
+### Server authentication
+
+| Variable | Description |
+|---|---|
+| `ARC_JWT_PRIVATE_KEY` | Ed25519 private key (base64-encoded PEM) for JWT signing |
+| `ARC_JWT_PUBLIC_KEY` | Ed25519 public key (base64-encoded PEM) for JWT verification |
+| `SESSION_SECRET` | Session encryption secret (64-character hex string) |
+
+### GitHub App (optional)
+
+| Variable | Description |
+|---|---|
+| `GITHUB_APP_CLIENT_SECRET` | GitHub App client secret |
+| `GITHUB_APP_WEBHOOK_SECRET` | GitHub App webhook secret |
+| `GITHUB_APP_PRIVATE_KEY` | GitHub App private key (base64-encoded) |
+
+### Slack integration (optional)
+
+| Variable | Description |
+|---|---|
+| `ARC_SLACK_APP_TOKEN` | Slack App-level token |
+| `ARC_SLACK_BOT_TOKEN` | Slack Bot token |
+
+### Logging
+
+| Variable | Default | Description |
+|---|---|---|
+| `ARC_LOG` | `info` | Log level: `error`, `warn`, `info`, `debug` |
+
+## Production deployment
+
+### Binding and TLS
+
+By default, `arc serve` binds to `127.0.0.1:3000` (localhost only). For production, either:
+
+1. **Reverse proxy** — Keep the default binding and place nginx, Caddy, or an ALB in front:
+
+```nginx
+upstream arc {
+    server 127.0.0.1:3000;
+}
+
+server {
+    listen 443 ssl;
+    server_name arc.example.com;
+
+    ssl_certificate /etc/tls/cert.pem;
+    ssl_certificate_key /etc/tls/key.pem;
+
+    location / {
+        proxy_pass http://arc;
+        proxy_http_version 1.1;
+
+        # Required for SSE event streams
+        proxy_set_header Connection '';
+        proxy_buffering off;
+        proxy_cache off;
+    }
+}
+```
+
+2. **Direct TLS** — Configure TLS in `server.toml`:
+
+```toml
+[api.tls]
+cert = "/etc/arc/tls/cert.pem"
+key = "/etc/arc/tls/key.pem"
+ca = "/etc/arc/tls/ca.pem"
+```
+
+<Note>
+If you use a reverse proxy, set `api.base_url` in `server.toml` to the external URL so that API responses include correct links.
+</Note>
+
+### Running as a service
+
+Example systemd unit:
+
+```ini
+[Unit]
+Description=Arc API Server
+After=network.target
+
+[Service]
+Type=simple
+User=arc
+WorkingDirectory=/opt/arc
+EnvironmentFile=/opt/arc/.env
+ExecStart=/opt/arc/bin/arc serve --host 0.0.0.0 --port 3000 --config /etc/arc/server.toml
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+```
+
+### Health checks
+
+The API server exposes a health endpoint at `GET /health` that returns `{"status": "ok"}`. No authentication is required. Use this for load balancer health checks, container orchestration probes, or uptime monitoring.
+
+```bash
+curl http://localhost:3000/health
+```
+
+### Concurrency tuning
+
+| Setting | Default | Where |
+|---|---|---|
+| Max concurrent runs | 5 | `--max-concurrent-runs` or `max_concurrent_runs` in `server.toml` |
+| Max parallel branches per node | 4 | `max_parallel` attribute on parallel nodes in DOT |
+| Subagent depth | 1 | Hardcoded (subagents can spawn one level deep) |
+| Max tool rounds per turn | 200 | Hardcoded |
+| Default retries | 3 | `default_max_retry` graph attribute (or `max_retries` per node) |
+
+### Stall watchdog
+
+Arc cancels a run if no handler events are emitted for a configurable duration. This protects against hung agents or unresponsive LLM providers.
+
+| Setting | Default | Where |
+|---|---|---|
+| `stall_timeout` | `600s` (10 min) | Graph attribute: `graph [stall_timeout="300s"]` |
+
+Set to `0s` to disable: `graph [stall_timeout="0s"]`.
+
+### Log files
+
+Arc writes two kinds of logs:
+
+- **Application logs** — `~/.arc/logs/YYYY-MM-DD.log` (structured, controlled by `ARC_LOG`)
+- **Run logs** — `~/.arc/logs/{run_id}/progress.jsonl` (one event per line)
+
+The logs directory is not currently configurable and has no automatic retention. For production, set up external log rotation (e.g. `logrotate`) or periodic cleanup of old run directories.
+
+See [Observability](/execution/observability) for the full event schema and analysis tools.
+
+## Troubleshooting
+
+### `arc doctor`
+
+The `arc doctor` command validates your installation:
+
+```bash
+arc doctor           # Check local configuration
+arc doctor --live    # Also probe live services (LLM APIs, sandbox, Brave Search)
+arc doctor --verbose # Show detailed output for each check
+```
+
+It checks:
+- System dependencies (`openssl`, `node`, `gh`, `dot`)
+- LLM provider API keys
+- Sandbox availability (Docker daemon, Daytona API key)
+- JWT key configuration
+- Brave Search API key
+
+### Common issues
+
+**"No API key configured"** — Set at least one provider key in `.env` or your shell environment. Run `arc doctor --live` to verify connectivity.
+
+**Stall watchdog timeouts** — If runs are cancelled unexpectedly, the agent may be stuck or the LLM provider may be slow. Check `ARC_LOG=debug` output for `Agent.LlmRetry` events. Increase `stall_timeout` in the graph if needed, or add [fallback providers](/core-concepts/models) to handle outages.
+
+**Sandbox creation failures** — For Docker: ensure the Docker daemon is running and the configured image exists. For Daytona: verify `DAYTONA_API_KEY` is set and the `gh` CLI is authenticated.
+
+**Port already in use** — Change the port with `arc serve --port 3001` or stop the conflicting process.
+
+**SSE streams disconnecting** — If using a reverse proxy, ensure buffering is disabled and the connection timeout is long enough for workflow runs. See the nginx example above.
+
+**Run config validation errors** — Use `--preflight` to validate without executing:
+
+```bash
+arc run start run.toml --preflight
+```

@@ -9,6 +9,23 @@ Arc is a workflow engine that reads a graph definition, executes nodes one at a 
   <img src="/images/how-arc-works.svg" alt="How Arc works: author-time inputs flow into the workflow engine, which dispatches to handlers that interact with LLMs, sandboxes, and humans" />
 </Frame>
 
+## Two ways to run Arc
+
+Arc has two interfaces, both backed by the same workflow engine:
+
+| | CLI mode | API mode |
+|---|---|---|
+| **Command** | `arc run start workflow.dot` | `arc serve` |
+| **Best for** | Local development, one-off runs | Production use, web UI, integrations |
+| **Execution** | Immediate, single run | Queued, up to N concurrent runs |
+| **Human-in-the-loop** | Terminal prompts | HTTP endpoints |
+| **Events** | Printed to stderr | Streamed via SSE |
+| **Web UI** | Not available | React app connects to the API |
+
+In CLI mode, you run a single workflow directly in your terminal. In API mode, `arc serve` starts an HTTP server that accepts runs via `POST /runs`, queues them, and streams events to the web UI or any HTTP client. Both modes parse the same DOT files, use the same execution engine, and support the same sandbox providers.
+
+See [Architecture](/reference/architecture) for the full details.
+
 ## Author time
 
 You provide three inputs:

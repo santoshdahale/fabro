@@ -30,6 +30,20 @@ No single model is best at everything. Arc lets you assign the right model to ea
 
 Each provider requires its own API key set via environment variable (e.g. `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GEMINI_API_KEY`). See the [Quick Start](/getting-started/quick-start) for setup.
 
+## Default models
+
+When no model is specified, the `arc agent` command uses a default model based on the provider:
+
+| Provider | Default model |
+|---|---|
+| `anthropic` | `claude-opus-4-6` |
+| `openai` | `gpt-5.2-codex` |
+| `gemini` | `gemini-3.1-pro-preview` |
+| `kimi` | `kimi-k2.5` |
+| `zai` | `glm-4.7` |
+| `minimax` | `minimax-m2.5` |
+| `inception` | `mercury` |
+
 ## Using models in workflows
 
 Assign models to workflow nodes using [model stylesheets](/workflows/stylesheets), which use a CSS-like syntax:

@@ -6,6 +6,14 @@
 <!-- Title: BranchLoop Pages: 1 -->
 <svg width="626pt" height="79pt"
  viewBox="0.00 0.00 626.00 79.00" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
+<style>
+  @media (prefers-color-scheme: dark) {
+    [fill="#1a1a1a"] { fill: #e5e5e5; }
+    [fill="#666666"] { fill: #aaaaaa; }
+    [stroke="#666666"] { stroke: #aaaaaa; }
+    [stroke="#999999"] { stroke: #777777; }
+  }
+</style>
 <g id="graph0" class="graph" transform="scale(1 1) rotate(0) translate(4 75.12)">
 <title>BranchLoop</title>
 <!-- start -->

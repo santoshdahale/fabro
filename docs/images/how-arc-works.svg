@@ -6,6 +6,14 @@
 <!-- Title: HowArcWorks Pages: 1 -->
 <svg width="684pt" height="424pt"
  viewBox="0.00 0.00 684.00 424.00" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
+<style>
+  @media (prefers-color-scheme: dark) {
+    [fill="#1a1a1a"] { fill: #e5e5e5; }
+    [fill="#666666"] { fill: #aaaaaa; }
+    [stroke="#666666"] { stroke: #aaaaaa; }
+    [stroke="#999999"] { stroke: #777777; }
+  }
+</style>
 <g id="graph0" class="graph" transform="scale(1 1) rotate(0) translate(4 420)">
 <title>HowArcWorks</title>
 <g id="clust1" class="cluster">

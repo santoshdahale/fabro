@@ -3,3 +3,275 @@ title: "CLI Reference"
 description: "Arc command-line interface reference"
 ---
 
+## Global options
+
+These flags apply to all subcommands:
+
+| Flag | Description |
+|---|---|
+| `--no-dotenv` | Skip loading `.env` file |
+| `--debug` | Enable DEBUG-level logging (default is INFO) |
+| `-h, --help` | Print help |
+| `-V, --version` | Print version |
+
+Arc loads environment variables from `.env` in the current directory and `~/.arc/.env` (unless `--no-dotenv` is set).
+
+## Configuration
+
+CLI defaults can be set in `~/.arc/cli.toml` so you don't have to pass common flags every time:
+
+```toml
+[agent]
+provider = "anthropic"
+model = "claude-opus-4-6"
+permissions = "read-write"
+output_format = "text"
+
+[llm]
+model = "claude-sonnet-4-5"
+```
+
+CLI flags always override `cli.toml` values, which override hardcoded defaults.
+
+---
+
+## `arc run start`
+
+Launch a workflow from a `.dot` workflow file or `.toml` task config.
+
+```bash
+arc run start <WORKFLOW>
+arc run start run.toml
+arc run start --run-branch arc/run/abc123
+```
+
+| Argument / Flag | Description |
+|---|---|
+| `<WORKFLOW>` | Path to a `.dot` workflow file or `.toml` task config. Not required when using `--run-branch`. |
+| `--logs-dir <DIR>` | Log and artifact directory |
+| `--dry-run` | Execute with a simulated LLM backend |
+| `--preflight` | Validate run configuration without executing |
+| `--auto-approve` | Auto-approve all human gates |
+| `--resume <FILE>` | Resume from a checkpoint file |
+| `--run-branch <BRANCH>` | Resume from a git run branch (reads checkpoint and graph from metadata branch) |
+| `--model <MODEL>` | Override default LLM model |
+| `--provider <PROVIDER>` | Override default LLM provider |
+| `-v, --verbose` | Enable verbose output |
+| `--sandbox <SANDBOX>` | Sandbox for agent tools: `local`, `docker`, or `daytona` |
+| `--label <KEY=VALUE>` | Attach a label to this run (repeatable) |
+| `--no-retro` | Skip retro generation after the run |
+| `--ssh` | Create SSH access to the Daytona sandbox and print the connection command |
+| `--preserve-sandbox` | Keep the sandbox alive after the run finishes (for debugging) |
+
+<Note>
+`--preflight` conflicts with `--resume`, `--run-branch`, and `--dry-run`. `--run-branch` conflicts with `--resume`.
+</Note>
+
+## `arc run list`
+
+List workflow runs stored in `~/.arc/logs`.
+
+```bash
+arc run list
+arc run list --workflow deploy --label env=prod
+arc run list --json
+```
+
+| Flag | Description |
+|---|---|
+| `--before <DATE>` | Only show runs started before this date (YYYY-MM-DD prefix match) |
+| `--workflow <NAME>` | Filter by workflow name (substring match) |
+| `--label <KEY=VALUE>` | Filter by label (repeatable, AND semantics) |
+| `--orphans` | Include orphan directories (no `manifest.json`) |
+| `--json` | Output as JSON |
+
+## `arc run prune`
+
+Delete old workflow runs. Dry-run by default — pass `--yes` to actually delete.
+
+```bash
+arc run prune --before 2026-01-01
+arc run prune --before 2026-01-01 --yes
+arc run prune --orphans --yes
+```
+
+| Flag | Description |
+|---|---|
+| `--before <DATE>` | Only prune runs started before this date (YYYY-MM-DD prefix match) |
+| `--workflow <NAME>` | Filter by workflow name (substring match) |
+| `--label <KEY=VALUE>` | Filter by label (repeatable, AND semantics) |
+| `--orphans` | Include orphan directories (no `manifest.json`) |
+| `--yes` | Actually delete (default is dry-run) |
+
+---
+
+## `arc agent`
+
+Run an agentic coding session. The agent operates in the current directory using file, search, and shell tools.
+
+```bash
+arc agent "Add input validation to the signup form"
+arc agent "Fix the failing test" --provider openai --model gpt-5.2-codex
+arc agent "Refactor the auth module" --permissions full --auto-approve
+```
+
+| Argument / Flag | Description | Default |
+|---|---|---|
+| `<PROMPT>` | Task prompt (required) | — |
+| `--provider <PROVIDER>` | LLM provider | `anthropic` |
+| `--model <MODEL>` | Model name | Per provider (see below) |
+| `--permissions <LEVEL>` | Permission level: `read-only`, `read-write`, or `full` | `read-write` |
+| `--auto-approve` | Skip interactive prompts; deny tools outside permission level | — |
+| `--debug` | Print LLM request/response debug info to stderr | — |
+| `--verbose` | Print full LLM request/response JSON to stderr | — |
+| `--skills-dir <DIR>` | Directory containing skill files (overrides default discovery) | — |
+| `--output-format <FORMAT>` | Output format: `text` (human-readable) or `json` (NDJSON event stream) | `text` |
+
+Permission levels control which tools are auto-approved: `read-only` allows read tools (`read_file`, `grep`, `glob`, `list_dir`) and subagent tools; `read-write` adds write tools (`write_file`, `edit_file`, `apply_patch`); `full` allows all tools including shell commands. Tools outside the permission level are either interactively prompted (if a TTY is present) or denied (with `--auto-approve`). See [default models by provider](/core-concepts/models#default-models).
+
+---
+
+## `arc llm prompt`
+
+Send a one-shot prompt to an LLM. Accepts a prompt as an argument, via stdin, or both (stdin is prepended).
+
+```bash
+arc llm prompt "Explain quicksort in one paragraph"
+echo "Summarize this:" | arc llm prompt
+arc llm prompt "Translate to French" -m claude-sonnet-4-5 -o temperature=0.3
+arc llm prompt -S '{"type":"object","properties":{"name":{"type":"string"}}}' "Extract the name from: John Smith"
+```
+
+| Argument / Flag | Description |
+|---|---|
+| `[PROMPT]` | The prompt text (also accepts stdin) |
+| `-m, --model <MODEL>` | Model to use |
+| `-s, --system <SYSTEM>` | System prompt |
+| `--no-stream` | Do not stream output |
+| `-u, --usage` | Show token usage |
+| `-S, --schema <SCHEMA>` | JSON schema for structured output (inline JSON string) |
+| `-o, --option <KEY=VALUE>` | Generation options: `temperature`, `max_tokens`, `top_p`, or provider-specific keys |
+
+## `arc llm chat`
+
+Start an interactive multi-turn chat session.
+
+```bash
+arc llm chat
+arc llm chat -m claude-opus-4-6 -s "You are a helpful coding assistant"
+```
+
+| Flag | Description |
+|---|---|
+| `-m, --model <MODEL>` | Model to use |
+| `-s, --system <SYSTEM>` | System prompt |
+
+---
+
+## `arc models list`
+
+List available LLM models from the built-in catalog. Running `arc models` with no subcommand also lists models.
+
+```bash
+arc models list
+arc models list -p anthropic
+arc models list -q sonnet
+```
+
+| Flag | Description |
+|---|---|
+| `-p, --provider <PROVIDER>` | Filter by provider |
+| `-q, --query <QUERY>` | Search for models matching this string (checks ID, display name, and aliases) |
+
+## `arc models test`
+
+Test model availability by sending a simple prompt to each model and reporting the result.
+
+```bash
+arc models test
+arc models test -p anthropic
+arc models test -m claude-sonnet-4-5
+```
+
+| Flag | Description |
+|---|---|
+| `-p, --provider <PROVIDER>` | Filter by provider |
+| `-m, --model <MODEL>` | Test a specific model |
+
+---
+
+## `arc serve`
+
+Start the HTTP API server that exposes the [REST API](/api-reference) for launching and managing workflow runs.
+
+```bash
+arc serve
+arc serve --port 8080 --host 0.0.0.0
+arc serve --demo
+arc serve --sandbox daytona --max-concurrent-runs 4
+```
+
+| Flag | Description | Default |
+|---|---|---|
+| `--port <PORT>` | Port to listen on | `3000` |
+| `--host <HOST>` | Host address to bind to | `127.0.0.1` |
+| `--model <MODEL>` | Override default LLM model | — |
+| `--provider <PROVIDER>` | Override default LLM provider | — |
+| `--dry-run` | Execute with simulated LLM backend | — |
+| `--sandbox <SANDBOX>` | Sandbox for agent tools: `local`, `docker`, or `daytona` | — |
+| `--demo` | Serve static demo data (disables auth, read-only) | — |
+| `--max-concurrent-runs <N>` | Maximum number of concurrent run executions | — |
+| `--config <PATH>` | Path to server config file | `~/.arc/server.toml` |
+
+If no LLM provider API keys are configured, the server automatically falls back to dry-run mode.
+
+---
+
+## `arc validate`
+
+Validate a workflow file without executing it. Reports errors and warnings.
+
+```bash
+arc validate workflow.dot
+```
+
+| Argument | Description |
+|---|---|
+| `<WORKFLOW>` | Path to the `.dot` workflow file (required) |
+
+## `arc parse`
+
+Parse a DOT file and print its AST as JSON. Useful for debugging workflow definitions.
+
+```bash
+arc parse workflow.dot
+```
+
+| Argument | Description |
+|---|---|
+| `<WORKFLOW>` | Path to the `.dot` workflow file (required) |
+
+---
+
+## `arc doctor`
+
+Check environment and integration health. Verifies system dependencies, API keys, and optional services.
+
+```bash
+arc doctor
+arc doctor -v
+arc doctor --live
+```
+
+| Flag | Description |
+|---|---|
+| `-v, --verbose` | Show detailed information for each check |
+| `-l, --live` | Probe live services (LLM providers, sandbox, API server, web frontend, Brave Search) |
+
+## `arc setup`
+
+Interactive setup wizard that walks you through configuring API keys and validating your environment. Run this after a fresh install.
+
+```bash
+arc setup
+```

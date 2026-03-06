@@ -1,5 +1,117 @@
 ---
 title: "Architecture"
-description: "Arc system architecture"
+description: "How Arc's CLI and API modes work under the hood"
 ---
 
+Arc provides two interfaces — a CLI for local development and an HTTP API for production use. Both share a common workflow engine.
+
+## Shared engine
+
+At the core of both modes is the `WorkflowRunEngine`. It parses the DOT graph, walks nodes, dispatches to handlers (agent, command, human, etc.), selects edges, and checkpoints after each stage. The engine is parameterized by an `Interviewer` trait that controls how human-in-the-loop questions are presented — terminal prompts in CLI mode, HTTP request/response in API mode.
+
+## CLI mode
+
+```bash
+arc run start workflow.dot --goal "Implement the login feature"
+```
+
+The CLI parses the workflow, creates the engine with a `ConsoleInterviewer`, and executes synchronously. Events are printed to stderr, progress is shown with terminal indicators, and human-in-the-loop questions are answered via interactive terminal prompts. When the run finishes, the process exits.
+
+CLI mode is ideal for:
+- Local development and iteration on workflows
+- One-off runs and debugging
+- Scripting and CI/CD pipelines
+
+## API mode
+
+```bash
+arc serve
+```
+
+`arc serve` starts an HTTP server (default `127.0.0.1:3000`) backed by SQLite for run persistence. Runs are submitted via the REST API and executed asynchronously.
+
+### Configuration
+
+The server reads `~/.arc/server.toml` for default settings (model, sandbox, variables, authentication). This file is live-reloaded — changes take effect within seconds without restarting the server.
+
+Key server config options:
+
+| Setting | Description |
+|---|---|
+| `api.host` / `api.port` | Bind address (default `127.0.0.1:3000`) |
+| `api.authentication_strategies` | Auth methods: `jwt`, `mtls`, or both |
+| `api.tls` | Optional HTTPS with cert/key/CA paths |
+| `max_concurrent_runs` | Scheduler concurrency limit (default 5) |
+| `[llm]`, `[sandbox]`, `[vars]` | Defaults applied to every run (overridable per-run) |
+
+### Run lifecycle
+
+1. **Submit** — `POST /runs` with a DOT workflow source. The run is created with status `Queued` and the response returns immediately with the run ID.
+2. **Schedule** — A background scheduler promotes queued runs to `Running` in FIFO order, up to the concurrency limit.
+3. **Execute** — The engine walks the graph, streaming events to all subscribers.
+4. **Complete** — The run transitions to `Completed`, `Failed`, or `Cancelled`.
+
+### Event streaming
+
+The API streams run events via [Server-Sent Events (SSE)](https://developer.mozilla.org/en-US/docs/Web/API/Server-sent_events):
+
+```
+GET /runs/{id}/events
+```
+
+Every significant action — stage starts, LLM calls, tool invocations, edge selections — is emitted as a structured JSON event. The web UI uses this endpoint for real-time run monitoring. Any HTTP client that supports SSE can subscribe.
+
+### Human-in-the-loop
+
+In API mode, human-in-the-loop questions are served over HTTP instead of terminal prompts:
+
+- `GET /runs/{id}/questions` — Poll for pending questions
+- `POST /runs/{id}/questions/{qid}/answer` — Submit an answer
+
+The engine blocks the current stage until the answer is received, then continues execution.
+
+### Authentication
+
+API mode supports two authentication strategies, configurable in `server.toml`:
+
+- **JWT** — EdDSA-signed tokens (used by the web UI)
+- **mTLS** — Mutual TLS with client certificates (used for service-to-service communication)
+
+### Demo mode
+
+```bash
+arc serve --demo
+```
+
+Demo mode disables authentication and serves static mock data for all endpoints. It lets you explore the web UI without API keys or real workflow execution.
+
+## Web UI
+
+The web UI is a React app (`apps/arc-web`) that connects to the API server. Start it alongside `arc serve`:
+
+```bash
+arc serve                        # API on port 3000
+cd apps/arc-web && bun run dev   # Web UI on port 5173
+```
+
+The UI provides:
+- **Run board** — List and monitor all runs
+- **Run detail** — Real-time stage progress, event stream, diffs, usage stats
+- **Start new run** — Submit a DOT workflow from the browser
+- **Human-in-the-loop** — Answer agent questions through the web interface
+- **Sessions** — Interactive chat interface (coming soon)
+- **Insights** — SQL-based analysis across runs via DuckDB
+
+## Comparison
+
+| Feature | CLI mode | API mode |
+|---|---|---|
+| Command | `arc run start` | `arc serve` |
+| Execution | Synchronous, single run | Async, queued with scheduler |
+| Concurrency | One run per process | Configurable (default 5) |
+| Human-in-the-loop | Terminal prompts | HTTP endpoints |
+| Events | Printed to stderr | SSE stream |
+| Persistence | Checkpoint files | SQLite + checkpoint files |
+| Web UI | Not available | Full web interface |
+| Authentication | None | JWT / mTLS |
+| Best for | Development, one-off runs | Production, integrations |

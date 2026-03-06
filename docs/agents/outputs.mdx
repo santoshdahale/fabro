@@ -1,5 +1,282 @@
 ---
-title: "Outputs"
-description: "Agent output handling"
+title: "Outputs & Artifacts"
+description: "How Arc captures agent responses, tracks file changes, and collects test assets"
 ---
 
+When an agent or prompt node finishes, Arc captures its response text and produces an **outcome** that feeds into context, transition logic, and downstream nodes. Arc also tracks every file change per stage, offloads large outputs to disk, and automatically collects test artifacts like screenshots and reports.
+
+## Response capture
+
+After an agent or prompt node completes, Arc captures the full response text and writes it to the run logs at `{logs_root}/nodes/{node_id}/response.md`. It also writes the final outcome (status, context updates, routing directives) to `{logs_root}/nodes/{node_id}/status.json`.
+
+## Context updates
+
+Every agent and prompt node sets three context keys from its response:
+
+| Key | Value |
+|---|---|
+| `last_stage` | The node ID of the stage that just completed |
+| `last_response` | The response text, truncated to the first 200 characters |
+| `response.{node_id}` | The full response text |
+
+These keys are available to downstream nodes via the [context](/execution/context). The `last_response` key provides a quick preview, while `response.{node_id}` preserves the complete output for nodes that need it.
+
+```dot
+plan -> implement -> review -> exit
+
+// In the review node's prompt, you can reference prior outputs:
+// The context key response.plan contains the full plan text
+// The context key response.implement contains the full implementation
+```
+
+## Routing directives
+
+Agent and prompt nodes can influence which edge is taken after they complete by including a JSON object with routing fields in their response. Arc scans the LLM output for the **last** JSON object containing any recognized routing field:
+
+```json
+{
+  "preferred_next_label": "fix",
+  "suggested_next_ids": ["implement", "review"],
+  "context_updates": { "tests_passed": true, "coverage": 85 }
+}
+```
+
+| Field | Effect |
+|---|---|
+| `preferred_next_label` | Matched against edge labels to select the next node |
+| `suggested_next_ids` | Ordered list of preferred target node IDs |
+| `context_updates` | Key-value pairs merged into the run context |
+
+### How extraction works
+
+Arc finds all balanced `{...}` JSON objects in the response text, parses each one, and uses the **last** object that contains at least one recognized field (`preferred_next_label`, `outcome`, `suggested_next_ids`, `context_updates`). The JSON can appear anywhere in the response -- inside a fenced code block, inline with natural language, or at the end.
+
+```markdown
+I've reviewed the code and found several issues that need fixing.
+The test coverage is below the threshold.
+
+{"preferred_next_label": "fix", "context_updates": {"coverage": 72}}
+```
+
+JSON objects without recognized fields are ignored. If no routing directive is found, the transition falls through to condition matching, unconditional edges, or weight-based tiebreaking as described in [Transitions](/workflows/transitions).
+
+### Instructing the agent
+
+Arc does not automatically instruct agents to emit routing JSON. You must include instructions in your prompt:
+
+```dot
+review [
+    label="Review",
+    shape=tab,
+    prompt="Review the implementation. If changes are needed, \
+        respond with: {\"preferred_next_label\": \"fix\"}. \
+        If everything looks good, respond with: \
+        {\"preferred_next_label\": \"approve\"}."
+]
+
+review -> fix     [label="Fix"]
+review -> approve [label="Approve"]
+```
+
+## Output logging
+
+Arc writes several files per stage to `{logs_root}/nodes/{node_id}/`:
+
+| File | Contents |
+|---|---|
+| `prompt.md` | The assembled prompt (preamble + expanded prompt text) |
+| `response.md` | The full LLM response text |
+| `status.json` | The outcome: status, context updates, routing directives, usage stats |
+
+These files are written for every agent and prompt node execution, including retries (visit count is appended to the directory name for repeat visits). Use them for debugging unexpected agent behavior or verifying that routing directives were extracted correctly.
+
+## File tracking
+
+Arc records which files each stage touches. When an agent calls `write_file` or `edit_file`, Arc tracks the file path. When using a CLI-based agent backend, Arc snapshots the Git working tree before and after execution and diffs the results.
+
+The tracked paths are stored as `files_touched` on the stage outcome:
+
+```json
+{
+  "status": "success",
+  "files_touched": ["src/main.rs", "tests/api_test.rs", "README.md"]
+}
+```
+
+### Where files_touched appears
+
+| Location | How it's used |
+|---|---|
+| `StageCompleted` event | Emitted with `files_touched` in the event stream and `progress.jsonl` |
+| Preambles | Listed under each completed stage so downstream agents know what changed |
+| Retros | Included per-stage and aggregated across the full run |
+| `status.json` | Written to the stage's logs directory after each node completes |
+
+### How tracking works
+
+For the **API backend**, Arc subscribes to agent session events. When a `ToolCallStarted` event fires for `write_file` or `edit_file`, Arc records the `file_path` argument as pending. When the corresponding `ToolCallCompleted` arrives without an error, the path is confirmed as touched. Failed tool calls are discarded.
+
+For the **CLI backend**, Arc takes a different approach: it runs `git diff --name-only` and `git ls-files --others --exclude-standard` before and after the agent session, then computes the difference. Any files that appear in the "after" snapshot but not "before" are recorded as touched.
+
+## Artifact offloading
+
+When a stage produces a large context value -- an LLM response, command output, or any context update -- Arc automatically offloads it to disk instead of keeping it in memory. This prevents large outputs from bloating checkpoint files and overwhelming preamble summaries.
+
+### How offloading works
+
+After each node completes, Arc checks every context update. If the serialized JSON of a value exceeds **100KB**, it is written to the artifact store on disk and replaced in the context with a `file://` pointer:
+
+```
+response.plan  -->  file:///path/to/logs/artifacts/values/response.plan.json
+command.output -->  file:///path/to/logs/artifacts/values/command.output.json
+```
+
+Values under 100KB remain in the context as-is.
+
+### Artifact storage layout
+
+Offloaded artifacts are written to the run's logs directory:
+
+```
+~/.arc/logs/{run_id}/
+  artifacts/
+    values/
+      response.plan.json
+      response.implement.json
+      command.output.json
+```
+
+Each file contains the full serialized JSON value. The `ArtifactStore` manages reads and writes, and cleans up files when artifacts are removed.
+
+### Preamble rendering
+
+When Arc builds a [preamble](/execution/context#preamble-construction) for a downstream stage, it resolves `file://` pointers and renders a reference instead of inlining the full content:
+
+```markdown
+## Completed stages
+- **plan**: success
+  - Model: claude-sonnet-4-5, 12.4k tokens in / 3.2k out
+  - Files: src/main.rs, tests/api_test.rs
+  - Response: See: /path/to/logs/artifacts/values/response.plan.json
+- **test**: success
+  - Script: `cargo test 2>&1 || true`
+  - Stdout: See: /path/to/logs/artifacts/values/command.output.json
+```
+
+This keeps preambles concise while still giving agents a path to read the full output if needed.
+
+## Git storage
+
+Artifact data is persisted on the Git [metadata branch](/execution/checkpoints#metadata-branch) alongside checkpoint data. Each time a checkpoint is written, any file-backed artifacts are included as additional entries:
+
+```
+refs/arc/{run_id}
+  manifest.json
+  graph.dot
+  checkpoint.json
+  artifacts/
+    response.plan.json
+    command.output.json
+```
+
+This means artifact data survives process restarts and can be recovered when resuming a run from a Git branch.
+
+## Remote sandbox syncing
+
+For remote sandboxes (Docker, Daytona), artifact files stored on the host are not directly accessible inside the sandbox. Before a stage executes, Arc syncs any `file://` pointers to the sandbox filesystem.
+
+For each pointer in the context updates:
+
+1. Arc checks whether the file is already accessible inside the sandbox
+2. If not, it reads the local file and uploads it via the sandbox's `write_file` interface
+3. The file is placed at `{working_directory}/.arc/artifacts/{filename}`
+4. The pointer is rewritten to reference the remote path
+
+```
+# Before sync (host path)
+file:///home/user/.arc/logs/01JK.../artifacts/values/response.plan.json
+
+# After sync (sandbox path)
+file:///workspace/.arc/artifacts/response.plan.json
+```
+
+This ensures agents running in remote sandboxes can read offloaded artifacts using the same `file://` pointer mechanism.
+
+<Note>
+For local sandboxes, syncing is a no-op since the agent can already access the host filesystem directly.
+</Note>
+
+## Automatic asset capture
+
+After each node executes a command, Arc automatically scans the sandbox for test artifacts — screenshots, videos, reports, and traces — and copies any new or changed files to the run's logs directory. This happens without any agent or workflow configuration.
+
+### How asset capture works
+
+1. **Before** the command runs, Arc takes a baseline snapshot of known asset paths in the sandbox
+2. **After** the command completes, Arc re-scans and diffs against the baseline
+3. Files that are new or modified since the command started are downloaded to the stage's asset directory
+
+Only files modified after the command started are collected. Files that match the baseline fingerprint (same size and mtime) are skipped. Individual files over 10 MB and total collections over 50 MB are also skipped.
+
+### What gets captured
+
+Arc looks for files inside these directories:
+
+| Directory | Typical contents |
+|---|---|
+| `playwright-report/` | Playwright HTML reports |
+| `test-results/` | Playwright screenshots, videos, and traces |
+| `cypress/videos/` | Cypress test recordings |
+| `cypress/screenshots/` | Cypress failure screenshots |
+
+And files matching these filename patterns anywhere in the tree:
+
+| Pattern | Typical contents |
+|---|---|
+| `junit*.xml` | JUnit XML test reports |
+| `*.trace.zip` | Playwright trace archives |
+
+Tool caches and dependency directories (`node_modules`, `.cache/ms-playwright`, `.yarn/cache`, etc.) are excluded from scanning.
+
+### Asset storage layout
+
+Collected assets are written to the run's logs directory, organized by node and retry attempt:
+
+```
+~/.arc/logs/{run_id}/
+  assets/
+    {node_slug}/
+      retry_1/
+        test-results/
+          screenshot.png
+          video.webm
+        manifest.json
+```
+
+Each collection writes a `manifest.json` summarizing what was captured:
+
+```json
+{
+  "files_copied": 3,
+  "total_bytes": 245760,
+  "files_skipped": 0,
+  "download_errors": 0,
+  "copied_paths": [
+    "test-results/screenshot.png",
+    "test-results/video.webm",
+    "playwright-report/index.html"
+  ]
+}
+```
+
+## Observability
+
+Outputs and artifacts appear in several observability surfaces:
+
+| Surface | What's reported |
+|---|---|
+| `StageCompleted` event | `files_touched` list for the stage |
+| `WorkflowRunCompleted` event | `artifact_count` -- total number of offloaded artifacts across the run |
+| [Retros](/execution/retros) | Per-stage `files_touched` and aggregate `files_touched` across all stages |
+| [Preambles](/execution/context#preamble-construction) | File list and artifact pointer references for completed stages |
+| Stage logs | `status.json` in each stage's logs directory contains the full outcome including `files_touched` |

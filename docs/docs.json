@@ -68,21 +68,7 @@
               "agents/hooks",
               "agents/subagents",
               "agents/permissions",
-              "agents/outputs",
-              "agents/artifacts"
-            ]
-          },
-          {
-            "group": "Administration",
-            "icon": "sliders",
-            "pages": [
-              "administration/advanced-setup",
-              "administration/bring-your-own-key",
-              "administration/sandboxing",
-              "administration/security",
-              "administration/usage",
-              "administration/monitoring",
-              "administration/costs"
+              "agents/outputs"
             ]
           },
           {
@@ -91,10 +77,9 @@
             "pages": [
               "reference/dot-language",
               "reference/cli",
-              "reference/hooks",
-              "reference/extensions",
-              "reference/llms",
-              "reference/architecture"
+              "reference/architecture",
+              "administration/advanced-setup",
+              "administration/security"
             ]
           }
         ]
@@ -107,6 +92,18 @@
             "icon": "star",
             "pages": [
               "workflows/best-practices"
+            ]
+          },
+          {
+            "group": "Workflow Tutorials",
+            "icon": "graduation-cap",
+            "pages": [
+              "tutorials/hello-world",
+              "tutorials/plan-implement",
+              "tutorials/branch-loop",
+              "tutorials/parallel-review",
+              "tutorials/multi-model",
+              "tutorials/ensemble"
             ]
           },
           {

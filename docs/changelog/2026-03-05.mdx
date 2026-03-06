@@ -1,13 +1,43 @@
 ---
-title: "Lifecycle hooks, model failover, and Docker Compose demo"
+title: "Slack interviews, richer conditions, lifecycle hooks, and model failover"
 date: "2026-03-05"
 ---
+
+<Warning>
+**`script.output` and `script.stderr` context keys renamed to `command.output` and `command.stderr`.** The old names were inconsistent with the handler name (`command`).
+
+To migrate: Update any DOT workflow prompts referencing `{{script.output}}` or `{{script.stderr}}` to use `{{command.output}}` and `{{command.stderr}}`.
+</Warning>
 
 <Warning>
 **`GET /runs/{id}/files` renamed to `GET /runs/{id}/compare`.** The endpoint returns the same data but the path now reflects its purpose of comparing file changes between checkpoints.
 
 To migrate: Update API integrations using `/files` to use `/compare`.
 </Warning>
+
+## Slack integration for interviews
+
+Arc can now conduct human-in-the-loop interviews directly in Slack. The new Slack Socket Mode integration supports all five question types — yes/no, confirmation, multiple choice, multi-select, and freeform (via threaded replies). Because it uses Socket Mode, no public URL or webhook endpoint is required.
+
+Previously, interviews required the CLI or web UI. Now teams can answer Arc's questions without leaving Slack.
+
+## Richer condition expressions
+
+Transition conditions in DOT workflows now support `||` (or), `!` (not), numeric comparisons (`>`, `<`, `>=`, `<=`), `contains` (substring and array membership), and `matches` (regex, validated at parse time). The parser uses full operator precedence — `&&` binds tighter than `||`, and `!` is prefix.
+
+Previously, conditions were limited to `&&`-joined equality checks. Now you can write expressive guards like:
+
+```dot
+stage_a -> stage_b [condition="score > 80 || result contains 'approved'"];
+```
+
+## `arc parse` command
+
+A new `arc parse FILE.dot` subcommand prints the raw AST of a DOT workflow file as pretty-printed JSON. Useful for debugging workflow definitions or building tooling on top of Arc's parser.
+
+```bash
+arc parse my-workflow.dot
+```
 
 ## Lifecycle hooks
 
@@ -64,6 +94,19 @@ output_format = "json"
 verbose = true
 ```
 
+## Simplified handler type names
+
+Handler types have been renamed for clarity: `agent_loop` is now `agent`, and `one_shot` is now `prompt`. The old names still work as aliases, so existing workflows won't break.
+
+```dot
+stage_a [type="agent"];
+stage_b [type="prompt"];
+```
+
 ---
 
+- MODEL column in CLI tables widened from 24 to 30 characters to avoid truncating longer model names
+- Fixes a server-side error message that could leak to the browser in production
+- Fixes a crash in the web UI when loading run stages (`apiStages.map` on non-array response)
+- Fixes Docker demo build and verifications API response parsing
 - Unknown `$variable` placeholders in DOT prompts now produce clear error messages instead of being silently passed through
