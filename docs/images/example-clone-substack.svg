@@ -1,0 +1,154 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<svg width="1250" height="210" viewBox="0 0 1250 210" xmlns="http://www.w3.org/2000/svg">
+<style>
+  @media (prefers-color-scheme: dark) {
+    [fill="#1a1a1a"] { fill: #e5e5e5; }
+    [fill="#666666"] { fill: #aaaaaa; }
+    [stroke="#666666"] { stroke: #aaaaaa; }
+    [stroke="#999999"] { stroke: #777777; }
+  }
+</style>
+<g>
+  <!-- START (Mdiamond) at (42, 52) -->
+  <polygon fill="none" stroke="#357f9e" points="42,34 7,52 42,70 77,52"/>
+  <polyline fill="none" stroke="#357f9e" points="18,46 18,58"/>
+  <polyline fill="none" stroke="#357f9e" points="30,64 54,64"/>
+  <polyline fill="none" stroke="#357f9e" points="66,58 66,46"/>
+  <polyline fill="none" stroke="#357f9e" points="54,40 30,40"/>
+  <text xml:space="preserve" text-anchor="middle" x="42" y="56" font-family="Helvetica,sans-Serif" font-size="12.00" fill="#1a1a1a">Start</text>
+
+  <!-- BOOTSTRAP (ellipse) at (155, 52) -->
+  <ellipse fill="none" stroke="#357f9e" cx="155" cy="52" rx="42" ry="18"/>
+  <text xml:space="preserve" text-anchor="middle" x="155" y="56" font-family="Helvetica,sans-Serif" font-size="12.00" fill="#1a1a1a">Bootstrap</text>
+
+  <!-- PLAN FAN-OUT (component) at (270, 52) -->
+  <polygon fill="none" stroke="#357f9e" points="295,38 245,38 245,42 241,42 241,46 245,46 245,58 241,58 241,62 245,62 245,66 295,66"/>
+  <polyline fill="none" stroke="#357f9e" points="245,42 249,42 249,46 245,46"/>
+  <polyline fill="none" stroke="#357f9e" points="245,58 249,58 249,62 245,62"/>
+  <text xml:space="preserve" text-anchor="middle" x="270" y="56" font-family="Helvetica,sans-Serif" font-size="12.00" fill="#1a1a1a">Plan</text>
+
+  <!-- PLAN A (ellipse) at (375, 22) -->
+  <ellipse fill="none" stroke="#357f9e" cx="375" cy="22" rx="30" ry="18"/>
+  <text xml:space="preserve" text-anchor="middle" x="375" y="26" font-family="Helvetica,sans-Serif" font-size="12.00" fill="#1a1a1a">Plan A</text>
+
+  <!-- PLAN B (ellipse) at (375, 82) -->
+  <ellipse fill="none" stroke="#357f9e" cx="375" cy="82" rx="30" ry="18"/>
+  <text xml:space="preserve" text-anchor="middle" x="375" y="86" font-family="Helvetica,sans-Serif" font-size="12.00" fill="#1a1a1a">Plan B</text>
+
+  <!-- DEBATE (ellipse) at (478, 52) -->
+  <ellipse fill="none" stroke="#357f9e" cx="478" cy="52" rx="32" ry="18"/>
+  <text xml:space="preserve" text-anchor="middle" x="478" y="56" font-family="Helvetica,sans-Serif" font-size="12.00" fill="#1a1a1a">Debate</text>
+
+  <!-- IMPLEMENT (ellipse) at (590, 52) -->
+  <ellipse fill="none" stroke="#357f9e" cx="590" cy="52" rx="46" ry="18"/>
+  <text xml:space="preserve" text-anchor="middle" x="590" y="56" font-family="Helvetica,sans-Serif" font-size="12.00" fill="#1a1a1a">Implement</text>
+
+  <!-- VERIFY CHAIN (parallelogram) at ~(720, 52) -->
+  <polygon fill="none" stroke="#357f9e" points="690,34 778,34 754,70 666,70"/>
+  <text xml:space="preserve" text-anchor="middle" x="722" y="56" font-family="Helvetica,sans-Serif" font-size="12.00" fill="#1a1a1a">Verify Chain</text>
+
+  <!-- REVIEW FAN-OUT (component) at (856, 52) -->
+  <polygon fill="none" stroke="#357f9e" points="884,38 828,38 828,42 824,42 824,46 828,46 828,58 824,58 824,62 828,62 828,66 884,66"/>
+  <polyline fill="none" stroke="#357f9e" points="828,42 832,42 832,46 828,46"/>
+  <polyline fill="none" stroke="#357f9e" points="828,58 832,58 832,62 828,62"/>
+  <text xml:space="preserve" text-anchor="middle" x="856" y="56" font-family="Helvetica,sans-Serif" font-size="12.00" fill="#1a1a1a">Review</text>
+
+  <!-- REVIEW A (ellipse) at (958, 22) -->
+  <ellipse fill="none" stroke="#357f9e" cx="958" cy="22" rx="30" ry="18"/>
+  <text xml:space="preserve" text-anchor="middle" x="958" y="26" font-family="Helvetica,sans-Serif" font-size="12.00" fill="#1a1a1a">Rev A</text>
+
+  <!-- REVIEW B (ellipse) at (958, 82) -->
+  <ellipse fill="none" stroke="#357f9e" cx="958" cy="82" rx="30" ry="18"/>
+  <text xml:space="preserve" text-anchor="middle" x="958" y="86" font-family="Helvetica,sans-Serif" font-size="12.00" fill="#1a1a1a">Rev B</text>
+
+  <!-- CONSENSUS (ellipse) at (1068, 52) -->
+  <ellipse fill="none" stroke="#357f9e" cx="1068" cy="52" rx="46" ry="18"/>
+  <text xml:space="preserve" text-anchor="middle" x="1068" y="56" font-family="Helvetica,sans-Serif" font-size="12.00" fill="#1a1a1a">Consensus</text>
+
+  <!-- EXIT (Msquare) at (1200, 52) -->
+  <polygon fill="none" stroke="#357f9e" points="1182,34 1218,34 1218,70 1182,70"/>
+  <polyline fill="none" stroke="#357f9e" points="1194,34 1182,46"/>
+  <polyline fill="none" stroke="#357f9e" points="1182,58 1194,70"/>
+  <polyline fill="none" stroke="#357f9e" points="1206,70 1218,58"/>
+  <polyline fill="none" stroke="#357f9e" points="1218,46 1206,34"/>
+  <text xml:space="preserve" text-anchor="middle" x="1200" y="56" font-family="Helvetica,sans-Serif" font-size="12.00" fill="#1a1a1a">Exit</text>
+
+  <!-- POSTMORTEM (ellipse) at (722, 162) -->
+  <ellipse fill="none" stroke="#357f9e" cx="722" cy="162" rx="48" ry="18"/>
+  <text xml:space="preserve" text-anchor="middle" x="722" y="166" font-family="Helvetica,sans-Serif" font-size="12.00" fill="#1a1a1a">Postmortem</text>
+
+  <!-- === EDGES === -->
+
+  <!-- start → bootstrap -->
+  <path fill="none" stroke="#666666" d="M77,52 L103,52"/>
+  <polygon fill="#666666" stroke="#666666" points="103,48.5 113,52 103,55.5"/>
+
+  <!-- bootstrap → plan_fork -->
+  <path fill="none" stroke="#666666" d="M197,52 L231,52"/>
+  <polygon fill="#666666" stroke="#666666" points="231,48.5 241,52 231,55.5"/>
+
+  <!-- plan_fork → plan_a (right-up) -->
+  <path fill="none" stroke="#666666" d="M295,44 L337,28"/>
+  <polygon fill="#666666" stroke="#666666" points="334,24 345,26 337,32"/>
+
+  <!-- plan_fork → plan_b (right-down) -->
+  <path fill="none" stroke="#666666" d="M295,60 L337,76"/>
+  <polygon fill="#666666" stroke="#666666" points="337,72 345,78 334,80"/>
+
+  <!-- plan_a → debate (right-down) -->
+  <path fill="none" stroke="#666666" d="M402,30 L440,44"/>
+  <polygon fill="#666666" stroke="#666666" points="438,40 450,45 440,48"/>
+
+  <!-- plan_b → debate (right-up) -->
+  <path fill="none" stroke="#666666" d="M402,74 L440,60"/>
+  <polygon fill="#666666" stroke="#666666" points="440,56 450,59 438,64"/>
+
+  <!-- debate → implement -->
+  <path fill="none" stroke="#666666" d="M510,52 L534,52"/>
+  <polygon fill="#666666" stroke="#666666" points="534,48.5 544,52 534,55.5"/>
+
+  <!-- implement → verify -->
+  <path fill="none" stroke="#666666" d="M636,52 L656,52"/>
+  <polygon fill="#666666" stroke="#666666" points="656,48.5 666,52 656,55.5"/>
+
+  <!-- verify → review_fork -->
+  <path fill="none" stroke="#666666" d="M766,52 L814,52"/>
+  <polygon fill="#666666" stroke="#666666" points="814,48.5 824,52 814,55.5"/>
+
+  <!-- review_fork → review_a (right-up) -->
+  <path fill="none" stroke="#666666" d="M884,44 L920,28"/>
+  <polygon fill="#666666" stroke="#666666" points="917,24 928,26 920,32"/>
+
+  <!-- review_fork → review_b (right-down) -->
+  <path fill="none" stroke="#666666" d="M884,60 L920,76"/>
+  <polygon fill="#666666" stroke="#666666" points="920,72 928,78 917,80"/>
+
+  <!-- review_a → consensus (right-down) -->
+  <path fill="none" stroke="#666666" d="M985,30 L1016,42"/>
+  <polygon fill="#666666" stroke="#666666" points="1014,38 1025,43 1016,46"/>
+
+  <!-- review_b → consensus (right-up) -->
+  <path fill="none" stroke="#666666" d="M985,74 L1016,62"/>
+  <polygon fill="#666666" stroke="#666666" points="1016,58 1025,61 1014,66"/>
+
+  <!-- consensus → exit [Approved] -->
+  <path fill="none" stroke="#666666" d="M1114,52 L1172,52"/>
+  <polygon fill="#666666" stroke="#666666" points="1172,48.5 1182,52 1172,55.5"/>
+  <text xml:space="preserve" text-anchor="middle" x="1148" y="47" font-family="Helvetica,sans-Serif" font-size="10.00" fill="#666666">Approved</text>
+
+  <!-- verify → implement [Fix] (backward curve below) -->
+  <path fill="none" stroke="#666666" d="M706,70 C706,116 590,116 590,70"/>
+  <polygon fill="#666666" stroke="#666666" points="586.5,78 590,68 593.5,78"/>
+  <text xml:space="preserve" text-anchor="middle" x="648" y="113" font-family="Helvetica,sans-Serif" font-size="10.00" fill="#666666">Fix</text>
+
+  <!-- consensus → postmortem [Rejected] -->
+  <path fill="none" stroke="#666666" d="M1068,70 C1068,132 790,132 758,148"/>
+  <polygon fill="#666666" stroke="#666666" points="762,144 754,152 754,145"/>
+  <text xml:space="preserve" text-anchor="middle" x="948" y="122" font-family="Helvetica,sans-Serif" font-size="10.00" fill="#666666">Rejected</text>
+
+  <!-- postmortem → plan_fork [Replan] (long backward loop below) -->
+  <path fill="none" stroke="#666666" d="M674,164 C480,195 320,195 270,70"/>
+  <polygon fill="#666666" stroke="#666666" points="266.5,78 270,68 273.5,78"/>
+  <text xml:space="preserve" text-anchor="middle" x="470" y="193" font-family="Helvetica,sans-Serif" font-size="10.00" fill="#666666">Replan</text>
+</g>
+</svg>

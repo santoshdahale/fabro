@@ -88,13 +88,6 @@
         "tab": "Guides",
         "groups": [
           {
-            "group": "Best Practices",
-            "icon": "star",
-            "pages": [
-              "workflows/best-practices"
-            ]
-          },
-          {
             "group": "Workflow Tutorials",
             "icon": "graduation-cap",
             "pages": [
@@ -110,19 +103,10 @@
             "group": "Example Workflows",
             "icon": "flask",
             "pages": [
-              "examples/implement-feature",
+              "examples/solitaire",
               "examples/semantic-port",
               "examples/nlspec-convergence",
-              "examples/investigate-alert"
-            ]
-          },
-          {
-            "group": "Deployment",
-            "icon": "cloud-arrow-up",
-            "pages": [
-              "deployment/overview",
-              "deployment/deploying-to-aws",
-              "deployment/environments"
+              "examples/clone-substack"
             ]
           }
         ]
