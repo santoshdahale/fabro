@@ -60,8 +60,9 @@ pub fn sign_app_jwt(app_id: &str, private_key_pem: &str) -> Result<String, Strin
     let key = EncodingKey::from_rsa_pem(private_key_pem.as_bytes())
         .map_err(|e| format!("Invalid RSA private key: {e}"))?;
 
-    encode(&Header::new(Algorithm::RS256), &claims, &key)
-        .map_err(|e| format!("Failed to sign JWT: {e}"))
+    let jwt = encode(&Header::new(Algorithm::RS256), &claims, &key)
+        .map_err(|e| format!("Failed to sign JWT: {e}"))?;
+    Ok(jwt)
 }
 
 /// Check whether a GitHub repository is public using the App JWT.
@@ -88,7 +89,13 @@ pub async fn is_repo_public(
         .map_err(|e| format!("Failed to check repo visibility: {e}"))?;
 
     let status = response.status();
-    if status == reqwest::StatusCode::NOT_FOUND {
+    // 404 = repo not found (or not visible); 401/403 = app JWT can't read repos.
+    // In all these cases, assume the repo is private and proceed to get an
+    // installation access token, which WILL have the right permissions.
+    if status == reqwest::StatusCode::NOT_FOUND
+        || status == reqwest::StatusCode::UNAUTHORIZED
+        || status == reqwest::StatusCode::FORBIDDEN
+    {
         return Ok(false);
     }
     if !status.is_success() {

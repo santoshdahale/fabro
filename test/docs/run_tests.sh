@@ -38,6 +38,19 @@ run_one() {
                 fail=$((fail + 1))
             fi
             ;;
+        preflight)
+            # cd into the dot file's directory so relative paths resolve
+            local target="$dot_name"
+            [[ -f "$toml" ]] && target="run-${stem}.toml"
+
+            if (cd "$dot_dir" && "$ARC" run start "$target" --preflight 2>&1); then
+                echo "  PASS  $rel"
+                pass=$((pass + 1))
+            else
+                echo "  FAIL  $rel"
+                fail=$((fail + 1))
+            fi
+            ;;
         dry-run|haiku|full)
             # cd into the dot file's directory so relative script paths resolve
             local target="$dot_name"
@@ -56,7 +69,7 @@ run_one() {
             fi
             ;;
         *)
-            echo "Usage: $0 <validate|dry-run|haiku|full>"
+            echo "Usage: $0 <validate|preflight|dry-run|haiku|full>"
             exit 1
             ;;
     esac
