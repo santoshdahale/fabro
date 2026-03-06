@@ -1,5 +1,386 @@
 ---
 title: "DOT Language"
-description: "Arc's DOT language reference"
+description: "Complete reference for Arc's DOT workflow language"
 ---
 
+Arc workflows are written in a subset of the [Graphviz DOT language](https://graphviz.org/doc/info/lang.html) with extensions for agent orchestration. This page is the complete syntax reference. For conceptual introductions, see [Workflows](/core-concepts/workflows) and [Nodes & Stages](/workflows/stages-and-nodes).
+
+## File structure
+
+Every workflow is a `digraph` (directed graph) with a name and a body of statements:
+
+```dot
+digraph MyWorkflow {
+    graph [goal="Describe the project"]
+    rankdir=LR
+
+    start [shape=Mdiamond, label="Start"]
+    exit  [shape=Msquare, label="Exit"]
+
+    scan    [label="Scan Files", shape=parallelogram, script="find . -type f | head -30"]
+    analyze [label="Analyze", shape=tab, prompt="Summarize the project structure."]
+
+    start -> scan -> analyze -> exit
+}
+```
+
+Only `digraph` is supported — `graph` (undirected) and `strict` are not. The graph name is required. Semicolons after statements are optional.
+
+## Comments
+
+```dot
+// Line comment — everything to end of line
+
+/* Block comment
+   spanning multiple lines */
+```
+
+Comments inside quoted strings are preserved as literal text.
+
+## Value types
+
+Attribute values in `[key=value]` blocks can be:
+
+| Type | Syntax | Examples |
+|---|---|---|
+| String | Double-quoted | `"Run tests"`, `"line1\nline2"` |
+| Integer | Bare digits, optional sign | `42`, `-1`, `0` |
+| Float | Digits with decimal point | `3.14`, `-0.5`, `.5` |
+| Boolean | Keywords | `true`, `false` |
+| Duration | Integer with unit suffix | `250ms`, `30s`, `15m`, `2h`, `1d` |
+| Bare string | Identifier with hyphens/dots | `claude-sonnet-4-5`, `gpt-5.2-codex` |
+| Identifier | Bare word | `LR`, `box`, `Mdiamond` |
+
+**Escape sequences** in quoted strings: `\"`, `\\`, `\n`, `\t`.
+
+**Duration units:** `ms` (milliseconds), `s` (seconds), `m` (minutes), `h` (hours), `d` (days).
+
+## Statements
+
+The body of a digraph can contain these statement types:
+
+### Graph attributes
+
+Set workflow-level configuration:
+
+```dot
+// Block syntax
+graph [goal="Build a feature", model_stylesheet="* { llm_model: claude-haiku-4-5; }"]
+
+// Declaration syntax
+rankdir=LR
+```
+
+| Attribute | Type | Description |
+|---|---|---|
+| `goal` | String | Workflow objective — guides agent behavior and retrospectives |
+| `rankdir` | Identifier | Layout direction: `LR` (left-to-right) or `TB` (top-to-bottom) |
+| `model_stylesheet` | String | CSS-like rules for model assignment (see [Model Stylesheets](/workflows/stylesheets)) |
+| `default_max_retry` | Integer | Default retry count for all nodes (default: 3) |
+| `retry_target` | String | Default node ID to jump to on retry |
+| `fallback_retry_target` | String | Fallback retry target if primary target fails |
+| `default_fidelity` | String | Default [fidelity level](/execution/context) for all nodes |
+| `default_thread` | String | Default thread ID for all nodes |
+| `max_node_visits` | Integer | Max visits per node across the run (0 = unlimited) |
+| `stall_timeout` | Duration | Timeout for stalled workflows (default: `600s`, 0 = disabled) |
+
+### Node defaults
+
+Apply default attributes to all subsequently declared nodes:
+
+```dot
+node [shape=box, timeout="900s"]
+```
+
+Defaults are scoped to their enclosing subgraph. Explicit attributes on individual nodes override defaults.
+
+### Edge defaults
+
+Apply default attributes to all subsequently declared edges:
+
+```dot
+edge [weight=5]
+```
+
+### Node declarations
+
+Declare a node with optional attributes:
+
+```dot
+plan [label="Plan", prompt="Create an implementation plan."]
+```
+
+**Node identifiers** must start with a letter or underscore, followed by letters, digits, or underscores (e.g. `run_tests`, `gate_1`, `_private`).
+
+Nodes referenced in edges are auto-created if not explicitly declared.
+
+### Edge declarations
+
+Connect nodes with directed edges:
+
+```dot
+start -> plan -> implement -> exit
+```
+
+Chained edges like `A -> B -> C` expand to individual edges `A -> B` and `B -> C`, all sharing the same attributes.
+
+Edges can have attributes:
+
+```dot
+gate -> exit      [label="Pass", condition="outcome=success"]
+gate -> implement [label="Fix"]
+```
+
+### Subgraphs
+
+Group nodes visually and apply scoped defaults:
+
+```dot
+subgraph cluster_impl {
+    label = "Implementation"
+    node [thread_id="impl", fidelity="full"]
+
+    plan      [label="Plan"]
+    implement [label="Implement"]
+    review    [label="Review"]
+}
+```
+
+When a subgraph has a `label`, it is converted to a CSS class name and applied to all nodes within the subgraph (e.g. `"Implementation"` becomes class `implementation`, `"Loop A"` becomes `loop-a`). This enables [stylesheet](/workflows/stylesheets) targeting.
+
+Node and edge defaults declared inside a subgraph are scoped — they don't leak to the outer graph. Edges can cross subgraph boundaries.
+
+## Node types
+
+Each node's `shape` attribute determines its execution behavior. See [Nodes & Stages](/workflows/stages-and-nodes) for detailed documentation of each type.
+
+| Shape | Handler | Purpose |
+|---|---|---|
+| `Mdiamond` | start | Workflow entry point (exactly one required) |
+| `Msquare` | exit | Workflow terminal (exactly one required) |
+| `box` (default) | agent | Multi-turn LLM with tool access |
+| `tab` | prompt | Single LLM call, no tools |
+| `parallelogram` | command | Execute a shell script |
+| `hexagon` | human | Human-in-the-loop decision gate |
+| `diamond` | conditional | Route based on conditions |
+| `component` | parallel | Fan-out to concurrent branches |
+| `tripleoctagon` | parallel.fan_in | Merge parallel branch results |
+| `insulator` | wait | Pause for a duration |
+| `house` | stack.manager_loop | Sub-workflow orchestration |
+
+The `type` attribute can also be set explicitly to override the shape-based mapping.
+
+Start nodes can also be identified by ID (`start` or `Start`). Exit nodes can be identified by ID (`exit`, `Exit`, `end`, or `End`).
+
+## Node attributes
+
+### All nodes
+
+| Attribute | Type | Description |
+|---|---|---|
+| `label` | String | Display name in the graph visualization |
+| `shape` | Identifier | Graphviz shape — determines handler type (see table above) |
+| `type` | String | Explicit handler type (overrides shape) |
+| `class` | String | Comma-separated classes for [stylesheet](/workflows/stylesheets) targeting |
+| `timeout` | Duration | Execution timeout (e.g. `900s`) |
+| `max_visits` | Integer | Max times this node can execute in a run (prevents infinite loops) |
+| `max_retries` | Integer | Override default retry count |
+| `retry_policy` | String | Named preset: `none`, `standard`, `aggressive`, `linear`, `patient` |
+| `retry_target` | String | Node ID to jump to on retry |
+| `goal_gate` | Boolean | When `true`, workflow fails if this node doesn't succeed |
+| `auto_status` | Boolean | Auto-generate status updates |
+
+### Agent and prompt nodes
+
+| Attribute | Type | Description |
+|---|---|---|
+| `prompt` | String | Task instructions for the LLM. Supports file references with `@path/to/file.md` |
+| `reasoning_effort` | String | `low`, `medium`, or `high` (default: `high`) |
+| `max_tokens` | Integer | Maximum output tokens |
+| `fidelity` | String | How much prior context is passed: `compact`, `full`, `summary:high`, `summary:medium`, `summary:low`, `truncate` |
+| `thread_id` | String | Groups nodes into a shared conversation thread |
+| `llm_model` | String | Explicit model ID (overrides stylesheet) |
+| `llm_provider` | String | Explicit provider name (overrides stylesheet) |
+| `backend` | String | Agent execution backend. `api` (default): Arc calls the LLM API directly and runs its own tool loop. `cli`: Arc delegates to an external CLI tool (`claude`, `codex`, or `gemini` based on provider). See [Agents — Backends](/core-concepts/agents#backends). |
+
+### Command nodes
+
+| Attribute | Type | Description |
+|---|---|---|
+| `script` | String | Shell command to execute |
+| `language` | String | `"shell"` (default) or `"python"` |
+
+### Parallel (fan-out) nodes
+
+| Attribute | Type | Description |
+|---|---|---|
+| `join_policy` | String | When the merge can proceed: `wait_all` (default), `first_success`, `k_of_n(N)`, `quorum(F)` |
+| `error_policy` | String | How branch failures are handled: `continue` (default), `fail_fast`, `ignore` |
+| `max_parallel` | Integer | Maximum concurrent branches (default: 4) |
+
+### Wait nodes
+
+| Attribute | Type | Description |
+|---|---|---|
+| `duration` | Duration | How long to pause (required). E.g. `"30s"`, `"2m"` |
+
+## Edge attributes
+
+| Attribute | Type | Description |
+|---|---|---|
+| `label` | String | Display text; also used for human gate option matching |
+| `condition` | String | Boolean expression for conditional routing (see below) |
+| `weight` | Integer | Priority for tiebreaking (higher wins, default: 0) |
+| `fidelity` | String | Override fidelity level for this transition |
+| `thread_id` | String | Override thread ID for this transition |
+| `loop_restart` | Boolean | Mark this edge as a loop restart point |
+
+## Condition expressions
+
+Edge conditions are boolean expressions evaluated against the stage outcome and run context. See [Transitions](/workflows/transitions) for the full routing logic.
+
+### Grammar
+
+```
+Expr       ::= OrExpr
+OrExpr     ::= AndExpr ('||' AndExpr)*
+AndExpr    ::= UnaryExpr ('&&' UnaryExpr)*
+UnaryExpr  ::= '!' UnaryExpr | Clause
+Clause     ::= Key Op Value | Key        (bare key = truthy check)
+Op         ::= '=' | '!=' | '>' | '<' | '>=' | '<='
+             | 'contains' | 'matches'
+```
+
+### Keys
+
+| Key | Resolves to |
+|---|---|
+| `outcome` | Stage status: `success`, `fail`, or `partial_success` |
+| `preferred_label` | Label selected by a human gate or LLM routing directive |
+| `context.KEY` | Value from the run context |
+| `KEY` | Shorthand for context lookup (without the `context.` prefix) |
+
+### Operators
+
+| Operator | Example | Description |
+|---|---|---|
+| `=` | `outcome=success` | Equality |
+| `!=` | `outcome!=fail` | Inequality |
+| `>` | `context.score > 80` | Greater than (numeric) |
+| `<` | `context.count < 5` | Less than (numeric) |
+| `>=` | `context.score >= 80` | Greater than or equal |
+| `<=` | `context.count <= 10` | Less than or equal |
+| `contains` | `context.message contains error` | Substring match or array membership |
+| `matches` | `context.version matches ^v\d+` | Regular expression match |
+| `&&` | `a=1 && b=2` | Logical AND (binds tighter than `\|\|`) |
+| `\|\|` | `a=1 \|\| b=2` | Logical OR |
+| `!` | `!outcome=fail` | Logical NOT |
+
+A bare key with no operator is a **truthiness check** — it passes if the value is non-empty, not `"false"`, and not `"0"`.
+
+### Examples
+
+```dot
+// Simple outcome check
+gate -> exit [condition="outcome=success"]
+
+// Compound condition
+gate -> deploy [condition="outcome=success && context.tests_passed=true"]
+
+// Either outcome
+gate -> proceed [condition="outcome=success || outcome=partial_success"]
+
+// Negation
+gate -> retry [condition="!outcome=success"]
+
+// Numeric comparison
+gate -> fast_path [condition="context.score > 80"]
+
+// Substring search
+gate -> alert [condition="context.log contains error"]
+
+// Regex match
+gate -> v2 [condition="context.version matches ^v2\\."]
+
+// Unconditional fallback (no condition attribute)
+gate -> slow_path
+```
+
+## Prompt file references
+
+Instead of inlining long prompts, reference an external file:
+
+```dot
+simplify [label="Simplify", prompt="@docs-internal/prompts/simplify.md"]
+```
+
+The `@` prefix tells Arc to load the prompt from a file path relative to the workflow file.
+
+## Validation
+
+Arc validates workflows at parse time and reports diagnostics. Key rules:
+
+- Exactly one start node and one exit node
+- All nodes reachable from start
+- No incoming edges to start, no outgoing edges from exit
+- Edge targets reference existing nodes
+- Condition expressions parse correctly
+- Stylesheet syntax is valid
+- LLM nodes (agent, prompt) have a `prompt` attribute
+- Conditional nodes have multiple outgoing edges with conditions
+- Retry targets reference existing nodes
+- Goal gates have retry configuration
+- Known handler types only
+
+## Complete example
+
+```dot
+digraph ImplementFeature {
+    graph [
+        goal="Implement a feature with tests and code review",
+        model_stylesheet="
+            *        { llm_model: claude-haiku-4-5; llm_provider: anthropic; reasoning_effort: low; }
+            .coding  { llm_model: claude-sonnet-4-5; llm_provider: anthropic; reasoning_effort: high; }
+            #review  { llm_model: claude-sonnet-4-5; llm_provider: anthropic; reasoning_effort: high; }
+        "
+    ]
+    rankdir=LR
+
+    start [shape=Mdiamond, label="Start"]
+    exit  [shape=Msquare, label="Exit"]
+
+    // Planning phase
+    plan [label="Plan", shape=tab, prompt="Create a detailed implementation plan for: $goal"]
+
+    // Human approval
+    approve [shape=hexagon, label="Approve Plan"]
+
+    // Implementation (threaded for context continuity)
+    subgraph cluster_impl {
+        label = "Implementation"
+        node [thread_id="impl", fidelity="full"]
+        implement [label="Implement", class="coding", prompt="Implement the approved plan."]
+        test      [label="Write Tests", class="coding", prompt="Write comprehensive tests."]
+    }
+
+    // Validation
+    validate [label="Run Tests", shape=parallelogram, script="cargo test 2>&1 || true"]
+    gate     [shape=diamond, label="Tests passing?"]
+
+    // Review
+    review [label="Code Review", shape=tab, prompt="Review the implementation for correctness."]
+
+    // Wiring
+    start -> plan -> approve
+
+    approve -> implement [label="[A] Approve"]
+    approve -> plan      [label="[R] Revise"]
+
+    implement -> test -> validate -> gate
+
+    gate -> review    [label="Pass", condition="outcome=success"]
+    gate -> implement [label="Fix"]
+
+    review -> exit
+}
+```

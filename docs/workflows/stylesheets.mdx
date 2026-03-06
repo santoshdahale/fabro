@@ -67,7 +67,7 @@ Stylesheets support four properties:
 | `llm_model` | Model ID or alias | `claude-sonnet-4-5`, `opus`, `gemini-pro` |
 | `llm_provider` | Provider name | `anthropic`, `openai`, `gemini` |
 | `reasoning_effort` | Reasoning effort level | `low`, `medium`, `high` |
-| `backend` | Backend type | `cli`, `api` |
+| `backend` | Agent execution backend — `api` (default) runs Arc's own tool loop, `cli` delegates to an external CLI tool. See [Backends](/core-concepts/agents#backends). | `cli`, `api` |
 
 See [Models](/core-concepts/models) for the full list of model IDs and aliases.
 

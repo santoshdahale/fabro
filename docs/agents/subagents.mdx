@@ -1,5 +1,127 @@
 ---
-title: "Subagents"
-description: "Spawning and managing subagents"
+title: "Sub-agents"
+description: "Delegate subtasks to child agent sessions"
 ---
 
+An agent can spawn **sub-agents** to delegate work to independent child sessions. Each sub-agent gets its own LLM session and tool access, runs concurrently with the parent, and returns its result when finished. This is useful for parallelizing research, isolating risky operations, or breaking complex tasks into focused pieces.
+
+<Note>
+Sub-agents are only available with the [API backend](/core-concepts/agents#api-backend-default) (the default). Agents using the [CLI backend](/core-concepts/agents#cli-backend) cannot spawn sub-agents.
+</Note>
+
+## Tools
+
+Sub-agent management is exposed through four built-in tools:
+
+| Tool | Description |
+|---|---|
+| `spawn_agent` | Create a new sub-agent with a task prompt |
+| `send_input` | Send a follow-up message to a running sub-agent |
+| `wait` | Block until a sub-agent completes and return its result |
+| `close_agent` | Cancel and remove a running sub-agent |
+
+These tools are registered automatically when the session starts. They inherit the parent's permissions -- no additional approval is needed for sub-agent tool calls.
+
+### spawn_agent
+
+Creates a new sub-agent session and starts it working on the given task.
+
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `task` | string | yes | The task description for the sub-agent |
+| `working_dir` | string | no | Working directory for the sub-agent |
+| `model` | string | no | Model to use for the sub-agent |
+| `max_turns` | integer | no | Maximum number of turns (default: 50) |
+
+Returns the `agent_id` string used to reference this sub-agent in subsequent calls.
+
+### send_input
+
+Sends a follow-up message to a running sub-agent. The message is queued and processed by the sub-agent on its next turn.
+
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `agent_id` | string | yes | The ID returned by `spawn_agent` |
+| `message` | string | yes | The message to send |
+
+### wait
+
+Blocks until the specified sub-agent completes, then returns its result. The result includes whether the sub-agent succeeded, how many turns it used, and the final text output.
+
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `agent_id` | string | yes | The ID returned by `spawn_agent` |
+
+Returns a formatted string:
+```
+Agent completed (success: true, turns: 12)
+
+<final assistant message text>
+```
+
+### close_agent
+
+Cancels a running sub-agent and removes it. Use this to clean up sub-agents that are no longer needed.
+
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `agent_id` | string | yes | The ID returned by `spawn_agent` |
+
+## Session isolation
+
+Each sub-agent runs in its own independent session:
+
+- **Own LLM conversation** -- the sub-agent has a fresh conversation history starting from the task prompt. It does not see the parent's prior conversation.
+- **Own tool access** -- the sub-agent has the same tools as the parent (shell, file editing, grep, etc.) and can use them independently.
+- **Concurrent execution** -- after `spawn_agent`, the parent continues working immediately. The sub-agent runs in a background task. Use `wait` to collect the result when needed.
+
+The parent can spawn multiple sub-agents and let them work in parallel, then `wait` on each to collect results:
+
+```
+1. spawn_agent("Research authentication patterns")  -> agent_a
+2. spawn_agent("Analyze the test suite structure")   -> agent_b
+3. ... parent does its own work ...
+4. wait(agent_a)  -> result_a
+5. wait(agent_b)  -> result_b
+6. Synthesize both results
+```
+
+## Depth limits
+
+Sub-agents can themselves spawn sub-agents, creating a hierarchy. The **maximum nesting depth** prevents runaway chains. By default, the depth limit is **1** -- a parent agent can spawn sub-agents, but those sub-agents cannot spawn their own children.
+
+If a sub-agent tries to spawn beyond the depth limit, the `spawn_agent` call returns an error:
+
+```
+Maximum subagent depth (1) reached
+```
+
+The depth limit is set via the `max_subagent_depth` field in the session configuration.
+
+## Event forwarding
+
+Sub-agent events (tool calls, assistant messages, errors) are forwarded to the parent session's event stream as `SubAgentEvent` wrappers. This means the parent's progress log captures the full activity of all children, giving you visibility into what sub-agents are doing.
+
+Key lifecycle events:
+
+| Event | When |
+|---|---|
+| `SubAgentSpawned` | A sub-agent was created |
+| `SubAgentCompleted` | A sub-agent finished successfully |
+| `SubAgentFailed` | A sub-agent encountered an error |
+| `SubAgentClosed` | A sub-agent was cancelled |
+
+Streaming events (text deltas, tool output deltas) from sub-agents are filtered out to reduce noise.
+
+## When to use sub-agents
+
+Sub-agents are most useful when:
+
+- **Parallel research** -- gather information from multiple parts of a codebase simultaneously
+- **Isolation** -- let a sub-agent try a risky approach without polluting the parent's context
+- **Divide and conquer** -- break a large task into independent pieces that can be worked on concurrently
+- **Context management** -- offload work to a sub-agent when the parent's context window is getting full
+
+<Note>
+Sub-agents have a default turn limit of 50. For larger tasks, pass a higher `max_turns` when spawning. The parent agent is blocked during a `wait` call, so spawn sub-agents before starting the wait to maximize concurrency.
+</Note>

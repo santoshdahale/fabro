@@ -16,6 +16,58 @@ Each agent turn follows the same cycle:
 
 This loop continues until the model stops calling tools, indicating it considers the task complete. Arc also enforces guardrails: token budgets, turn limits, and loop detection to prevent runaway agents.
 
+## Backends
+
+Every agent node uses a **backend** that determines how Arc interacts with the LLM. There are two options:
+
+### API backend (default)
+
+Arc manages the agent loop directly — it calls the LLM provider's API, executes built-in tools in the sandbox, and tracks file changes via tool call events. This is the default and supports the full feature set:
+
+- [Session caching](/execution/context) via `fidelity="full"` + `thread_id`
+- [Sub-agents](/agents/subagents)
+- Provider failover
+- All [built-in tools](/agents/tools) and [MCP](/agents/mcp) integrations
+
+### CLI backend
+
+Arc delegates execution to an external coding assistant CLI. The CLI tool manages its own tool loop internally — Arc sends the prompt, waits for the CLI to finish, and tracks file changes via `git diff` before and after execution.
+
+The CLI is selected automatically based on the node's provider:
+
+| Provider | CLI tool |
+|---|---|
+| Anthropic | `claude` |
+| OpenAI | `codex` |
+| Gemini | `gemini` |
+
+Set the CLI backend on a node with `backend="cli"` or via a [model stylesheet](/workflows/stylesheets):
+
+```dot
+implement [label="Implement", backend="cli", llm_provider="anthropic"]
+```
+
+```
+// Stylesheet
+* { backend: cli; }
+```
+
+### Comparison
+
+| Capability | API backend | CLI backend |
+|---|---|---|
+| Tools | Arc built-in tools + MCP | CLI's own tool set |
+| Session caching | Supported (`fidelity` + `thread_id`) | Not supported |
+| Sub-agents | Supported | Not supported |
+| Provider failover | Supported | Not supported |
+| File tracking | Tool call events | `git diff` before/after |
+
+### When to use the CLI backend
+
+- **CLI-specific tools** — leverage tool implementations built into a specific CLI (e.g. Claude Code's computer use, Codex's sandboxed execution)
+- **CLI-only models** — use models that are only available through a CLI tool, not via API
+- **Existing workflows** — integrate a CLI tool you already depend on without rewriting its configuration
+
 ## Tools
 
 Agents have access to a set of built-in tools for interacting with the codebase and environment:
