@@ -13,18 +13,14 @@
  */
 
 
-// May contain unused imports in some cases
-// @ts-ignore
-import type { CodeLocation } from './code-location';
 
 /**
- * Request body for sending inline steering guidance to a running agent.
+ * Reference to a verification category by name.
  */
-export interface SteerRequest {
-    'location'?: CodeLocation;
+export interface CategoryReference {
     /**
-     * Guidance text for the agent.
+     * Category name.
      */
-    'guidance': string;
+    'name': string;
 }
 

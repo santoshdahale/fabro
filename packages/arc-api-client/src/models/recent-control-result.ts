@@ -15,24 +15,20 @@
 
 // May contain unused imports in some cases
 // @ts-ignore
+import type { RunReference } from './run-reference';
+// May contain unused imports in some cases
+// @ts-ignore
 import type { VerificationStatus } from './verification-status';
+// May contain unused imports in some cases
+// @ts-ignore
+import type { WorkflowReference } from './workflow-reference';
 
 /**
  * Result of a recent verification control evaluation for a specific run.
  */
 export interface RecentControlResult {
-    /**
-     * Identifier of the run that was evaluated.
-     */
-    'run_id': string;
-    /**
-     * Title of the evaluated run.
-     */
-    'run_title': string;
-    /**
-     * Workflow that produced the run.
-     */
-    'workflow': string;
+    'run': RunReference;
+    'workflow': WorkflowReference;
     'result': VerificationStatus;
     /**
      * Human-readable relative timestamp of the evaluation.

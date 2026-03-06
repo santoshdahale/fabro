@@ -13,18 +13,18 @@
  */
 
 
-// May contain unused imports in some cases
-// @ts-ignore
-import type { CodeLocation } from './code-location';
 
 /**
- * Request body for sending inline steering guidance to a running agent.
+ * A file and line location in the codebase.
  */
-export interface SteerRequest {
-    'location'?: CodeLocation;
+export interface CodeLocation {
     /**
-     * Guidance text for the agent.
+     * File path.
      */
-    'guidance': string;
+    'file'?: string;
+    /**
+     * Line number in the file.
+     */
+    'line'?: number;
 }
 

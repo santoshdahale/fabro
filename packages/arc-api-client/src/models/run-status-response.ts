@@ -15,6 +15,9 @@
 
 // May contain unused imports in some cases
 // @ts-ignore
+import type { RunError } from './run-error';
+// May contain unused imports in some cases
+// @ts-ignore
 import type { RunStatus } from './run-status';
 
 /**
@@ -26,10 +29,7 @@ export interface RunStatusResponse {
      */
     'id': string;
     'status': RunStatus;
-    /**
-     * Error message if the run failed.
-     */
-    'error'?: string;
+    'error'?: RunError;
     /**
      * Position in the queue (1-based). Only present when status is `queued`.
      */

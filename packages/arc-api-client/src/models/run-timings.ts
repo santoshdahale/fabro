@@ -13,18 +13,18 @@
  */
 
 
-// May contain unused imports in some cases
-// @ts-ignore
-import type { CodeLocation } from './code-location';
 
 /**
- * Request body for sending inline steering guidance to a running agent.
+ * Timing information for a run.
  */
-export interface SteerRequest {
-    'location'?: CodeLocation;
+export interface RunTimings {
     /**
-     * Guidance text for the agent.
+     * Wall-clock time elapsed in seconds.
      */
-    'guidance': string;
+    'elapsed_secs': number;
+    /**
+     * Whether the elapsed time exceeds the expected threshold.
+     */
+    'elapsed_warning'?: boolean;
 }
 

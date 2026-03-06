@@ -19,21 +19,21 @@ export async function loader({ request, params }: Route.LoaderArgs) {
   const { data: apiRuns } = await apiJson<PaginatedRunList>(`/workflows/${params.name}/runs`, { request });
   const runs: RunWithStatus[] = apiRuns.map((r) => ({
     id: r.id,
-    repo: r.repo,
+    repo: r.repository.name,
     title: r.title,
-    workflow: r.workflow,
-    number: r.number,
-    additions: r.additions,
-    deletions: r.deletions,
-    checks: r.checks?.map((c) => ({
+    workflow: r.workflow.slug,
+    number: r.pull_request?.number,
+    additions: r.pull_request?.additions,
+    deletions: r.pull_request?.deletions,
+    checks: r.pull_request?.checks?.map((c) => ({
       name: c.name,
       status: c.status,
       duration: c.duration_secs != null ? formatDurationSecs(c.duration_secs) : undefined,
     })),
-    elapsed: r.elapsed_secs != null ? formatElapsedSecs(r.elapsed_secs) : undefined,
-    elapsedWarning: r.elapsed_warning,
-    comments: r.comments,
-    sandboxId: r.sandbox_id,
+    elapsed: r.timings?.elapsed_secs != null ? formatElapsedSecs(r.timings.elapsed_secs) : undefined,
+    elapsedWarning: r.timings?.elapsed_warning,
+    comments: r.pull_request?.comments,
+    sandboxId: r.sandbox?.id,
     status: r.status as ColumnStatus,
     statusLabel: columnNames[r.status as ColumnStatus] ?? r.status,
   }));

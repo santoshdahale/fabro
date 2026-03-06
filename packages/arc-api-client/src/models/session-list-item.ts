@@ -13,6 +13,9 @@
  */
 
 
+// May contain unused imports in some cases
+// @ts-ignore
+import type { ModelReference } from './model-reference';
 
 /**
  * Summary of a session shown in list views.
@@ -26,10 +29,7 @@ export interface SessionListItem {
      * Short title summarizing the session topic.
      */
     'title': string;
-    /**
-     * The LLM model used for this session.
-     */
-    'model': string;
+    'model': ModelReference;
     /**
      * Truncated snippet of the most recent turn\'s content.
      */

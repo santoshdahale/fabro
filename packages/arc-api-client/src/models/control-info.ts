@@ -15,6 +15,9 @@
 
 // May contain unused imports in some cases
 // @ts-ignore
+import type { CategoryReference } from './category-reference';
+// May contain unused imports in some cases
+// @ts-ignore
 import type { VerificationType } from './verification-type';
 
 /**
@@ -34,10 +37,7 @@ export interface ControlInfo {
      */
     'description': string;
     'type'?: VerificationType;
-    /**
-     * Name of the category this control belongs to.
-     */
-    'category': string;
+    'category': CategoryReference;
 }
 
 

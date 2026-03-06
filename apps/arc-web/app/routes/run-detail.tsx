@@ -27,14 +27,14 @@ export async function loader({ request, params }: Route.LoaderArgs) {
   return {
     run: {
       id: apiRun.id,
-      repo: apiRun.repo,
+      repo: apiRun.repository.name,
       title: apiRun.title,
-      workflow: apiRun.workflow,
+      workflow: apiRun.workflow.slug,
       status: apiRun.status as ColumnStatus,
       statusLabel: apiRun.status === "working" ? "Working" : apiRun.status === "pending" ? "Pending" : apiRun.status === "review" ? "Verify" : "Merge",
-      elapsed: apiRun.elapsed_secs != null ? formatElapsedSecs(apiRun.elapsed_secs) : undefined,
-      elapsedWarning: apiRun.elapsed_warning,
-      sandboxId: apiRun.sandbox_id,
+      elapsed: apiRun.timings?.elapsed_secs != null ? formatElapsedSecs(apiRun.timings.elapsed_secs) : undefined,
+      elapsedWarning: apiRun.timings?.elapsed_warning,
+      sandboxId: apiRun.sandbox?.id,
     },
   };
 }

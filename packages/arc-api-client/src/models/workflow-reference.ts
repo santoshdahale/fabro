@@ -13,18 +13,14 @@
  */
 
 
-// May contain unused imports in some cases
-// @ts-ignore
-import type { CodeLocation } from './code-location';
 
 /**
- * Request body for sending inline steering guidance to a running agent.
+ * Reference to a workflow by its slug.
  */
-export interface SteerRequest {
-    'location'?: CodeLocation;
+export interface WorkflowReference {
     /**
-     * Guidance text for the agent.
+     * URL-safe workflow slug.
      */
-    'guidance': string;
+    'slug': string;
 }
 

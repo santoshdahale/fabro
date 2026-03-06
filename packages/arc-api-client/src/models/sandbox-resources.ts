@@ -13,18 +13,18 @@
  */
 
 
-// May contain unused imports in some cases
-// @ts-ignore
-import type { CodeLocation } from './code-location';
 
 /**
- * Request body for sending inline steering guidance to a running agent.
+ * Compute resources allocated to a sandbox.
  */
-export interface SteerRequest {
-    'location'?: CodeLocation;
+export interface SandboxResources {
     /**
-     * Guidance text for the agent.
+     * Number of CPU cores.
      */
-    'guidance': string;
+    'cpu': number;
+    /**
+     * Memory in GB.
+     */
+    'memory': number;
 }
 

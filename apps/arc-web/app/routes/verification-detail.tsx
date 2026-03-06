@@ -213,7 +213,7 @@ export default function VerificationDetail({ loaderData }: Route.ComponentProps)
     description: controlInfo.description,
     type: (controlInfo.type ?? null) as VerificationType | null,
   };
-  const categoryName = controlInfo.category;
+  const categoryName = controlInfo.category.name;
   const performance = {
     f1: apiPerf.f1 ?? null,
     passAt1: apiPerf.pass_at_1 ?? null,
@@ -227,9 +227,9 @@ export default function VerificationDetail({ loaderData }: Route.ComponentProps)
     failExample: apiDetail.fail_example,
   } : null;
   const recentResults = apiRecentResults.map((r) => ({
-    runId: r.run_id,
-    runTitle: r.run_title,
-    workflow: r.workflow,
+    runId: r.run.id,
+    runTitle: r.run.title,
+    workflow: r.workflow.slug,
     result: r.result as VerificationStatus,
     timestamp: r.timestamp,
   }));

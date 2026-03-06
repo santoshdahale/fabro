@@ -13,18 +13,18 @@
  */
 
 
-// May contain unused imports in some cases
-// @ts-ignore
-import type { CodeLocation } from './code-location';
 
 /**
- * Request body for sending inline steering guidance to a running agent.
+ * Schedule configuration for a workflow.
  */
-export interface SteerRequest {
-    'location'?: CodeLocation;
+export interface WorkflowSchedule {
     /**
-     * Guidance text for the agent.
+     * Cron-like schedule expression.
      */
-    'guidance': string;
+    'expression': string;
+    /**
+     * Human-readable relative timestamp of the next run.
+     */
+    'next_run'?: string;
 }
 

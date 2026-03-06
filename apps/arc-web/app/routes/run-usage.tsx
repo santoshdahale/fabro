@@ -6,12 +6,12 @@ import type { Route } from "./+types/run-usage";
 export async function loader({ request, params }: Route.LoaderArgs) {
   const usage = await apiJson<RunUsage>(`/runs/${params.id}/usage`, { request });
   const stages = usage.stages.map((s) => ({
-    stage: s.stage,
-    model: s.model,
-    inputTokens: s.input_tokens,
-    outputTokens: s.output_tokens,
+    stage: s.stage.name,
+    model: s.model.id,
+    inputTokens: s.usage.input_tokens,
+    outputTokens: s.usage.output_tokens,
     runtime: formatDurationSecs(s.runtime_secs),
-    cost: s.cost,
+    cost: s.usage.cost,
   }));
   const totalRuntime = formatDurationSecs(usage.totals.runtime_secs);
   const totalCost = usage.totals.cost;
@@ -19,11 +19,11 @@ export async function loader({ request, params }: Route.LoaderArgs) {
   const totalOutput = usage.totals.output_tokens;
   const modelBreakdown = usage.by_model
     .map((m) => ({
-      model: m.model,
+      model: m.model.id,
       stages: m.stages,
-      inputTokens: m.input_tokens,
-      outputTokens: m.output_tokens,
-      cost: m.cost,
+      inputTokens: m.usage.input_tokens,
+      outputTokens: m.usage.output_tokens,
+      cost: m.usage.cost,
     }))
     .sort((a, b) => b.cost - a.cost);
   return { stages, totalRuntime, totalCost, totalInput, totalOutput, modelBreakdown };

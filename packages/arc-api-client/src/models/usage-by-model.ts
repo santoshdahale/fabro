@@ -13,30 +13,22 @@
  */
 
 
+// May contain unused imports in some cases
+// @ts-ignore
+import type { ModelReference } from './model-reference';
+// May contain unused imports in some cases
+// @ts-ignore
+import type { TokenUsage } from './token-usage';
 
 /**
  * Usage statistics grouped by model.
  */
 export interface UsageByModel {
-    /**
-     * Model slug.
-     */
-    'model': string;
+    'model': ModelReference;
     /**
      * Number of stages that used this model.
      */
     'stages': number;
-    /**
-     * Total input tokens for this model.
-     */
-    'input_tokens': number;
-    /**
-     * Total output tokens for this model.
-     */
-    'output_tokens': number;
-    /**
-     * Total cost in USD for this model.
-     */
-    'cost': number;
+    'usage': TokenUsage;
 }
 

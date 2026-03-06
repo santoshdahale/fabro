@@ -18,24 +18,20 @@
 import type { RetroStats } from './retro-stats';
 // May contain unused imports in some cases
 // @ts-ignore
+import type { RunReference } from './run-reference';
+// May contain unused imports in some cases
+// @ts-ignore
 import type { SmoothnessRating } from './smoothness-rating';
+// May contain unused imports in some cases
+// @ts-ignore
+import type { WorkflowReference } from './workflow-reference';
 
 /**
  * Summary of a run retrospective shown in list views.
  */
 export interface RetroListItem {
-    /**
-     * Identifier of the run this retro belongs to.
-     */
-    'run_id': string;
-    /**
-     * Name of the workflow that produced the run.
-     */
-    'workflow_name': string;
-    /**
-     * The run\'s goal.
-     */
-    'goal': string;
+    'run': RunReference;
+    'workflow': WorkflowReference;
     /**
      * Timestamp when the retro was generated.
      */

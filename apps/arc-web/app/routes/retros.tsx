@@ -20,9 +20,9 @@ interface RetroRow {
 export async function loader({ request }: Route.LoaderArgs) {
   const { data: apiRetros } = await apiJson<PaginatedRetroList>("/retros", { request });
   const retros: RetroRow[] = apiRetros.map((r) => ({
-    run_id: r.run_id,
-    workflow_name: r.workflow_name,
-    goal: r.goal,
+    run_id: r.run.id,
+    workflow_name: r.workflow.slug,
+    goal: r.run.title,
     timestamp: r.timestamp,
     smoothness: r.smoothness as SmoothnessRating | undefined,
     total_duration_ms: r.stats.total_duration_ms,

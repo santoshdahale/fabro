@@ -110,10 +110,10 @@ export async function loader({ request }: Route.LoaderArgs) {
     name: w.name,
     slug: w.slug,
     filename: w.filename,
-    lastRun: w.last_run ?? "never",
+    lastRun: w.last_run?.label ?? "never",
     color: slugColorMap[w.slug] ?? "var(--color-teal-500)",
-    schedule: w.schedule,
-    nextRun: w.next_run,
+    schedule: w.schedule?.expression,
+    nextRun: w.schedule?.next_run,
   }));
   return { workflows };
 }

@@ -28,7 +28,7 @@ export async function loader({ request, params }: Route.LoaderArgs) {
   const session: Session = {
     id: apiSession.id,
     title: apiSession.title,
-    model: apiSession.model,
+    model: apiSession.model.id,
     created_at: apiSession.created_at,
     updated_at: apiSession.updated_at,
     turns: apiSession.turns.map((t): Turn => {

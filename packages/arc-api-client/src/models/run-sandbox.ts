@@ -15,19 +15,16 @@
 
 // May contain unused imports in some cases
 // @ts-ignore
-import type { AggregateUsageTotals } from './aggregate-usage-totals';
-// May contain unused imports in some cases
-// @ts-ignore
-import type { UsageByModel } from './usage-by-model';
+import type { SandboxResources } from './sandbox-resources';
 
 /**
- * Aggregate token and cost usage across all runs since server start.
+ * Sandbox environment for a run.
  */
-export interface AggregateUsage {
-    'totals': AggregateUsageTotals;
+export interface RunSandbox {
     /**
-     * Usage grouped by model.
+     * Sandbox identifier.
      */
-    'by_model': Array<UsageByModel>;
+    'id': string;
+    'resources'?: SandboxResources;
 }
 

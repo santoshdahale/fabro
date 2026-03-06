@@ -13,6 +13,9 @@
  */
 
 
+// May contain unused imports in some cases
+// @ts-ignore
+import type { ModelReference } from './model-reference';
 
 /**
  * Response returned after successfully creating a session.
@@ -26,10 +29,7 @@ export interface CreateSessionResponse {
      * Server-generated title for the session.
      */
     'title': string;
-    /**
-     * The resolved LLM model for this session (may be the server default).
-     */
-    'model': string;
+    'model': ModelReference;
     /**
      * Timestamp when the session was created.
      */

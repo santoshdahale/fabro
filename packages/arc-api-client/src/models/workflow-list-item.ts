@@ -13,6 +13,12 @@
  */
 
 
+// May contain unused imports in some cases
+// @ts-ignore
+import type { WorkflowLastRun } from './workflow-last-run';
+// May contain unused imports in some cases
+// @ts-ignore
+import type { WorkflowSchedule } from './workflow-schedule';
 
 /**
  * Summary of a workflow shown in list views.
@@ -30,17 +36,7 @@ export interface WorkflowListItem {
      * DOT graph filename.
      */
     'filename': string;
-    /**
-     * Human-readable relative timestamp of the last run.
-     */
-    'last_run'?: string;
-    /**
-     * Cron-like schedule expression, if the workflow runs on a schedule.
-     */
-    'schedule'?: string;
-    /**
-     * Human-readable relative timestamp of the next scheduled run.
-     */
-    'next_run'?: string;
+    'last_run'?: WorkflowLastRun;
+    'schedule'?: WorkflowSchedule;
 }
 

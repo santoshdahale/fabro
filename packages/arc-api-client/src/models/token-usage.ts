@@ -13,18 +13,22 @@
  */
 
 
-// May contain unused imports in some cases
-// @ts-ignore
-import type { CodeLocation } from './code-location';
 
 /**
- * Request body for sending inline steering guidance to a running agent.
+ * Token and cost usage totals.
  */
-export interface SteerRequest {
-    'location'?: CodeLocation;
+export interface TokenUsage {
     /**
-     * Guidance text for the agent.
+     * Number of input tokens consumed.
      */
-    'guidance': string;
+    'input_tokens': number;
+    /**
+     * Number of output tokens generated.
+     */
+    'output_tokens': number;
+    /**
+     * Cost in USD.
+     */
+    'cost': number;
 }
 
