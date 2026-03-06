@@ -107,7 +107,7 @@
             "pages": [
               "examples/solitaire",
               "examples/semantic-port",
-              "examples/nlspec-convergence",
+              "examples/nlspec-conformance",
               "examples/clone-substack"
             ]
           }
