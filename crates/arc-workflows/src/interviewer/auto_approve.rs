@@ -16,6 +16,7 @@ impl Interviewer for AutoApproveInterviewer {
                     |first| Answer {
                         value: AnswerValue::Selected(first.key.clone()),
                         selected_option: Some(first.clone()),
+                        selected_options: Vec::new(),
                         text: None,
                     },
                 )

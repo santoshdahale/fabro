@@ -28,6 +28,7 @@ fn find_matching_option(response: &str, options: &[super::QuestionOption]) -> Op
             return Some(Answer {
                 value: AnswerValue::Selected(opt.key.clone()),
                 selected_option: Some(opt.clone()),
+                selected_options: Vec::new(),
                 text: None,
             });
         }
@@ -39,6 +40,7 @@ fn find_matching_option(response: &str, options: &[super::QuestionOption]) -> Op
             return Some(Answer {
                 value: AnswerValue::Selected(opt.key.clone()),
                 selected_option: Some(opt.clone()),
+                selected_options: Vec::new(),
                 text: None,
             });
         }
@@ -89,6 +91,7 @@ fn ask_select_interactive(question: &Question) -> Answer {
             Answer {
                 value: AnswerValue::Selected(opt.key.clone()),
                 selected_option: Some(opt.clone()),
+                selected_options: Vec::new(),
                 text: None,
             }
         }
@@ -111,13 +114,9 @@ fn ask_multi_select_interactive(question: &Question) -> Answer {
 
     match selection {
         Ok(Some(indices)) if !indices.is_empty() => {
-            let idx = indices[0];
-            let opt = &question.options[idx];
-            Answer {
-                value: AnswerValue::Selected(opt.key.clone()),
-                selected_option: Some(opt.clone()),
-                text: None,
-            }
+            let keys: Vec<String> = indices.iter().map(|&i| question.options[i].key.clone()).collect();
+            let options: Vec<_> = indices.iter().map(|&i| question.options[i].clone()).collect();
+            Answer::multi_selected(keys, options)
         }
         _ => Answer::skipped(),
     }

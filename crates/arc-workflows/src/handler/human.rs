@@ -255,6 +255,7 @@ fn answer_text(answer: &Answer) -> String {
     match &answer.value {
         AnswerValue::Text(t) => t.clone(),
         AnswerValue::Selected(s) => s.clone(),
+        AnswerValue::MultiSelected(keys) => keys.join(", "),
         AnswerValue::Yes => "yes".to_string(),
         AnswerValue::No => "no".to_string(),
         AnswerValue::Skipped => "skipped".to_string(),

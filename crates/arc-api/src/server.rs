@@ -767,30 +767,42 @@ async fn submit_answer(
                         .into_response();
                 }
             };
-            let answer = match &req.selected_option_key {
-                Some(key) => {
-                    let option = interviewer
-                        .pending_questions()
-                        .iter()
-                        .find(|pq| pq.id == qid)
-                        .and_then(|pq| pq.question.options.iter().find(|o| o.key == *key))
-                        .cloned();
-                    match option {
-                        Some(opt) => Answer::selected(key.clone(), opt),
+            let answer = if let Some(key) = &req.selected_option_key {
+                let option = interviewer
+                    .pending_questions()
+                    .iter()
+                    .find(|pq| pq.id == qid)
+                    .and_then(|pq| pq.question.options.iter().find(|o| o.key == *key))
+                    .cloned();
+                match option {
+                    Some(opt) => Answer::selected(key.clone(), opt),
+                    None => {
+                        return ApiError::bad_request("Invalid option key.").into_response();
+                    }
+                }
+            } else if !req.selected_option_keys.is_empty() {
+                let pending = interviewer.pending_questions();
+                let pq = pending.iter().find(|pq| pq.id == qid);
+                let mut options = Vec::new();
+                for key in &req.selected_option_keys {
+                    let opt = pq.and_then(|pq| {
+                        pq.question.options.iter().find(|o| o.key == *key).cloned()
+                    });
+                    match opt {
+                        Some(o) => options.push(o),
                         None => {
                             return ApiError::bad_request("Invalid option key.").into_response();
                         }
                     }
                 }
-                None => match req.value {
-                    Some(v) => Answer::text(v),
-                    None => {
-                        return ApiError::bad_request(
-                            "Either value or selected_option_key is required.",
-                        )
-                        .into_response();
-                    }
-                },
+                Answer::multi_selected(req.selected_option_keys, options)
+            } else if let Some(v) = req.value {
+                Answer::text(v)
+            } else {
+                return ApiError::bad_request(
+                    "One of value, selected_option_key, or selected_option_keys is required.",
+                )
+                .into_response();
             };
             let accepted = interviewer.submit_answer(&qid, answer);
             if accepted {

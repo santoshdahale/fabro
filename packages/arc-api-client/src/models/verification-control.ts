@@ -39,7 +39,7 @@ export interface VerificationControl {
      * Short description of what the control verifies.
      */
     'description': string;
-    'type'?: VerificationType;
+    'type': VerificationType;
     'mode'?: VerificationMode;
     /**
      * F1 score of the control\'s AI evaluator.

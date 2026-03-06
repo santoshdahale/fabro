@@ -946,7 +946,6 @@ mod runs {
     pub fn compare() -> RunCompare {
         RunCompare {
             checkpoints: vec![
-                FileCheckpoint { id: "all".into(), label: "All changes".into() },
                 FileCheckpoint { id: "cp-4".into(), label: "Checkpoint 4 — Apply Changes".into() },
                 FileCheckpoint { id: "cp-3".into(), label: "Checkpoint 3 — Review Changes".into() },
                 FileCheckpoint { id: "cp-2".into(), label: "Checkpoint 2 — Propose Changes".into() },
@@ -1454,7 +1453,7 @@ mod verifications {
         name: &'static str,
         slug: &'static str,
         description: &'static str,
-        type_: Option<VerificationType>,
+        type_: VerificationType,
         mode: VerificationMode,
         f1: Option<f64>,
         pass_at_1: Option<f64>,
@@ -1640,7 +1639,7 @@ mod verifications {
                 ControlDef {
                     name: "Motivation", slug: "motivation",
                     description: "Origin of proposal identified",
-                    type_: Some(VerificationType::Ai), mode: VerificationMode::Active,
+                    type_: VerificationType::Ai, mode: VerificationMode::Active,
                     f1: Some(0.87), pass_at_1: Some(0.82),
                     evaluations: &[P, P, F, P, P, P, P, F, P, P],
                     run_status: VerificationResult::Pass,
@@ -1653,7 +1652,7 @@ mod verifications {
                 ControlDef {
                     name: "Specifications", slug: "specifications",
                     description: "Requirements written down",
-                    type_: Some(VerificationType::Ai), mode: VerificationMode::Active,
+                    type_: VerificationType::Ai, mode: VerificationMode::Active,
                     f1: Some(0.83), pass_at_1: Some(0.78),
                     evaluations: &[P, F, P, P, P, F, P, P, P, P],
                     run_status: VerificationResult::Pass,
@@ -1666,7 +1665,7 @@ mod verifications {
                 ControlDef {
                     name: "Documentation", slug: "documentation",
                     description: "Developer and user docs added",
-                    type_: Some(VerificationType::Ai), mode: VerificationMode::Active,
+                    type_: VerificationType::Ai, mode: VerificationMode::Active,
                     f1: Some(0.79), pass_at_1: Some(0.74),
                     evaluations: &[P, P, P, F, P, P, F, P, P, F],
                     run_status: VerificationResult::Pass,
@@ -1679,7 +1678,7 @@ mod verifications {
                 ControlDef {
                     name: "Minimization", slug: "minimization",
                     description: "No extraneous changes",
-                    type_: Some(VerificationType::Ai), mode: VerificationMode::Evaluate,
+                    type_: VerificationType::Ai, mode: VerificationMode::Evaluate,
                     f1: Some(0.72), pass_at_1: Some(0.68),
                     evaluations: &[P, F, P, F, P, P, F, P, P, P],
                     run_status: VerificationResult::Pass,
@@ -1698,7 +1697,7 @@ mod verifications {
                 ControlDef {
                     name: "Formatting", slug: "formatting",
                     description: "Code layout matches standard",
-                    type_: Some(VerificationType::Automated), mode: VerificationMode::Active,
+                    type_: VerificationType::Automated, mode: VerificationMode::Active,
                     f1: Some(0.99), pass_at_1: Some(0.98),
                     evaluations: &[P, P, P, P, P, P, P, P, P, P],
                     run_status: VerificationResult::Pass,
@@ -1711,7 +1710,7 @@ mod verifications {
                 ControlDef {
                     name: "Linting", slug: "linting",
                     description: "Linter issues resolved",
-                    type_: Some(VerificationType::Automated), mode: VerificationMode::Active,
+                    type_: VerificationType::Automated, mode: VerificationMode::Active,
                     f1: Some(0.98), pass_at_1: Some(0.97),
                     evaluations: &[P, P, P, P, P, P, P, P, F, P],
                     run_status: VerificationResult::Pass,
@@ -1724,7 +1723,7 @@ mod verifications {
                 ControlDef {
                     name: "Style", slug: "style",
                     description: "House style applied",
-                    type_: Some(VerificationType::Ai), mode: VerificationMode::Active,
+                    type_: VerificationType::Ai, mode: VerificationMode::Active,
                     f1: Some(0.81), pass_at_1: Some(0.76),
                     evaluations: &[P, F, P, P, P, P, F, P, P, P],
                     run_status: VerificationResult::Pass,
@@ -1743,7 +1742,7 @@ mod verifications {
                 ControlDef {
                     name: "Completeness", slug: "completeness",
                     description: "Implementation covers requirements",
-                    type_: Some(VerificationType::Ai), mode: VerificationMode::Active,
+                    type_: VerificationType::Ai, mode: VerificationMode::Active,
                     f1: Some(0.76), pass_at_1: Some(0.71),
                     evaluations: &[P, P, F, P, F, P, P, P, F, P],
                     run_status: VerificationResult::Pass,
@@ -1756,7 +1755,7 @@ mod verifications {
                 ControlDef {
                     name: "Defects", slug: "defects",
                     description: "Potential or likely bugs remediated",
-                    type_: Some(VerificationType::AiAnalysis), mode: VerificationMode::Active,
+                    type_: VerificationType::AiAnalysis, mode: VerificationMode::Active,
                     f1: Some(0.84), pass_at_1: Some(0.79),
                     evaluations: &[P, P, P, F, P, P, P, P, P, F],
                     run_status: VerificationResult::Pass,
@@ -1769,7 +1768,7 @@ mod verifications {
                 ControlDef {
                     name: "Performance", slug: "performance",
                     description: "Hot path impact identified",
-                    type_: Some(VerificationType::Ai), mode: VerificationMode::Evaluate,
+                    type_: VerificationType::Ai, mode: VerificationMode::Evaluate,
                     f1: Some(0.69), pass_at_1: Some(0.63),
                     evaluations: &[F, P, P, F, P, F, P, P, F, P],
                     run_status: VerificationResult::Pass,
@@ -1788,7 +1787,7 @@ mod verifications {
                 ControlDef {
                     name: "Test Coverage", slug: "test-coverage",
                     description: "Production code exercised by unit tests",
-                    type_: Some(VerificationType::Analysis), mode: VerificationMode::Active,
+                    type_: VerificationType::Analysis, mode: VerificationMode::Active,
                     f1: Some(0.95), pass_at_1: Some(0.93),
                     evaluations: &[P, P, P, P, P, P, F, P, P, P],
                     run_status: VerificationResult::Pass,
@@ -1801,7 +1800,7 @@ mod verifications {
                 ControlDef {
                     name: "Test Quality", slug: "test-quality",
                     description: "Tests are robust and clear",
-                    type_: Some(VerificationType::Ai), mode: VerificationMode::Evaluate,
+                    type_: VerificationType::Ai, mode: VerificationMode::Evaluate,
                     f1: Some(0.71), pass_at_1: Some(0.65),
                     evaluations: &[P, F, F, P, P, F, P, F, P, P],
                     run_status: VerificationResult::Fail,
@@ -1814,7 +1813,7 @@ mod verifications {
                 ControlDef {
                     name: "E2E Coverage", slug: "e2e-coverage",
                     description: "Browser automation exercises UX",
-                    type_: Some(VerificationType::Analysis), mode: VerificationMode::Active,
+                    type_: VerificationType::Analysis, mode: VerificationMode::Active,
                     f1: Some(0.91), pass_at_1: Some(0.88),
                     evaluations: &[P, P, P, F, P, P, P, P, P, P],
                     run_status: VerificationResult::Na,
@@ -1833,7 +1832,7 @@ mod verifications {
                 ControlDef {
                     name: "Architecture", slug: "architecture",
                     description: "Layering and dependency graph meets design",
-                    type_: Some(VerificationType::Analysis), mode: VerificationMode::Active,
+                    type_: VerificationType::Analysis, mode: VerificationMode::Active,
                     f1: Some(0.88), pass_at_1: Some(0.84),
                     evaluations: &[P, P, P, P, F, P, P, P, P, P],
                     run_status: VerificationResult::Pass,
@@ -1846,7 +1845,7 @@ mod verifications {
                 ControlDef {
                     name: "Interfaces", slug: "interfaces",
                     description: "",
-                    type_: None, mode: VerificationMode::Disabled,
+                    type_: VerificationType::Ai, mode: VerificationMode::Disabled,
                     f1: None, pass_at_1: None,
                     evaluations: &[],
                     run_status: VerificationResult::Pass,
@@ -1859,7 +1858,7 @@ mod verifications {
                 ControlDef {
                     name: "Duplication", slug: "duplication",
                     description: "Similar and identical code blocks identified",
-                    type_: Some(VerificationType::Analysis), mode: VerificationMode::Active,
+                    type_: VerificationType::Analysis, mode: VerificationMode::Active,
                     f1: Some(0.96), pass_at_1: Some(0.94),
                     evaluations: &[P, P, P, P, P, P, P, F, P, P],
                     run_status: VerificationResult::Pass,
@@ -1872,7 +1871,7 @@ mod verifications {
                 ControlDef {
                     name: "Simplicity", slug: "simplicity",
                     description: "Extra review for reducing complexity",
-                    type_: Some(VerificationType::Ai), mode: VerificationMode::Active,
+                    type_: VerificationType::Ai, mode: VerificationMode::Active,
                     f1: Some(0.74), pass_at_1: Some(0.69),
                     evaluations: &[P, F, P, P, F, P, P, F, P, P],
                     run_status: VerificationResult::Pass,
@@ -1885,7 +1884,7 @@ mod verifications {
                 ControlDef {
                     name: "Dead Code", slug: "dead-code",
                     description: "Unexecuted code and dependencies removed",
-                    type_: Some(VerificationType::Analysis), mode: VerificationMode::Active,
+                    type_: VerificationType::Analysis, mode: VerificationMode::Active,
                     f1: Some(0.93), pass_at_1: Some(0.90),
                     evaluations: &[P, P, P, P, P, F, P, P, P, P],
                     run_status: VerificationResult::Pass,
@@ -1904,7 +1903,7 @@ mod verifications {
                 ControlDef {
                     name: "Vulnerabilities", slug: "vulnerabilities",
                     description: "Security issues are remediated",
-                    type_: Some(VerificationType::AiAnalysis), mode: VerificationMode::Active,
+                    type_: VerificationType::AiAnalysis, mode: VerificationMode::Active,
                     f1: Some(0.86), pass_at_1: Some(0.81),
                     evaluations: &[P, P, F, P, P, P, P, P, F, P],
                     run_status: VerificationResult::Pass,
@@ -1917,7 +1916,7 @@ mod verifications {
                 ControlDef {
                     name: "IaC Scanning", slug: "iac-scanning",
                     description: "",
-                    type_: None, mode: VerificationMode::Disabled,
+                    type_: VerificationType::Automated, mode: VerificationMode::Disabled,
                     f1: None, pass_at_1: None,
                     evaluations: &[],
                     run_status: VerificationResult::Pass,
@@ -1930,7 +1929,7 @@ mod verifications {
                 ControlDef {
                     name: "Dependency Alerts", slug: "dependency-alerts",
                     description: "Known CVEs are patched",
-                    type_: Some(VerificationType::Analysis), mode: VerificationMode::Active,
+                    type_: VerificationType::Analysis, mode: VerificationMode::Active,
                     f1: Some(0.97), pass_at_1: Some(0.95),
                     evaluations: &[P, P, P, P, P, P, P, P, P, F],
                     run_status: VerificationResult::Pass,
@@ -1943,7 +1942,7 @@ mod verifications {
                 ControlDef {
                     name: "Security Controls", slug: "security-controls",
                     description: "Organization standards applied",
-                    type_: Some(VerificationType::Ai), mode: VerificationMode::Active,
+                    type_: VerificationType::Ai, mode: VerificationMode::Active,
                     f1: Some(0.80), pass_at_1: Some(0.75),
                     evaluations: &[P, P, F, P, P, F, P, P, P, P],
                     run_status: VerificationResult::Pass,
@@ -1962,7 +1961,7 @@ mod verifications {
                 ControlDef {
                     name: "Compatibility", slug: "compatibility",
                     description: "Breaking changes are avoided",
-                    type_: Some(VerificationType::Analysis), mode: VerificationMode::Active,
+                    type_: VerificationType::Analysis, mode: VerificationMode::Active,
                     f1: Some(0.89), pass_at_1: Some(0.85),
                     evaluations: &[P, P, P, P, F, P, P, P, P, P],
                     run_status: VerificationResult::Pass,
@@ -1975,7 +1974,7 @@ mod verifications {
                 ControlDef {
                     name: "Rollout / Rollback", slug: "rollout-rollback",
                     description: "Known rollback plan if deploy fails",
-                    type_: Some(VerificationType::Ai), mode: VerificationMode::Evaluate,
+                    type_: VerificationType::Ai, mode: VerificationMode::Evaluate,
                     f1: Some(0.66), pass_at_1: Some(0.60),
                     evaluations: &[F, P, F, P, F, P, P, F, P, F],
                     run_status: VerificationResult::Fail,
@@ -1988,7 +1987,7 @@ mod verifications {
                 ControlDef {
                     name: "Observability", slug: "observability",
                     description: "Logging, metrics, tracing instrumented",
-                    type_: Some(VerificationType::Ai), mode: VerificationMode::Evaluate,
+                    type_: VerificationType::Ai, mode: VerificationMode::Evaluate,
                     f1: Some(0.73), pass_at_1: Some(0.67),
                     evaluations: &[P, F, P, F, P, P, F, P, F, P],
                     run_status: VerificationResult::Fail,
@@ -2001,7 +2000,7 @@ mod verifications {
                 ControlDef {
                     name: "Cost", slug: "cost",
                     description: "Tech ops costs estimated",
-                    type_: Some(VerificationType::Analysis), mode: VerificationMode::Evaluate,
+                    type_: VerificationType::Analysis, mode: VerificationMode::Evaluate,
                     f1: Some(0.78), pass_at_1: Some(0.72),
                     evaluations: &[P, P, F, P, F, P, P, F, P, P],
                     run_status: VerificationResult::Pass,
@@ -2020,7 +2019,7 @@ mod verifications {
                 ControlDef {
                     name: "Change Control", slug: "change-control",
                     description: "Separation of Duties policy met",
-                    type_: Some(VerificationType::Analysis), mode: VerificationMode::Active,
+                    type_: VerificationType::Analysis, mode: VerificationMode::Active,
                     f1: Some(0.94), pass_at_1: Some(0.91),
                     evaluations: &[P, P, P, P, P, P, P, P, F, P],
                     run_status: VerificationResult::Pass,
@@ -2033,7 +2032,7 @@ mod verifications {
                 ControlDef {
                     name: "AI Governance", slug: "ai-governance",
                     description: "AI involvement was acceptable",
-                    type_: Some(VerificationType::Analysis), mode: VerificationMode::Active,
+                    type_: VerificationType::Analysis, mode: VerificationMode::Active,
                     f1: Some(0.85), pass_at_1: Some(0.80),
                     evaluations: &[P, P, P, F, P, P, P, P, P, P],
                     run_status: VerificationResult::Pass,
@@ -2046,7 +2045,7 @@ mod verifications {
                 ControlDef {
                     name: "Privacy", slug: "privacy",
                     description: "PII is identified and handled to standards",
-                    type_: Some(VerificationType::Ai), mode: VerificationMode::Active,
+                    type_: VerificationType::Ai, mode: VerificationMode::Active,
                     f1: Some(0.77), pass_at_1: Some(0.72),
                     evaluations: &[P, F, P, P, P, F, P, P, P, F],
                     run_status: VerificationResult::Pass,
@@ -2059,7 +2058,7 @@ mod verifications {
                 ControlDef {
                     name: "Accessibility", slug: "accessibility",
                     description: "Software meets accessibility requirements",
-                    type_: Some(VerificationType::Analysis), mode: VerificationMode::Active,
+                    type_: VerificationType::Analysis, mode: VerificationMode::Active,
                     f1: Some(0.90), pass_at_1: Some(0.87),
                     evaluations: &[P, P, P, P, P, F, P, P, P, P],
                     run_status: VerificationResult::Pass,
@@ -2072,7 +2071,7 @@ mod verifications {
                 ControlDef {
                     name: "Licensing", slug: "licensing",
                     description: "Supply chain meets IP policy",
-                    type_: Some(VerificationType::Analysis), mode: VerificationMode::Active,
+                    type_: VerificationType::Analysis, mode: VerificationMode::Active,
                     f1: Some(0.96), pass_at_1: Some(0.93),
                     evaluations: &[P, P, P, P, P, P, P, P, P, P],
                     run_status: VerificationResult::Pass,
@@ -2155,7 +2154,7 @@ mod verifications {
                         .map(|(_, s)| SiblingControl {
                             name: s.name.into(),
                             slug: s.slug.into(),
-                            type_: s.type_,
+                            type_: Some(s.type_),
                             mode: Some(s.mode),
                         })
                         .collect();
@@ -2170,7 +2169,7 @@ mod verifications {
                             name: ctrl.name.into(),
                             slug: ctrl.slug.into(),
                             description: ctrl.description.into(),
-                            type_: ctrl.type_,
+                            type_: Some(ctrl.type_),
                             category: CategoryReference { name: cat.name.into() },
                         },
                         performance: ControlPerformance {
@@ -2206,6 +2205,7 @@ mod verifications {
                     .iter()
                     .map(|c| RunVerificationControl {
                         name: c.name.into(),
+                        slug: c.slug.into(),
                         description: c.description.into(),
                         type_: c.type_,
                         status: c.run_status,

@@ -15,7 +15,7 @@
 
 
 /**
- * Request body for submitting an answer to a pending question.
+ * Request body for submitting an answer to a pending question. At least one of `value`, `selected_option_key`, or `selected_option_keys` must be provided. 
  */
 export interface SubmitAnswerRequest {
     /**
@@ -23,8 +23,12 @@ export interface SubmitAnswerRequest {
      */
     'value'?: string;
     /**
-     * Key of the selected option (for multiple-choice questions).
+     * Key of the selected option (for single-select multiple-choice questions).
      */
     'selected_option_key'?: string;
+    /**
+     * Keys of selected options (for multi-select questions).
+     */
+    'selected_option_keys'?: Array<string>;
 }
 

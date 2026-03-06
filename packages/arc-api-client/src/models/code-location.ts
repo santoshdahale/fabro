@@ -21,7 +21,7 @@ export interface CodeLocation {
     /**
      * File path.
      */
-    'file'?: string;
+    'file': string;
     /**
      * Line number in the file.
      */

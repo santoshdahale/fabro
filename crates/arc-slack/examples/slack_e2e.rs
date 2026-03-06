@@ -86,6 +86,7 @@ fn format_answer(answer: &Answer) -> String {
                 k.clone()
             }
         }
+        AnswerValue::MultiSelected(keys) => keys.join(", "),
         AnswerValue::Skipped => "Skipped".to_string(),
         AnswerValue::Timeout => "Timed out".to_string(),
     }

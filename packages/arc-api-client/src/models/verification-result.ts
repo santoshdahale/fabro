@@ -15,7 +15,7 @@
 
 
 /**
- * Outcome of a verification control evaluation.
+ * Outcome of a verification control evaluation. `skip`: evaluation was intentionally skipped (e.g., control is disabled). `na`: control does not apply to this run (e.g., Python lint on a Rust-only change). 
  */
 
 export const VerificationResult = {

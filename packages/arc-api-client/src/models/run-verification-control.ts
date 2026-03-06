@@ -29,10 +29,14 @@ export interface RunVerificationControl {
      */
     'name': string;
     /**
+     * URL-safe slug for linking to verification detail page.
+     */
+    'slug': string;
+    /**
      * Short description of what the control verifies.
      */
     'description': string;
-    'type'?: VerificationType;
+    'type': VerificationType;
     'status': VerificationResult;
 }
 

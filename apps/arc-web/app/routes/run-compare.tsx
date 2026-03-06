@@ -14,7 +14,7 @@ import type { Route } from "./+types/run-compare";
 export const handle = { wide: true };
 
 export async function loader({ request, params }: Route.LoaderArgs) {
-  const data = await apiJson<RunCompare>(`/runs/${params.id}/compare?checkpoint=all`, { request });
+  const data = await apiJson<RunCompare>(`/runs/${params.id}/compare`, { request });
   return data;
 }
 

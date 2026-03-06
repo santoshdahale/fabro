@@ -438,9 +438,9 @@ paths:
 
   /runs/{id}/compare:
     get:
-      operationId: retrieveRunDiff
+      operationId: retrieveRunCompare
       tags: [Run Outputs]
-      summary: List Run Compare
+      summary: Retrieve Run Compare
       description: Returns file-level diffs produced by the run, optionally filtered to a specific checkpoint.
       parameters:
         - $ref: "#/components/parameters/RunId"
@@ -550,6 +550,12 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: Run is not in a steerable state
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
 
   /runs/{id}/preview:
     post:
@@ -574,6 +580,12 @@ paths:
                 $ref: "#/components/schemas/PreviewUrlResponse"
         "404":
           description: Run not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: Run has no active sandbox
           content:
             application/json:
               schema:
@@ -1174,10 +1186,9 @@ components:
       name: checkpoint
       in: query
       required: false
-      description: Filter file diffs to a specific checkpoint. Defaults to all changes.
+      description: Filter to a specific checkpoint ID. Omit to include all changes.
       schema:
         type: string
-        default: "all"
       example: cp-3
 
     PageLimit:
@@ -1506,7 +1517,9 @@ components:
         - confirmation
 
     SubmitAnswerRequest:
-      description: Request body for submitting an answer to a pending question.
+      description: >
+        Request body for submitting an answer to a pending question.
+        At least one of `value`, `selected_option_key`, or `selected_option_keys` must be provided.
       type: object
       properties:
         value:
@@ -1515,8 +1528,14 @@ components:
           example: "Yes, proceed with the changes."
         selected_option_key:
           type: string
-          description: Key of the selected option (for multiple-choice questions).
+          description: Key of the selected option (for single-select multiple-choice questions).
           example: option_a
+        selected_option_keys:
+          type: array
+          items:
+            type: string
+          description: Keys of selected options (for multi-select questions).
+          example: ["option_a", "option_b"]
 
     ErrorResponseEntry:
       description: A single error entry in an error response.
@@ -1676,6 +1695,8 @@ components:
     CodeLocation:
       description: A file and line location in the codebase.
       type: object
+      required:
+        - file
       properties:
         file:
           type: string
@@ -2228,7 +2249,10 @@ components:
     # ── Verification Schemas ─────────────────────────────────────────────
 
     VerificationResult:
-      description: Outcome of a verification control evaluation.
+      description: >
+        Outcome of a verification control evaluation.
+        `skip`: evaluation was intentionally skipped (e.g., control is disabled).
+        `na`: control does not apply to this run (e.g., Python lint on a Rust-only change).
       type: string
       enum:
         - pass
@@ -2250,13 +2274,19 @@ components:
       type: object
       required:
         - name
+        - slug
         - description
+        - type
         - status
       properties:
         name:
           type: string
           description: Human-readable control name.
           example: Motivation
+        slug:
+          type: string
+          description: URL-safe slug for linking to verification detail page.
+          example: motivation
         description:
           type: string
           description: Short description of what the control verifies.
@@ -2318,6 +2348,8 @@ components:
         expires_in_secs:
           type: integer
           description: Time-to-live for the preview URL in seconds.
+          minimum: 1
+          maximum: 86400
           example: 3600
 
     PreviewUrlResponse:
@@ -2409,6 +2441,7 @@ components:
         - name
         - slug
         - description
+        - type
       properties:
         name:
           type: string

@@ -87,15 +87,15 @@ export const RunOutputsApiAxiosParamCreator = function (configuration?: Configur
         },
         /**
          * Returns file-level diffs produced by the run, optionally filtered to a specific checkpoint.
-         * @summary List Run Compare
+         * @summary Retrieve Run Compare
          * @param {string} id Unique run identifier (ULID).
-         * @param {string} [checkpoint] Filter file diffs to a specific checkpoint. Defaults to all changes.
+         * @param {string} [checkpoint] Filter to a specific checkpoint ID. Omit to include all changes.
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        retrieveRunDiff: async (id: string, checkpoint?: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+        retrieveRunCompare: async (id: string, checkpoint?: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
             // verify required parameter 'id' is not null or undefined
-            assertParamExists('retrieveRunDiff', 'id', id)
+            assertParamExists('retrieveRunCompare', 'id', id)
             const localVarPath = `/runs/{id}/compare`
                 .replace(`{${"id"}}`, encodeURIComponent(String(id)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
@@ -198,16 +198,16 @@ export const RunOutputsApiFp = function(configuration?: Configuration) {
         },
         /**
          * Returns file-level diffs produced by the run, optionally filtered to a specific checkpoint.
-         * @summary List Run Compare
+         * @summary Retrieve Run Compare
          * @param {string} id Unique run identifier (ULID).
-         * @param {string} [checkpoint] Filter file diffs to a specific checkpoint. Defaults to all changes.
+         * @param {string} [checkpoint] Filter to a specific checkpoint ID. Omit to include all changes.
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        async retrieveRunDiff(id: string, checkpoint?: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<RunCompare>> {
-            const localVarAxiosArgs = await localVarAxiosParamCreator.retrieveRunDiff(id, checkpoint, options);
+        async retrieveRunCompare(id: string, checkpoint?: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<RunCompare>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.retrieveRunCompare(id, checkpoint, options);
             const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
-            const localVarOperationServerBasePath = operationServerMap['RunOutputsApi.retrieveRunDiff']?.[localVarOperationServerIndex]?.url;
+            const localVarOperationServerBasePath = operationServerMap['RunOutputsApi.retrieveRunCompare']?.[localVarOperationServerIndex]?.url;
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
@@ -246,14 +246,14 @@ export const RunOutputsApiFactory = function (configuration?: Configuration, bas
         },
         /**
          * Returns file-level diffs produced by the run, optionally filtered to a specific checkpoint.
-         * @summary List Run Compare
+         * @summary Retrieve Run Compare
          * @param {string} id Unique run identifier (ULID).
-         * @param {string} [checkpoint] Filter file diffs to a specific checkpoint. Defaults to all changes.
+         * @param {string} [checkpoint] Filter to a specific checkpoint ID. Omit to include all changes.
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        retrieveRunDiff(id: string, checkpoint?: string, options?: RawAxiosRequestConfig): AxiosPromise<RunCompare> {
-            return localVarFp.retrieveRunDiff(id, checkpoint, options).then((request) => request(axios, basePath));
+        retrieveRunCompare(id: string, checkpoint?: string, options?: RawAxiosRequestConfig): AxiosPromise<RunCompare> {
+            return localVarFp.retrieveRunCompare(id, checkpoint, options).then((request) => request(axios, basePath));
         },
         /**
          * Returns token and cost usage broken down by stage and model for a specific run.
@@ -287,14 +287,14 @@ export class RunOutputsApi extends BaseAPI {
 
     /**
      * Returns file-level diffs produced by the run, optionally filtered to a specific checkpoint.
-     * @summary List Run Compare
+     * @summary Retrieve Run Compare
      * @param {string} id Unique run identifier (ULID).
-     * @param {string} [checkpoint] Filter file diffs to a specific checkpoint. Defaults to all changes.
+     * @param {string} [checkpoint] Filter to a specific checkpoint ID. Omit to include all changes.
      * @param {*} [options] Override http request option.
      * @throws {RequiredError}
      */
-    public retrieveRunDiff(id: string, checkpoint?: string, options?: RawAxiosRequestConfig) {
-        return RunOutputsApiFp(this.configuration).retrieveRunDiff(id, checkpoint, options).then((request) => request(this.axios, this.basePath));
+    public retrieveRunCompare(id: string, checkpoint?: string, options?: RawAxiosRequestConfig) {
+        return RunOutputsApiFp(this.configuration).retrieveRunCompare(id, checkpoint, options).then((request) => request(this.axios, this.basePath));
     }
 
     /**
