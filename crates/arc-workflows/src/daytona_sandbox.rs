@@ -781,7 +781,7 @@ impl Sandbox for DaytonaSandbox {
         command: &str,
         timeout_ms: u64,
         working_dir: Option<&str>,
-        _env_vars: Option<&HashMap<String, String>>,
+        env_vars: Option<&HashMap<String, String>>,
         _cancel_token: Option<tokio_util::sync::CancellationToken>,
     ) -> Result<ExecResult, String> {
         let sandbox = self.sandbox()?;
@@ -798,8 +798,8 @@ impl Sandbox for DaytonaSandbox {
 
         let options = daytona_sdk::ExecuteCommandOptions {
             cwd: Some(cwd),
+            env: env_vars.cloned(),
             timeout: Some(std::time::Duration::from_millis(timeout_ms)),
-            ..Default::default()
         };
 
         // Wrap with `bash -c` so pipes, env vars, and shell features work.

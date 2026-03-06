@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::path::Path;
 use std::sync::Arc;
 
@@ -317,8 +318,15 @@ impl CodergenBackend for AgentCliBackend {
             let _ = tokio::fs::write(stage_dir.join("provider_used.json"), json).await;
         }
 
+        // Forward provider API keys so CLI tools can authenticate
+        let env_vars: HashMap<String, String> = provider
+            .api_key_env_vars()
+            .iter()
+            .filter_map(|name| std::env::var(name).ok().map(|val| (name.to_string(), val)))
+            .collect();
+
         let result = sandbox
-            .exec_command(&command, 600_000, None, None, None)
+            .exec_command(&command, 600_000, None, Some(&env_vars), None)
             .await
             .map_err(|e| ArcError::handler(format!("CLI command failed: {e}")))?;
 
@@ -332,11 +340,19 @@ impl CodergenBackend for AgentCliBackend {
         }
 
         if result.exit_code != 0 {
+            let _ = tokio::fs::write(stage_dir.join("cli_stdout.log"), &result.stdout).await;
+            let _ = tokio::fs::write(stage_dir.join("cli_stderr.log"), &result.stderr).await;
+
             let stderr: String = result.stderr.chars().rev().take(500).collect::<Vec<_>>().into_iter().rev().collect();
-            let detail = if stderr.is_empty() {
-                format!("command: {command}")
-            } else {
+            let detail = if !stderr.is_empty() {
                 stderr
+            } else {
+                let stdout: String = result.stdout.chars().rev().take(500).collect::<Vec<_>>().into_iter().rev().collect();
+                if !stdout.is_empty() {
+                    format!("stdout: {stdout}")
+                } else {
+                    format!("command: {command}")
+                }
             };
             return Err(ArcError::handler(format!(
                 "CLI command exited with code {}: {detail}",
