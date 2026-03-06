@@ -8174,8 +8174,8 @@ async fn fidelity_prompt_summary_high() {
         "summary:high: should have stage heading for run_tests"
     );
     assert!(
-        prompt.contains("## Stage: start"),
-        "summary:high: should have stage heading for start"
+        !prompt.contains("## Stage: start"),
+        "summary:high: should not have stage heading for meta start node"
     );
     assert!(
         prompt.contains("Pipeline progress:"),

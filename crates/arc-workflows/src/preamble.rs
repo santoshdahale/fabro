@@ -71,6 +71,18 @@ pub fn build_preamble(
 // Helpers
 // ---------------------------------------------------------------------------
 
+fn is_meta_handler(graph: &Graph, node_id: &str) -> bool {
+    graph
+        .nodes
+        .get(node_id)
+        .and_then(|n| n.handler_type())
+        .is_some_and(|h| h == "start" || h == "exit")
+}
+
+fn is_blank_value(val: Option<&serde_json::Value>) -> bool {
+    val.and_then(|v| v.as_str()).is_some_and(|s| s.is_empty())
+}
+
 fn is_context_key_excluded(key: &str) -> bool {
     key.starts_with(keys::INTERNAL_PREFIX)
         || key.starts_with(keys::CURRENT_PREFIX)
@@ -290,7 +302,11 @@ fn append_filtered_context(
     let snapshot = context.snapshot();
     let mut context_keys: Vec<&String> = snapshot
         .keys()
-        .filter(|k| !is_context_key_excluded(k) && !rendered_keys.contains(*k))
+        .filter(|k| {
+            !is_context_key_excluded(k)
+                && !rendered_keys.contains(*k)
+                && !is_blank_value(snapshot.get(*k))
+        })
         .collect();
     if !context_keys.is_empty() {
         context_keys.sort();
@@ -312,7 +328,11 @@ fn append_filtered_context_table(
     let snapshot = context.snapshot();
     let mut context_keys: Vec<&String> = snapshot
         .keys()
-        .filter(|k| !is_context_key_excluded(k) && !rendered_keys.contains(*k))
+        .filter(|k| {
+            !is_context_key_excluded(k)
+                && !rendered_keys.contains(*k)
+                && !is_blank_value(snapshot.get(*k))
+        })
         .collect();
     if !context_keys.is_empty() {
         context_keys.sort();
@@ -343,9 +363,16 @@ fn build_compact_preamble(
 
     let mut all_rendered_keys = HashSet::new();
 
-    if !completed_nodes.is_empty() {
-        parts.push(String::from("\n## Completed stages"));
+    {
+        let mut header_emitted = false;
         for node_id in completed_nodes {
+            if is_meta_handler(graph, node_id) {
+                continue;
+            }
+            if !header_emitted {
+                parts.push(String::from("\n## Completed stages"));
+                header_emitted = true;
+            }
             let node = graph.nodes.get(node_id);
             if let Some(outcome) = node_outcomes.get(node_id) {
                 let status = &outcome.status;
@@ -394,14 +421,23 @@ fn build_summary_preamble(
 
     match detail {
         SummaryDetail::High => {
-            // Pipeline progress: count all nodes (including start/exit)
-            let total_nodes = graph.nodes.len();
-            let completed_count = completed_nodes.len();
+            let total_nodes = graph
+                .nodes
+                .keys()
+                .filter(|id| !is_meta_handler(graph, id))
+                .count();
+            let completed_count = completed_nodes
+                .iter()
+                .filter(|id| !is_meta_handler(graph, id))
+                .count();
             parts.push(format!(
                 "Pipeline progress: {completed_count} of {total_nodes} stages completed"
             ));
 
             for node_id in completed_nodes {
+                if is_meta_handler(graph, node_id) {
+                    continue;
+                }
                 let node = graph.nodes.get(node_id);
                 if let Some(outcome) = node_outcomes.get(node_id) {
                     let section = render_summary_high_stage_section(node_id, node, outcome);
@@ -428,9 +464,16 @@ fn build_summary_preamble(
                 completed_nodes.iter().collect()
             };
 
-            if !stages_to_show.is_empty() {
-                parts.push(String::from("\nRecent stages:"));
+            {
+                let mut header_emitted = false;
                 for node_id in &stages_to_show {
+                    if is_meta_handler(graph, node_id) {
+                        continue;
+                    }
+                    if !header_emitted {
+                        parts.push(String::from("\nRecent stages:"));
+                        header_emitted = true;
+                    }
                     if let Some(outcome) = node_outcomes.get(*node_id) {
                         let status = outcome.status.to_string();
                         let mut line = format!("- {node_id}: {status}");
@@ -468,9 +511,16 @@ fn build_summary_preamble(
                 completed_nodes.iter().collect()
             };
 
-            if !stages_to_show.is_empty() {
-                parts.push(String::from("\nRecent stages:"));
+            {
+                let mut header_emitted = false;
                 for node_id in &stages_to_show {
+                    if is_meta_handler(graph, node_id) {
+                        continue;
+                    }
+                    if !header_emitted {
+                        parts.push(String::from("\nRecent stages:"));
+                        header_emitted = true;
+                    }
                     if let Some(outcome) = node_outcomes.get(*node_id) {
                         let status = outcome.status.to_string();
                         let mut line = format!("- {node_id}: {status}");
@@ -1623,6 +1673,340 @@ mod tests {
         assert!(!is_context_key_excluded("user.name"));
         assert!(!is_context_key_excluded("custom.key"));
         assert!(!is_context_key_excluded(keys::COMMAND_OUTPUT));
+    }
+
+    // --- meta node filtering ---
+
+    #[test]
+    fn compact_preamble_excludes_start_node() {
+        let mut graph = Graph::new("test");
+        let mut start = Node::new("start");
+        start.attrs.insert(
+            "shape".to_string(),
+            AttrValue::String("Mdiamond".to_string()),
+        );
+        graph.nodes.insert("start".to_string(), start);
+        let plan = Node::new("plan");
+        graph.nodes.insert("plan".to_string(), plan);
+
+        let context = Context::new();
+        let completed_nodes = vec!["start".to_string(), "plan".to_string()];
+        let mut node_outcomes: HashMap<String, Outcome> = HashMap::new();
+        node_outcomes.insert("start".to_string(), Outcome::success());
+        node_outcomes.insert("plan".to_string(), Outcome::success());
+
+        let preamble = build_preamble(
+            keys::Fidelity::Compact,
+            &context,
+            &graph,
+            &completed_nodes,
+            &node_outcomes,
+        );
+
+        assert!(
+            !preamble.contains("**start**"),
+            "should not show start node, got:\n{preamble}"
+        );
+        assert!(
+            preamble.contains("**plan**"),
+            "should show non-meta nodes"
+        );
+    }
+
+    #[test]
+    fn summary_high_excludes_start_node() {
+        let mut graph = Graph::new("test");
+        let mut start = Node::new("start");
+        start.attrs.insert(
+            "shape".to_string(),
+            AttrValue::String("Mdiamond".to_string()),
+        );
+        graph.nodes.insert("start".to_string(), start);
+        let work = Node::new("work");
+        graph.nodes.insert("work".to_string(), work);
+
+        let context = Context::new();
+        let completed_nodes = vec!["start".to_string(), "work".to_string()];
+        let mut node_outcomes: HashMap<String, Outcome> = HashMap::new();
+        node_outcomes.insert("start".to_string(), Outcome::success());
+        node_outcomes.insert("work".to_string(), Outcome::success());
+
+        let preamble = build_preamble(
+            keys::Fidelity::SummaryHigh,
+            &context,
+            &graph,
+            &completed_nodes,
+            &node_outcomes,
+        );
+
+        assert!(
+            !preamble.contains("## Stage: start"),
+            "should not show start stage, got:\n{preamble}"
+        );
+        assert!(
+            preamble.contains("## Stage: work"),
+            "should show non-meta stages"
+        );
+    }
+
+    #[test]
+    fn summary_high_progress_excludes_meta_nodes() {
+        let mut graph = Graph::new("test");
+        let mut start = Node::new("start");
+        start.attrs.insert(
+            "shape".to_string(),
+            AttrValue::String("Mdiamond".to_string()),
+        );
+        graph.nodes.insert("start".to_string(), start);
+        let work = Node::new("work");
+        graph.nodes.insert("work".to_string(), work);
+        let test_node = Node::new("test");
+        graph.nodes.insert("test".to_string(), test_node);
+        let mut exit = Node::new("exit");
+        exit.attrs.insert(
+            "shape".to_string(),
+            AttrValue::String("Msquare".to_string()),
+        );
+        graph.nodes.insert("exit".to_string(), exit);
+
+        let context = Context::new();
+        let completed_nodes = vec!["start".to_string(), "work".to_string()];
+        let mut node_outcomes: HashMap<String, Outcome> = HashMap::new();
+        node_outcomes.insert("start".to_string(), Outcome::success());
+        node_outcomes.insert("work".to_string(), Outcome::success());
+
+        let preamble = build_preamble(
+            keys::Fidelity::SummaryHigh,
+            &context,
+            &graph,
+            &completed_nodes,
+            &node_outcomes,
+        );
+
+        assert!(
+            preamble.contains("1 of 2 stages completed"),
+            "should exclude meta nodes from progress count, got:\n{preamble}"
+        );
+    }
+
+    #[test]
+    fn summary_medium_excludes_start_node() {
+        let mut graph = Graph::new("test");
+        let mut start = Node::new("start");
+        start.attrs.insert(
+            "shape".to_string(),
+            AttrValue::String("Mdiamond".to_string()),
+        );
+        graph.nodes.insert("start".to_string(), start);
+        let work = Node::new("work");
+        graph.nodes.insert("work".to_string(), work);
+
+        let context = Context::new();
+        let completed_nodes = vec!["start".to_string(), "work".to_string()];
+        let mut node_outcomes: HashMap<String, Outcome> = HashMap::new();
+        node_outcomes.insert("start".to_string(), Outcome::success());
+        node_outcomes.insert("work".to_string(), Outcome::success());
+
+        let preamble = build_preamble(
+            keys::Fidelity::SummaryMedium,
+            &context,
+            &graph,
+            &completed_nodes,
+            &node_outcomes,
+        );
+
+        assert!(
+            !preamble.contains("- start:"),
+            "should not show start stage, got:\n{preamble}"
+        );
+        assert!(
+            preamble.contains("- work:"),
+            "should show non-meta stages"
+        );
+    }
+
+    #[test]
+    fn summary_low_excludes_start_node() {
+        let mut graph = Graph::new("test");
+        let mut start = Node::new("start");
+        start.attrs.insert(
+            "shape".to_string(),
+            AttrValue::String("Mdiamond".to_string()),
+        );
+        graph.nodes.insert("start".to_string(), start);
+        let work = Node::new("work");
+        graph.nodes.insert("work".to_string(), work);
+
+        let context = Context::new();
+        let completed_nodes = vec!["start".to_string(), "work".to_string()];
+        let mut node_outcomes: HashMap<String, Outcome> = HashMap::new();
+        node_outcomes.insert("start".to_string(), Outcome::success());
+        node_outcomes.insert("work".to_string(), Outcome::success());
+
+        let preamble = build_preamble(
+            keys::Fidelity::SummaryLow,
+            &context,
+            &graph,
+            &completed_nodes,
+            &node_outcomes,
+        );
+
+        assert!(
+            !preamble.contains("- start:"),
+            "should not show start stage, got:\n{preamble}"
+        );
+        assert!(
+            preamble.contains("- work:"),
+            "should show non-meta stages"
+        );
+    }
+
+    #[test]
+    fn summary_medium_no_recent_stages_when_only_start() {
+        let mut graph = Graph::new("test");
+        let mut start = Node::new("start");
+        start.attrs.insert(
+            "shape".to_string(),
+            AttrValue::String("Mdiamond".to_string()),
+        );
+        graph.nodes.insert("start".to_string(), start);
+
+        let context = Context::new();
+        let completed_nodes = vec!["start".to_string()];
+        let mut node_outcomes: HashMap<String, Outcome> = HashMap::new();
+        node_outcomes.insert("start".to_string(), Outcome::success());
+
+        let preamble = build_preamble(
+            keys::Fidelity::SummaryMedium,
+            &context,
+            &graph,
+            &completed_nodes,
+            &node_outcomes,
+        );
+
+        assert!(
+            !preamble.contains("Recent stages:"),
+            "should not show Recent stages header when only meta nodes, got:\n{preamble}"
+        );
+    }
+
+    #[test]
+    fn summary_low_no_recent_stages_when_only_start() {
+        let mut graph = Graph::new("test");
+        let mut start = Node::new("start");
+        start.attrs.insert(
+            "shape".to_string(),
+            AttrValue::String("Mdiamond".to_string()),
+        );
+        graph.nodes.insert("start".to_string(), start);
+
+        let context = Context::new();
+        let completed_nodes = vec!["start".to_string()];
+        let mut node_outcomes: HashMap<String, Outcome> = HashMap::new();
+        node_outcomes.insert("start".to_string(), Outcome::success());
+
+        let preamble = build_preamble(
+            keys::Fidelity::SummaryLow,
+            &context,
+            &graph,
+            &completed_nodes,
+            &node_outcomes,
+        );
+
+        assert!(
+            !preamble.contains("Recent stages:"),
+            "should not show Recent stages header when only meta nodes, got:\n{preamble}"
+        );
+    }
+
+    #[test]
+    fn compact_preamble_no_completed_stages_when_only_start() {
+        let mut graph = Graph::new("test");
+        let mut start = Node::new("start");
+        start.attrs.insert(
+            "shape".to_string(),
+            AttrValue::String("Mdiamond".to_string()),
+        );
+        graph.nodes.insert("start".to_string(), start);
+
+        let context = Context::new();
+        let completed_nodes = vec!["start".to_string()];
+        let mut node_outcomes: HashMap<String, Outcome> = HashMap::new();
+        node_outcomes.insert("start".to_string(), Outcome::success());
+
+        let preamble = build_preamble(
+            keys::Fidelity::Compact,
+            &context,
+            &graph,
+            &completed_nodes,
+            &node_outcomes,
+        );
+
+        assert!(
+            !preamble.contains("## Completed stages"),
+            "should not show Completed stages header when only meta nodes, got:\n{preamble}"
+        );
+    }
+
+    // --- blank context values ---
+
+    #[test]
+    fn blank_context_values_excluded() {
+        let graph = Graph::new("test");
+        let context = Context::new();
+        context.set("failure_class", serde_json::json!(""));
+        context.set("failure_signature", serde_json::json!(""));
+        context.set("user.name", serde_json::json!("alice"));
+        let completed_nodes: Vec<String> = Vec::new();
+        let node_outcomes: HashMap<String, Outcome> = HashMap::new();
+
+        let preamble = build_preamble(
+            keys::Fidelity::Compact,
+            &context,
+            &graph,
+            &completed_nodes,
+            &node_outcomes,
+        );
+
+        assert!(
+            !preamble.contains("failure_class"),
+            "should exclude blank failure_class"
+        );
+        assert!(
+            !preamble.contains("failure_signature"),
+            "should exclude blank failure_signature"
+        );
+        assert!(
+            preamble.contains("user.name"),
+            "should include non-blank context"
+        );
+    }
+
+    #[test]
+    fn blank_context_values_excluded_from_summary_high_table() {
+        let graph = Graph::new("test");
+        let context = Context::new();
+        context.set("failure_class", serde_json::json!(""));
+        context.set("user.name", serde_json::json!("alice"));
+        let completed_nodes: Vec<String> = Vec::new();
+        let node_outcomes: HashMap<String, Outcome> = HashMap::new();
+
+        let preamble = build_preamble(
+            keys::Fidelity::SummaryHigh,
+            &context,
+            &graph,
+            &completed_nodes,
+            &node_outcomes,
+        );
+
+        assert!(
+            !preamble.contains("failure_class"),
+            "should exclude blank failure_class from table"
+        );
+        assert!(
+            preamble.contains("| user.name | alice |"),
+            "should include non-blank context in table"
+        );
     }
 
     // --- empty state ---
