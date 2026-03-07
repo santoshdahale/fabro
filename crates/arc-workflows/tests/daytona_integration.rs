@@ -332,6 +332,7 @@ async fn daytona_pipeline_artifact_offload_and_sync() {
         meta_branch: None,
         labels: std::collections::HashMap::new(),
         checkpoint_exclude_globs: Vec::new(),
+        github_app: None,
     };
 
     let outcome = engine
@@ -524,6 +525,7 @@ async fn daytona_git_checkpoint_remote_emits_events() {
         meta_branch: None,
         labels: std::collections::HashMap::new(),
         checkpoint_exclude_globs: Vec::new(),
+        github_app: None,
     };
 
     let outcome = engine
@@ -705,6 +707,7 @@ async fn daytona_parallel_git_branching_e2e() {
         meta_branch: None,
         labels: std::collections::HashMap::new(),
         checkpoint_exclude_globs: Vec::new(),
+        github_app: None,
     };
 
     let outcome = engine
@@ -1031,6 +1034,7 @@ async fn daytona_git_checkpoint_with_shadow_branch() {
         meta_branch: Some(meta_branch),
         labels: std::collections::HashMap::new(),
         checkpoint_exclude_globs: Vec::new(),
+        github_app: None,
     };
 
     let outcome = engine
@@ -1169,6 +1173,7 @@ async fn daytona_asset_collection() {
         meta_branch: None,
         labels: std::collections::HashMap::new(),
         checkpoint_exclude_globs: Vec::new(),
+        github_app: None,
     };
 
     let outcome = engine
@@ -1400,6 +1405,7 @@ async fn daytona_git_push_run_branch_to_origin() {
         meta_branch: None,
         labels: std::collections::HashMap::new(),
         checkpoint_exclude_globs: Vec::new(),
+        github_app: None,
     };
 
     let outcome = engine

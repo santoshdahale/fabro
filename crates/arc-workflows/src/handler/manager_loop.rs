@@ -148,6 +148,7 @@ impl Handler for SubWorkflowHandler {
             meta_branch: None,
             labels: HashMap::new(),
             checkpoint_exclude_globs: Vec::new(),
+            github_app: None,
         };
 
         // Clone parent context for child; inject parent preamble

@@ -244,6 +244,22 @@ pub fn reset_hard(work_dir: &Path, sha: &str) -> Result<()> {
     Ok(())
 }
 
+/// Push a local ref to an explicit remote URL.
+///
+/// Uses a URL (not a named remote) so the host repo's remote config is untouched.
+pub fn push_ref(repo: &Path, url: &str, refname: &str) -> Result<()> {
+    tracing::debug!(path = %repo.display(), refname, "Pushing ref to remote");
+    let output = git_cmd(repo)
+        .args(["push", url, refname])
+        .output()
+        .map_err(|e| git_error(format!("git push failed: {e}")))?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(git_error(format!("git push failed: {stderr}")));
+    }
+    Ok(())
+}
+
 /// Sanitize a string for use as a git ref component.
 /// Lowercases, replaces non-alphanumeric chars with dashes, collapses runs.
 pub fn sanitize_ref_component(s: &str) -> String {
@@ -1000,5 +1016,55 @@ mod tests {
         );
 
         remove_worktree(dir.path(), &wt_path).unwrap();
+    }
+
+    #[test]
+    fn push_ref_to_bare_remote() {
+        let dir = tempfile::tempdir().unwrap();
+        let repo_dir = dir.path().join("repo");
+        let remote_dir = dir.path().join("remote.git");
+
+        // Create a bare remote
+        Command::new("git")
+            .args(["init", "--bare"])
+            .arg(&remote_dir)
+            .output()
+            .unwrap();
+
+        // Create a local repo with origin pointing at the bare remote
+        Command::new("git")
+            .args(["init"])
+            .arg(&repo_dir)
+            .output()
+            .unwrap();
+        Command::new("git")
+            .args(["remote", "add", "origin"])
+            .arg(&remote_dir)
+            .current_dir(&repo_dir)
+            .output()
+            .unwrap();
+        Command::new("git")
+            .args([
+                "-c", "user.name=test",
+                "-c", "user.email=test@test",
+                "commit", "--allow-empty", "-m", "init",
+            ])
+            .current_dir(&repo_dir)
+            .output()
+            .unwrap();
+
+        // Create a branch and push it via push_ref
+        create_branch(&repo_dir, "test-push").unwrap();
+        let url = format!("file://{}", remote_dir.display());
+        push_ref(&repo_dir, &url, "refs/heads/test-push").unwrap();
+
+        // Verify the remote now has the branch
+        let output = Command::new("git")
+            .args(["branch", "--list", "test-push"])
+            .current_dir(&remote_dir)
+            .output()
+            .unwrap();
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        assert!(stdout.contains("test-push"), "remote should have test-push branch");
     }
 }

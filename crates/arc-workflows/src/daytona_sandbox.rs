@@ -321,24 +321,7 @@ impl DaytonaSandbox {
     }
 }
 
-/// Convert a Git SSH URL to HTTPS format for token-based authentication.
-///
-/// SSH URLs like `git@github.com:owner/repo.git` become
-/// `https://github.com/owner/repo.git`. URLs that are already HTTPS
-/// (or any other non-SSH format) are returned unchanged.
-fn ssh_url_to_https(url: &str) -> String {
-    // Match `git@<host>:<path>` (standard SSH URL format)
-    if let Some(rest) = url.strip_prefix("git@") {
-        if let Some((host, path)) = rest.split_once(':') {
-            return format!("https://{host}/{path}");
-        }
-    }
-    // Match `ssh://git@<host>/<path>`
-    if let Some(rest) = url.strip_prefix("ssh://git@") {
-        return format!("https://{rest}");
-    }
-    url.to_string()
-}
+use crate::github_app::ssh_url_to_https;
 
 /// Detect the git remote URL and current branch from a local repository.
 ///
@@ -1076,30 +1059,6 @@ mod tests {
         assert!(
             wrapped.ends_with("' | base64 -d | sh\""),
             "should end with base64 -d | sh"
-        );
-    }
-
-    #[test]
-    fn ssh_url_to_https_converts_git_at_syntax() {
-        assert_eq!(
-            ssh_url_to_https("git@github.com:brynary/arc.git"),
-            "https://github.com/brynary/arc.git"
-        );
-    }
-
-    #[test]
-    fn ssh_url_to_https_converts_ssh_protocol() {
-        assert_eq!(
-            ssh_url_to_https("ssh://git@github.com/brynary/arc.git"),
-            "https://github.com/brynary/arc.git"
-        );
-    }
-
-    #[test]
-    fn ssh_url_to_https_passes_through_https() {
-        assert_eq!(
-            ssh_url_to_https("https://github.com/brynary/arc.git"),
-            "https://github.com/brynary/arc.git"
         );
     }
 

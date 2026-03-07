@@ -658,6 +658,75 @@ pub async fn git_checkpoint_remote(
     }
 }
 
+/// Push the metadata branch from the host repo to origin (best-effort).
+///
+/// Authenticates via a GitHub App installation token so we don't depend
+/// on the host's ambient git credentials.
+async fn git_push_meta_host(
+    repo_path: PathBuf,
+    meta_branch: String,
+    github_app: Option<crate::github_app::GitHubAppCredentials>,
+) {
+    let (origin_url, _) = match crate::daytona_sandbox::detect_repo_info(&repo_path) {
+        Ok(info) => info,
+        Err(e) => {
+            tracing::warn!(error = %e, "Cannot detect origin for metadata push");
+            return;
+        }
+    };
+
+    let https_url = crate::github_app::ssh_url_to_https(&origin_url);
+    let push_url = match &github_app {
+        Some(creds) => {
+            let (owner, repo) = match crate::github_app::parse_github_owner_repo(&https_url) {
+                Ok(pair) => pair,
+                Err(e) => {
+                    tracing::warn!(error = %e, "Cannot parse GitHub URL for metadata push");
+                    return;
+                }
+            };
+            match crate::github_app::resolve_clone_credentials(creds, &owner, &repo).await {
+                Ok((_, Some(token))) => https_url.replacen(
+                    "https://",
+                    &format!("https://x-access-token:{token}@"),
+                    1,
+                ),
+                Ok(_) => {
+                    tracing::warn!("No token returned for metadata push");
+                    return;
+                }
+                Err(e) => {
+                    tracing::warn!(error = %e, "Failed to get token for metadata push");
+                    return;
+                }
+            }
+        }
+        None => {
+            tracing::warn!("No GitHub App credentials for metadata push");
+            return;
+        }
+    };
+
+    // The metadata branch is stored locally as a custom ref (e.g. refs/arc/{run_id}).
+    // Push it to a normal branch on the remote (refs/heads/arc/meta/{run_id})
+    // since GitHub rejects branch names starting with "refs/".
+    let local_ref = meta_branch.clone();
+    let run_id_part = local_ref.strip_prefix("refs/arc/").unwrap_or(&local_ref);
+    let refname = format!("{local_ref}:refs/heads/arc/meta/{run_id_part}");
+    let rp = repo_path.clone();
+    let result = tokio::time::timeout(
+        std::time::Duration::from_secs(60),
+        tokio::task::spawn_blocking(move || crate::git::push_ref(&rp, &push_url, &refname)),
+    )
+    .await;
+    match result {
+        Ok(Ok(Ok(()))) => tracing::info!(meta_branch, "Pushed metadata branch to origin"),
+        Ok(Ok(Err(e))) => tracing::warn!(error = %e, "Failed to push metadata branch"),
+        Ok(Err(e)) => tracing::warn!(error = %e, "Metadata branch push task panicked"),
+        Err(_) => tracing::warn!("Metadata branch push timed out after 60s"),
+    }
+}
+
 /// Push the run branch to origin inside a remote sandbox (best-effort).
 async fn git_push_remote(sandbox: &dyn Sandbox, branch: &str) {
     if let Err(e) = sandbox.refresh_push_credentials().await {
@@ -759,6 +828,8 @@ pub struct RunConfig {
     /// Glob patterns to exclude from git checkpoint staging.
     #[allow(clippy::struct_field_names)]
     pub checkpoint_exclude_globs: Vec<String>,
+    /// GitHub App credentials for pushing metadata branches to origin.
+    pub github_app: Option<crate::github_app::GitHubAppCredentials>,
 }
 
 /// The workflow run execution engine.
@@ -1891,10 +1962,18 @@ impl WorkflowRunEngine {
                             git_commit_sha: sha.clone(),
                         });
 
-                    // Push run branch to origin after remote checkpoint
-                    if matches!(mode, GitCheckpointMode::Remote(_)) {
+                    // Push run branch and metadata branch to origin after remote checkpoint
+                    if let GitCheckpointMode::Remote(ref host_repo) = mode {
                         if let Some(ref branch) = config.run_branch {
                             git_push_remote(&*self.services.sandbox, branch).await;
+                        }
+                        if let Some(ref meta_branch) = config.meta_branch {
+                            git_push_meta_host(
+                                host_repo.clone(),
+                                meta_branch.clone(),
+                                config.github_app.clone(),
+                            )
+                            .await;
                         }
                     }
 
@@ -2730,6 +2809,7 @@ mod tests {
             meta_branch: None,
             labels: HashMap::new(),
             checkpoint_exclude_globs: Vec::new(),
+            github_app: None,
         };
         let outcome = engine.run(&g, &config).await.unwrap();
         assert_eq!(outcome.status, StageStatus::Success);
@@ -2752,6 +2832,7 @@ mod tests {
             meta_branch: None,
             labels: HashMap::new(),
             checkpoint_exclude_globs: Vec::new(),
+            github_app: None,
         };
         engine.run(&g, &config).await.unwrap();
         let checkpoint_path = dir.path().join("checkpoint.json");
@@ -2782,6 +2863,7 @@ mod tests {
             meta_branch: None,
             labels: HashMap::new(),
             checkpoint_exclude_globs: Vec::new(),
+            github_app: None,
         };
         engine.run(&g, &config).await.unwrap();
 
@@ -2808,6 +2890,7 @@ mod tests {
             meta_branch: None,
             labels: HashMap::new(),
             checkpoint_exclude_globs: Vec::new(),
+            github_app: None,
         };
         let result = engine.run(&g, &config).await;
         assert!(result.is_err());
@@ -2830,6 +2913,7 @@ mod tests {
             meta_branch: None,
             labels: HashMap::new(),
             checkpoint_exclude_globs: Vec::new(),
+            github_app: None,
         };
         engine.run(&g, &config).await.unwrap();
 
@@ -2865,6 +2949,7 @@ mod tests {
             meta_branch: None,
             labels: HashMap::new(),
             checkpoint_exclude_globs: Vec::new(),
+            github_app: None,
         };
         let outcome = engine.run(&g, &config).await.unwrap();
         assert_eq!(outcome.status, StageStatus::Success);
@@ -2924,6 +3009,7 @@ mod tests {
             meta_branch: None,
             labels: HashMap::new(),
             checkpoint_exclude_globs: Vec::new(),
+            github_app: None,
         };
         engine.run(&g, &config).await.unwrap();
 
@@ -3010,6 +3096,7 @@ mod tests {
             meta_branch: None,
             labels: HashMap::new(),
             checkpoint_exclude_globs: Vec::new(),
+            github_app: None,
         };
         engine.run(&g, &config).await.unwrap();
 
@@ -3039,6 +3126,7 @@ mod tests {
             meta_branch: None,
             labels: HashMap::from([("env".into(), "test".into())]),
             checkpoint_exclude_globs: Vec::new(),
+            github_app: None,
         };
         engine.run(&g, &config).await.unwrap();
 
@@ -3064,6 +3152,7 @@ mod tests {
             meta_branch: None,
             labels: HashMap::new(),
             checkpoint_exclude_globs: Vec::new(),
+            github_app: None,
         };
         engine.run(&g, &config).await.unwrap();
 
@@ -3089,6 +3178,7 @@ mod tests {
             meta_branch: None,
             labels: HashMap::new(),
             checkpoint_exclude_globs: Vec::new(),
+            github_app: None,
         };
         engine.run(&g, &config).await.unwrap();
 
@@ -3117,6 +3207,7 @@ mod tests {
             meta_branch: None,
             labels: HashMap::new(),
             checkpoint_exclude_globs: Vec::new(),
+            github_app: None,
         };
         engine.run(&g, &config).await.unwrap();
 
@@ -3273,6 +3364,7 @@ mod tests {
             meta_branch: None,
             labels: HashMap::new(),
             checkpoint_exclude_globs: Vec::new(),
+            github_app: None,
         };
         engine.run(&g, &config).await.unwrap();
 
@@ -3312,6 +3404,7 @@ mod tests {
             meta_branch: None,
             labels: HashMap::new(),
             checkpoint_exclude_globs: Vec::new(),
+            github_app: None,
         };
         engine.run(&g, &config).await.unwrap();
 
@@ -3369,6 +3462,7 @@ mod tests {
             meta_branch: None,
             labels: HashMap::new(),
             checkpoint_exclude_globs: Vec::new(),
+            github_app: None,
         };
         let outcome = engine.run(&g, &config).await.unwrap();
 
@@ -3429,6 +3523,7 @@ mod tests {
             meta_branch: None,
             labels: HashMap::new(),
             checkpoint_exclude_globs: Vec::new(),
+            github_app: None,
         };
         let result = engine.run(&g, &config).await;
 
@@ -3493,6 +3588,7 @@ mod tests {
             meta_branch: None,
             labels: HashMap::new(),
             checkpoint_exclude_globs: Vec::new(),
+            github_app: None,
         };
         let result = engine.run(&g, &config).await;
         assert!(result.is_ok());
@@ -3546,6 +3642,7 @@ mod tests {
             meta_branch: None,
             labels: HashMap::new(),
             checkpoint_exclude_globs: Vec::new(),
+            github_app: None,
         };
         let outcome = engine.run(&g, &config).await.unwrap();
         assert_eq!(outcome.status, StageStatus::Success);
@@ -3600,6 +3697,7 @@ mod tests {
             meta_branch: None,
             labels: HashMap::new(),
             checkpoint_exclude_globs: Vec::new(),
+            github_app: None,
         };
         let outcome = engine.run(&g, &config).await.unwrap();
 
@@ -3629,6 +3727,7 @@ mod tests {
             meta_branch: None,
             labels: HashMap::new(),
             checkpoint_exclude_globs: Vec::new(),
+            github_app: None,
         };
         let outcome = engine.run(&g, &config).await.unwrap();
         assert_eq!(outcome.status, StageStatus::Success);
@@ -3654,6 +3753,7 @@ mod tests {
             meta_branch: None,
             labels: HashMap::new(),
             checkpoint_exclude_globs: Vec::new(),
+            github_app: None,
         };
         let result = engine.run(&g, &config).await;
         assert!(result.is_err());
@@ -3678,6 +3778,7 @@ mod tests {
             meta_branch: None,
             labels: HashMap::new(),
             checkpoint_exclude_globs: Vec::new(),
+            github_app: None,
         };
         let outcome = engine.run(&g, &config).await.unwrap();
         assert_eq!(outcome.status, StageStatus::Success);
@@ -3715,6 +3816,7 @@ mod tests {
             meta_branch: None,
             labels: HashMap::new(),
             checkpoint_exclude_globs: Vec::new(),
+            github_app: None,
         };
 
         // Set cancel after a short delay (while the slow handler is running)
@@ -3789,6 +3891,7 @@ mod tests {
             meta_branch: None,
             labels: HashMap::new(),
             checkpoint_exclude_globs: Vec::new(),
+            github_app: None,
         };
         let result = engine.run(&g, &config).await;
         assert!(result.is_err());
@@ -3816,6 +3919,7 @@ mod tests {
             meta_branch: None,
             labels: HashMap::new(),
             checkpoint_exclude_globs: Vec::new(),
+            github_app: None,
         };
         let result = engine.run(&g, &config).await;
         assert!(result.is_err());
@@ -3845,6 +3949,7 @@ mod tests {
             meta_branch: None,
             labels: HashMap::new(),
             checkpoint_exclude_globs: Vec::new(),
+            github_app: None,
         };
         let result = engine.run(&g, &config).await;
         assert!(result.is_err());
@@ -3879,6 +3984,7 @@ mod tests {
             meta_branch: None,
             labels: HashMap::new(),
             checkpoint_exclude_globs: Vec::new(),
+            github_app: None,
         };
         let result = engine.run(&g, &config).await;
         assert!(result.is_err());
@@ -3911,6 +4017,7 @@ mod tests {
             meta_branch: None,
             labels: HashMap::new(),
             checkpoint_exclude_globs: Vec::new(),
+            github_app: None,
         };
         let result = engine.run(&g, &config).await;
         assert!(result.is_err());
@@ -3940,6 +4047,7 @@ mod tests {
             meta_branch: None,
             labels: HashMap::new(),
             checkpoint_exclude_globs: Vec::new(),
+            github_app: None,
         };
         let result = engine.run(&g, &config).await;
         assert!(result.is_err());
@@ -4030,6 +4138,7 @@ mod tests {
             meta_branch: None,
             labels: HashMap::new(),
             checkpoint_exclude_globs: Vec::new(),
+            github_app: None,
         };
 
         // The engine returns Err because the Fail outcome has no outgoing fail edge,
@@ -4235,6 +4344,7 @@ mod tests {
             meta_branch: None,
             labels: HashMap::new(),
             checkpoint_exclude_globs: Vec::new(),
+            github_app: None,
         };
         let result = engine.run(&g, &config).await;
         assert!(result.is_err());
@@ -4267,6 +4377,7 @@ mod tests {
             meta_branch: None,
             labels: HashMap::new(),
             checkpoint_exclude_globs: Vec::new(),
+            github_app: None,
         };
         let result = engine.run(&g, &config).await;
         assert!(result.is_err());
@@ -4306,6 +4417,7 @@ mod tests {
             meta_branch: None,
             labels: HashMap::new(),
             checkpoint_exclude_globs: Vec::new(),
+            github_app: None,
         };
         let result = engine.run(&g, &config).await;
         assert!(result.is_err());
@@ -4385,6 +4497,7 @@ mod tests {
             meta_branch: None,
             labels: HashMap::new(),
             checkpoint_exclude_globs: Vec::new(),
+            github_app: None,
         };
         let result = engine.run(&g, &config).await;
         assert!(result.is_err());
@@ -4475,6 +4588,7 @@ mod tests {
             meta_branch: None,
             labels: HashMap::new(),
             checkpoint_exclude_globs: Vec::new(),
+            github_app: None,
         };
         let result = engine.run(&g, &config).await;
         assert!(result.is_err());
@@ -4542,6 +4656,7 @@ mod tests {
             meta_branch: None,
             labels: HashMap::new(),
             checkpoint_exclude_globs: Vec::new(),
+            github_app: None,
         };
         let outcome = engine.run(&g, &config).await.unwrap();
         assert_eq!(outcome.status, StageStatus::Success);
@@ -4596,6 +4711,7 @@ mod tests {
             meta_branch: None,
             labels: HashMap::new(),
             checkpoint_exclude_globs: Vec::new(),
+            github_app: None,
         };
         let outcome = engine.run(&g, &config).await.unwrap();
         assert_eq!(outcome.status, StageStatus::Success);
@@ -4651,6 +4767,7 @@ mod tests {
             meta_branch: None,
             labels: HashMap::new(),
             checkpoint_exclude_globs: Vec::new(),
+            github_app: None,
         };
         let _outcome = engine.run(&g, &config).await.unwrap();
 
