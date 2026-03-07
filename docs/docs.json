@@ -55,7 +55,8 @@
               "execution/interviews",
               "execution/failures",
               "execution/retros",
-              "execution/observability"
+              "execution/observability",
+              "execution/devcontainers"
             ]
           },
           {
@@ -80,7 +81,8 @@
               "integrations/daytona",
               "integrations/slack",
               "integrations/exe-dev",
-              "integrations/brave-search"
+              "integrations/brave-search",
+              "integrations/vs-code"
             ]
           },
           {
