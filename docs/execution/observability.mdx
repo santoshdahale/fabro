@@ -88,6 +88,7 @@ Events fall into several categories:
 | `SetupStarted` | `command_count` | Setup commands beginning |
 | `SetupCommandCompleted` | `command`, `exit_code`, `duration_ms` | Single setup command finished |
 | `SetupFailed` | `command`, `exit_code`, `stderr` | Setup command failed |
+| `SshAccessReady` | `ssh_command` | SSH connection command printed |
 | `StallWatchdogTimeout` | `node`, `idle_seconds` | No activity for too long |
 
 ### Event envelope format

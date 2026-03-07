@@ -1,0 +1,67 @@
+---
+title: "SSH Access"
+description: "Connect to sandbox environments via SSH for direct inspection and debugging"
+---
+
+When a workflow runs in a [Daytona sandbox](/execution/environments#daytona), you can SSH into the sandbox to inspect files, run commands, and debug issues — all while the workflow is still executing.
+
+<Note>
+SSH access is only available with the Daytona sandbox provider. Local, Docker, and exe.dev sandboxes do not support SSH access.
+</Note>
+
+## Enabling SSH access
+
+Pass the `--ssh` flag to `arc run start`:
+
+```bash
+arc run start workflow.dot --sandbox daytona --ssh
+```
+
+After the sandbox is created, Arc generates temporary SSH credentials (valid for 60 minutes) and prints the connection command:
+
+```
+  Sandbox: daytona (arc-20260307-143022-a3f2)
+             ssh daytona@arc-20260307-143022-a3f2.ssh.daytona.io
+```
+
+Copy and run the `ssh` command in a separate terminal to connect.
+
+## Keeping the sandbox alive
+
+By default, Daytona sandboxes are destroyed when the workflow finishes. To keep the sandbox running after the workflow completes — so you can continue debugging — combine `--ssh` with `--preserve-sandbox`:
+
+```bash
+arc run start workflow.dot --sandbox daytona --ssh --preserve-sandbox
+```
+
+Without `--preserve-sandbox`, the SSH session is terminated when the run ends and the sandbox is cleaned up.
+
+You can also set `auto_stop_interval` in your run config to control how long an idle sandbox stays alive:
+
+```toml
+[sandbox]
+provider = "daytona"
+preserve = true
+
+[sandbox.daytona]
+auto_stop_interval = 60
+```
+
+## What you can do over SSH
+
+Once connected, you have a full shell inside the sandbox VM:
+
+- **Inspect the working directory** — Agent file changes are at `/home/daytona/workspace`
+- **Run commands** — Execute tests, check logs, inspect process state
+- **Edit files** — Make manual fixes while the workflow is paused at a human gate
+- **Debug failures** — Reproduce and diagnose issues in the exact environment where they occurred
+
+## Credential lifetime
+
+SSH credentials are temporary and expire after **60 minutes**. If your session expires, you'll need to start a new run with `--ssh` to get fresh credentials.
+
+## Limitations
+
+- SSH access is **Daytona-only**. Passing `--ssh` with other sandbox providers prints a warning and is ignored.
+- SSH access is currently available only from the **CLI**. The API server and web UI do not yet expose an SSH endpoint.
+- Credentials cannot be refreshed — once the 60-minute window expires, a new run is needed.
