@@ -106,8 +106,7 @@ pub struct AppState {
     max_concurrent_runs: usize,
     scheduler_notify: tokio::sync::Notify,
     pub hook_config: arc_workflows::hook::HookConfig,
-    git_author_name: String,
-    git_author_email: String,
+    git_author: arc_workflows::git::GitAuthor,
 }
 
 /// Build the axum Router with all run endpoints.
@@ -367,7 +366,7 @@ pub fn create_app_state(
     db: sqlx::SqlitePool,
     registry_factory: impl Fn(Arc<dyn Interviewer>) -> HandlerRegistry + Send + Sync + 'static,
 ) -> Arc<AppState> {
-    create_app_state_with_options(db, registry_factory, false, 5, "arc".into(), "arc@local".into())
+    create_app_state_with_options(db, registry_factory, false, 5, arc_workflows::git::GitAuthor::default())
 }
 
 /// Create an `AppState` with the given database pool, registry factory, dry-run flag, and concurrency limit.
@@ -376,8 +375,7 @@ pub fn create_app_state_with_options(
     registry_factory: impl Fn(Arc<dyn Interviewer>) -> HandlerRegistry + Send + Sync + 'static,
     dry_run: bool,
     max_concurrent_runs: usize,
-    git_author_name: String,
-    git_author_email: String,
+    git_author: arc_workflows::git::GitAuthor,
 ) -> Arc<AppState> {
     Arc::new(AppState {
         runs: Mutex::new(HashMap::new()),
@@ -388,8 +386,7 @@ pub fn create_app_state_with_options(
         max_concurrent_runs,
         scheduler_notify: tokio::sync::Notify::new(),
         hook_config: arc_workflows::hook::HookConfig::default(),
-        git_author_name,
-        git_author_email,
+        git_author,
     })
 }
 
@@ -585,8 +582,7 @@ async fn execute_run(state: Arc<AppState>, run_id: String) {
         labels: std::collections::HashMap::new(),
         checkpoint_exclude_globs: Vec::new(),
         github_app: None,
-        git_author_name: state.git_author_name.clone(),
-        git_author_email: state.git_author_email.clone(),
+        git_author: state.git_author.clone(),
     };
 
     let result = tokio::select! {
@@ -1143,7 +1139,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_model_dry_run_returns_ok() {
-        let state = create_app_state_with_options(test_db().await, test_registry, true, 5, "arc".into(), "arc@local".into());
+        let state = create_app_state_with_options(test_db().await, test_registry, true, 5, arc_workflows::git::GitAuthor::default());
         let app = build_router(state, AuthMode::Disabled);
 
         let req = Request::builder()
@@ -1163,7 +1159,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_model_dry_run_unknown_returns_404() {
-        let state = create_app_state_with_options(test_db().await, test_registry, true, 5, "arc".into(), "arc@local".into());
+        let state = create_app_state_with_options(test_db().await, test_registry, true, 5, arc_workflows::git::GitAuthor::default());
         let app = build_router(state, AuthMode::Disabled);
 
         let req = Request::builder()
@@ -1844,7 +1840,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn concurrency_limit_respected() {
-        let state = create_app_state_with_options(test_db().await, test_registry, false, 1, "arc".into(), "arc@local".into());
+        let state = create_app_state_with_options(test_db().await, test_registry, false, 1, arc_workflows::git::GitAuthor::default());
         let app = test_app_with_scheduler(state);
 
         // Submit two runs with max_concurrent_runs=1

@@ -150,8 +150,7 @@ impl Handler for SubWorkflowHandler {
             labels: HashMap::new(),
             checkpoint_exclude_globs: Vec::new(),
             github_app: None,
-            git_author_name: git_state.as_ref().map(|gs| gs.git_author_name.clone()).unwrap_or_else(|| "arc".into()),
-            git_author_email: git_state.as_ref().map(|gs| gs.git_author_email.clone()).unwrap_or_else(|| "arc@local".into()),
+            git_author: git_state.as_ref().map(|gs| gs.git_author.clone()).unwrap_or_default(),
         };
 
         // Clone parent context for child; inject parent preamble

@@ -183,24 +183,21 @@ async fn main() -> Result<()> {
                 let github_app = build_github_app_credentials(&server_config);
 
                 let cli_author = cli_config.git.as_ref().map(|g| &g.author);
-                let git_author_name = cli_author
-                    .and_then(|a| a.name.as_deref())
-                    .or(server_config.git.author.name.as_deref())
-                    .unwrap_or("arc")
-                    .to_string();
-                let git_author_email = cli_author
-                    .and_then(|a| a.email.as_deref())
-                    .or(server_config.git.author.email.as_deref())
-                    .unwrap_or("arc@local")
-                    .to_string();
+                let git_author = arc_workflows::git::GitAuthor::from_options(
+                    cli_author
+                        .and_then(|a| a.name.clone())
+                        .or_else(|| server_config.git.author.name.clone()),
+                    cli_author
+                        .and_then(|a| a.email.clone())
+                        .or_else(|| server_config.git.author.email.clone()),
+                );
 
                 arc_workflows::cli::run::run_command(
                     args,
                     server_config.run_defaults,
                     styles,
                     github_app,
-                    git_author_name,
-                    git_author_email,
+                    git_author,
                 )
                 .await?;
             }

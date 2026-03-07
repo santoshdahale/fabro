@@ -244,8 +244,7 @@ impl Handler for ParallelHandler {
                         0,
                         None,
                         gs.checkpoint_exclude_globs.clone(),
-                        gs.git_author_name.clone(),
-                        gs.git_author_email.clone(),
+                        gs.git_author.clone(),
                     )
                     .await
                 }
@@ -258,8 +257,7 @@ impl Handler for ParallelHandler {
                         0,
                         None,
                         &gs.checkpoint_exclude_globs,
-                        &gs.git_author_name,
-                        &gs.git_author_email,
+                        &gs.git_author,
                     )
                     .await
                 }
@@ -401,8 +399,7 @@ impl Handler for ParallelHandler {
             let sem = Arc::clone(&semaphore);
             let has_git = git_state.is_some();
             let run_id = git_state.as_ref().map(|gs| gs.run_id.clone());
-            let git_author_name = git_state.as_ref().map(|gs| gs.git_author_name.clone()).unwrap_or_else(|| "arc".into());
-            let git_author_email = git_state.as_ref().map(|gs| gs.git_author_email.clone()).unwrap_or_else(|| "arc@local".into());
+            let git_author = git_state.as_ref().map(|gs| gs.git_author.clone()).unwrap_or_default();
 
             let handle = tokio::spawn(async move {
                 let _permit = sem
@@ -468,7 +465,9 @@ impl Handler for ParallelHandler {
                     if add_result.as_ref().is_ok_and(|r| r.exit_code == 0) {
                         let msg = format!("arc({rid}): {nid} ({status_str})");
                         let commit_cmd = format!(
-                            "{git_r} -c user.name={git_author_name} -c user.email={git_author_email} commit --allow-empty -m '{msg}'"
+                            "{git_r} -c 'user.name={name}' -c 'user.email={email}' commit --allow-empty -m '{msg}'",
+                            name = git_author.name,
+                            email = git_author.email,
                         );
                         let _ = setup
                             .sandbox

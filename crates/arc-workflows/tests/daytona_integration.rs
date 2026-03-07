@@ -333,8 +333,7 @@ async fn daytona_pipeline_artifact_offload_and_sync() {
         labels: std::collections::HashMap::new(),
         checkpoint_exclude_globs: Vec::new(),
         github_app: None,
-        git_author_name: "arc".into(),
-        git_author_email: "arc@local".into(),
+        git_author: arc_workflows::git::GitAuthor::default(),
     };
 
     let outcome = engine
@@ -528,8 +527,7 @@ async fn daytona_git_checkpoint_remote_emits_events() {
         labels: std::collections::HashMap::new(),
         checkpoint_exclude_globs: Vec::new(),
         github_app: None,
-        git_author_name: "arc".into(),
-        git_author_email: "arc@local".into(),
+        git_author: arc_workflows::git::GitAuthor::default(),
     };
 
     let outcome = engine
@@ -712,8 +710,7 @@ async fn daytona_parallel_git_branching_e2e() {
         labels: std::collections::HashMap::new(),
         checkpoint_exclude_globs: Vec::new(),
         github_app: None,
-        git_author_name: "arc".into(),
-        git_author_email: "arc@local".into(),
+        git_author: arc_workflows::git::GitAuthor::default(),
     };
 
     let outcome = engine
@@ -1041,8 +1038,7 @@ async fn daytona_git_checkpoint_with_shadow_branch() {
         labels: std::collections::HashMap::new(),
         checkpoint_exclude_globs: Vec::new(),
         github_app: None,
-        git_author_name: "arc".into(),
-        git_author_email: "arc@local".into(),
+        git_author: arc_workflows::git::GitAuthor::default(),
     };
 
     let outcome = engine
@@ -1182,8 +1178,7 @@ async fn daytona_asset_collection() {
         labels: std::collections::HashMap::new(),
         checkpoint_exclude_globs: Vec::new(),
         github_app: None,
-        git_author_name: "arc".into(),
-        git_author_email: "arc@local".into(),
+        git_author: arc_workflows::git::GitAuthor::default(),
     };
 
     let outcome = engine
@@ -1416,8 +1411,7 @@ async fn daytona_git_push_run_branch_to_origin() {
         labels: std::collections::HashMap::new(),
         checkpoint_exclude_globs: Vec::new(),
         github_app: None,
-        git_author_name: "arc".into(),
-        git_author_email: "arc@local".into(),
+        git_author: arc_workflows::git::GitAuthor::default(),
     };
 
     let outcome = engine

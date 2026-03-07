@@ -9,6 +9,34 @@ use git2::{Repository, Signature};
 use crate::checkpoint::Checkpoint;
 use crate::error::{ArcError, Result};
 
+/// Resolved git author identity for checkpoint commits.
+#[derive(Debug, Clone, PartialEq)]
+pub struct GitAuthor {
+    pub name: String,
+    pub email: String,
+}
+
+impl Default for GitAuthor {
+    fn default() -> Self {
+        Self {
+            name: "arc".into(),
+            email: "arc@local".into(),
+        }
+    }
+}
+
+impl GitAuthor {
+    /// Create a `GitAuthor` from optional name/email, falling back to defaults.
+    pub fn from_options(name: Option<String>, email: Option<String>) -> Self {
+        let defaults = Self::default();
+        Self {
+            name: name.unwrap_or(defaults.name),
+            email: email.unwrap_or(defaults.email),
+        }
+    }
+}
+
+
 fn git_error(msg: impl Into<String>) -> ArcError {
     ArcError::engine(msg.into())
 }
@@ -145,8 +173,7 @@ pub fn checkpoint_commit(
     completed_count: usize,
     shadow_sha: Option<&str>,
     excludes: &[String],
-    author_name: &str,
-    author_email: &str,
+    author: &GitAuthor,
 ) -> Result<String> {
     tracing::debug!(path = %work_dir.display(), node_id, "Creating git checkpoint commit");
     // Stage everything (with optional excludes)
@@ -186,8 +213,8 @@ pub fn checkpoint_commit(
     let message = trailerlink::format_message(&subject, "", &trailers);
 
     // Commit with configured identity (works even if user.name/email not configured)
-    let name_cfg = format!("user.name={author_name}");
-    let email_cfg = format!("user.email={author_email}");
+    let name_cfg = format!("user.name={}", author.name);
+    let email_cfg = format!("user.email={}", author.email);
     let output = git_cmd(work_dir)
         .args([
             "-c",
@@ -287,16 +314,14 @@ pub fn sanitize_ref_component(s: &str) -> String {
 /// (`arc/{run_id}`) so that runs can be resumed from git alone.
 pub struct MetadataStore {
     repo_path: std::path::PathBuf,
-    author_name: String,
-    author_email: String,
+    author: GitAuthor,
 }
 
 impl MetadataStore {
-    pub fn new(repo_path: impl Into<std::path::PathBuf>, author_name: &str, author_email: &str) -> Self {
+    pub fn new(repo_path: impl Into<std::path::PathBuf>, author: &GitAuthor) -> Self {
         Self {
             repo_path: repo_path.into(),
-            author_name: author_name.to_string(),
-            author_email: author_email.to_string(),
+            author: author.clone(),
         }
     }
 
@@ -309,7 +334,7 @@ impl MetadataStore {
         let repo = Repository::discover(&self.repo_path)
             .map_err(|e| git_error(format!("failed to open repo: {e}")))?;
         let store = Store::new(repo);
-        let sig = Signature::now(&self.author_name, &self.author_email)
+        let sig = Signature::now(&self.author.name, &self.author.email)
             .map_err(|e| git_error(format!("failed to create signature: {e}")))?;
         Ok((store, sig))
     }
@@ -526,7 +551,7 @@ mod tests {
         let wt = dir.path().join("ff-wt");
         add_worktree(dir.path(), &wt, "ff-branch").unwrap();
         fs::write(wt.join("new.txt"), "data").unwrap();
-        checkpoint_commit(&wt, "run", "node", "ok", 1, None, &[], "arc", "arc@local").unwrap();
+        checkpoint_commit(&wt, "run", "node", "ok", 1, None, &[], &GitAuthor::default()).unwrap();
         let advanced_sha = head_sha(&wt).unwrap();
         remove_worktree(dir.path(), &wt).unwrap();
 
@@ -598,7 +623,7 @@ mod tests {
         // Simulate a shadow commit SHA
         let shadow_sha = "abcdef1234567890abcdef1234567890abcdef12";
         let sha =
-            checkpoint_commit(&wt_path, "run1", "nodeA", "success", 3, Some(shadow_sha), &[], "arc", "arc@local").unwrap();
+            checkpoint_commit(&wt_path, "run1", "nodeA", "success", 3, Some(shadow_sha), &[], &GitAuthor::default()).unwrap();
         assert_eq!(sha.len(), 40);
         assert!(sha.chars().all(|c| c.is_ascii_hexdigit()));
 
@@ -637,7 +662,7 @@ mod tests {
         let wt_path = dir.path().join("worktree");
         add_worktree(dir.path(), &wt_path, "run-branch2").unwrap();
 
-        let sha = checkpoint_commit(&wt_path, "run2", "nodeB", "completed", 1, None, &[], "arc", "arc@local").unwrap();
+        let sha = checkpoint_commit(&wt_path, "run2", "nodeB", "completed", 1, None, &[], &GitAuthor::default()).unwrap();
         assert_eq!(sha.len(), 40);
 
         // Verify Arc-Completed trailer present but no Arc-Meta
@@ -681,7 +706,7 @@ mod tests {
         let wt_path = dir.path().join("worktree");
         add_worktree(dir.path(), &wt_path, "fallback-branch").unwrap();
 
-        let sha = checkpoint_commit(&wt_path, "run2", "nodeB", "completed", 0, None, &[], "arc", "arc@local").unwrap();
+        let sha = checkpoint_commit(&wt_path, "run2", "nodeB", "completed", 0, None, &[], &GitAuthor::default()).unwrap();
         assert_eq!(sha.len(), 40);
 
         remove_worktree(dir.path(), &wt_path).unwrap();
@@ -735,7 +760,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         init_repo(dir.path());
 
-        let store = MetadataStore::new(dir.path(), "arc", "arc@local");
+        let store = MetadataStore::new(dir.path(), &GitAuthor::default());
         let manifest = br#"{"run_id":"RUN1","workflow_name":"test","goal":"g","start_time":"2025-01-01T00:00:00Z","node_count":2,"edge_count":1}"#;
         let dot = b"digraph { start -> end }";
         store.init_run("RUN1", manifest, dot).unwrap();
@@ -757,7 +782,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         init_repo(dir.path());
 
-        let store = MetadataStore::new(dir.path(), "arc", "arc@local");
+        let store = MetadataStore::new(dir.path(), &GitAuthor::default());
         store.init_run("RUN2", b"{}", b"digraph {}").unwrap();
 
         let ctx = crate::context::Context::new();
@@ -792,7 +817,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         init_repo(dir.path());
 
-        let store = MetadataStore::new(dir.path(), "arc", "arc@local");
+        let store = MetadataStore::new(dir.path(), &GitAuthor::default());
         store.init_run("RUN3", b"{}", b"digraph {}").unwrap();
 
         let ctx = crate::context::Context::new();
@@ -843,7 +868,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         init_repo(dir.path());
 
-        let store = MetadataStore::new(dir.path(), "arc", "arc@local");
+        let store = MetadataStore::new(dir.path(), &GitAuthor::default());
         store.init_run("RUN4", b"{}", b"digraph {}").unwrap();
 
         let artifact_data = br#"{"large_output":"some data"}"#;
@@ -966,7 +991,7 @@ mod tests {
         fs::write(wt_path.join("node_modules/pkg/index.js"), "module").unwrap();
 
         let excludes = vec!["**/node_modules/**".to_string()];
-        checkpoint_commit(&wt_path, "run", "node", "ok", 1, None, &excludes, "arc", "arc@local").unwrap();
+        checkpoint_commit(&wt_path, "run", "node", "ok", 1, None, &excludes, &GitAuthor::default()).unwrap();
 
         // Verify kept.txt was committed
         let output = Command::new("git")
@@ -999,14 +1024,14 @@ mod tests {
         // Create and commit a file in the excluded dir first
         fs::create_dir_all(wt_path.join(".cache")).unwrap();
         fs::write(wt_path.join(".cache/data.bin"), "v1").unwrap();
-        checkpoint_commit(&wt_path, "run", "setup", "ok", 0, None, &[], "arc", "arc@local").unwrap();
+        checkpoint_commit(&wt_path, "run", "setup", "ok", 0, None, &[], &GitAuthor::default()).unwrap();
 
         // Now modify the tracked excluded file and add a new non-excluded file
         fs::write(wt_path.join(".cache/data.bin"), "v2").unwrap();
         fs::write(wt_path.join("result.txt"), "done").unwrap();
 
         let excludes = vec!["**/.cache/**".to_string()];
-        checkpoint_commit(&wt_path, "run", "step", "ok", 1, None, &excludes, "arc", "arc@local").unwrap();
+        checkpoint_commit(&wt_path, "run", "step", "ok", 1, None, &excludes, &GitAuthor::default()).unwrap();
 
         let output = Command::new("git")
             .args(["show", "--name-only", "--format=", "HEAD"])

@@ -521,8 +521,7 @@ pub struct GitState {
     pub run_branch: Option<String>,
     pub meta_branch: Option<String>,
     pub checkpoint_exclude_globs: Vec<String>,
-    pub git_author_name: String,
-    pub git_author_email: String,
+    pub git_author: crate::git::GitAuthor,
 }
 
 /// How git checkpointing should be performed for a workflow run.
@@ -544,8 +543,7 @@ pub async fn git_checkpoint_host(
     completed_count: usize,
     shadow_sha: Option<String>,
     exclude_globs: Vec<String>,
-    author_name: String,
-    author_email: String,
+    author: crate::git::GitAuthor,
 ) -> Option<String> {
     match tokio::task::spawn_blocking(move || {
         crate::git::checkpoint_commit(
@@ -556,8 +554,7 @@ pub async fn git_checkpoint_host(
             completed_count,
             shadow_sha.as_deref(),
             &exclude_globs,
-            &author_name,
-            &author_email,
+            &author,
         )
     })
     .await
@@ -593,8 +590,7 @@ pub async fn git_checkpoint_remote(
     completed_count: usize,
     shadow_sha: Option<String>,
     exclude_globs: &[String],
-    author_name: &str,
-    author_email: &str,
+    author: &crate::git::GitAuthor,
 ) -> Option<String> {
     // Stage everything (with optional excludes)
     let add_cmd = if exclude_globs.is_empty() {
@@ -646,7 +642,9 @@ pub async fn git_checkpoint_remote(
 
     // Commit with configured identity using the message file
     let commit_cmd = format!(
-        "{GIT_REMOTE} -c user.name={author_name} -c user.email={author_email} commit --allow-empty -F /tmp/arc-commit-msg"
+        "{GIT_REMOTE} -c user.name={name} -c user.email={email} commit --allow-empty -F /tmp/arc-commit-msg",
+        name = author.name,
+        email = author.email,
     );
     let commit_result = sandbox
         .exec_command(&commit_cmd, 30_000, None, None, None)
@@ -838,10 +836,8 @@ pub struct RunConfig {
     pub checkpoint_exclude_globs: Vec<String>,
     /// GitHub App credentials for pushing metadata branches to origin.
     pub github_app: Option<crate::github_app::GitHubAppCredentials>,
-    /// Git author name for checkpoint commits.
-    pub git_author_name: String,
-    /// Git author email for checkpoint commits.
-    pub git_author_email: String,
+    /// Git author identity for checkpoint commits.
+    pub git_author: crate::git::GitAuthor,
 }
 
 /// The workflow run execution engine.
@@ -1220,8 +1216,7 @@ impl WorkflowRunEngine {
                 run_branch: config.run_branch.clone(),
                 meta_branch: config.meta_branch.clone(),
                 checkpoint_exclude_globs: config.checkpoint_exclude_globs.clone(),
-                git_author_name: config.git_author_name.clone(),
-                git_author_email: config.git_author_email.clone(),
+                git_author: config.git_author.clone(),
             })),
             _ => None,
         };
@@ -1272,11 +1267,7 @@ impl WorkflowRunEngine {
                 None => None,
             };
             if let Some(repo_path) = store_path {
-                let store = crate::git::MetadataStore::new(
-                    repo_path,
-                    &config.git_author_name,
-                    &config.git_author_email,
-                );
+                let store = crate::git::MetadataStore::new(repo_path, &config.git_author);
                 let manifest_bytes = serde_json::to_vec_pretty(&manifest).unwrap_or_default();
                 let dot_source =
                     std::fs::read(config.logs_root.join("graph.dot")).unwrap_or_default();
@@ -1900,11 +1891,7 @@ impl WorkflowRunEngine {
                     let repo_path = match mode {
                         GitCheckpointMode::Host(ref p) | GitCheckpointMode::Remote(ref p) => p,
                     };
-                    let store = crate::git::MetadataStore::new(
-                        repo_path,
-                        &config.git_author_name,
-                        &config.git_author_email,
-                    );
+                    let store = crate::git::MetadataStore::new(repo_path, &config.git_author);
                     serde_json::to_vec_pretty(&checkpoint)
                         .ok()
                         .and_then(|cp_json| {
@@ -1953,8 +1940,7 @@ impl WorkflowRunEngine {
                             completed_count,
                             shadow_sha,
                             config.checkpoint_exclude_globs.clone(),
-                            config.git_author_name.clone(),
-                            config.git_author_email.clone(),
+                            config.git_author.clone(),
                         )
                         .await
                     }
@@ -1967,8 +1953,7 @@ impl WorkflowRunEngine {
                             completed_count,
                             shadow_sha,
                             &config.checkpoint_exclude_globs,
-                            &config.git_author_name,
-                            &config.git_author_email,
+                            &config.git_author,
                         )
                         .await
                     }
@@ -2836,8 +2821,7 @@ mod tests {
             labels: HashMap::new(),
             checkpoint_exclude_globs: Vec::new(),
             github_app: None,
-            git_author_name: "arc".into(),
-            git_author_email: "arc@local".into(),
+            git_author: crate::git::GitAuthor::default(),
         };
         let outcome = engine.run(&g, &config).await.unwrap();
         assert_eq!(outcome.status, StageStatus::Success);
@@ -2861,8 +2845,7 @@ mod tests {
             labels: HashMap::new(),
             checkpoint_exclude_globs: Vec::new(),
             github_app: None,
-            git_author_name: "arc".into(),
-            git_author_email: "arc@local".into(),
+            git_author: crate::git::GitAuthor::default(),
         };
         engine.run(&g, &config).await.unwrap();
         let checkpoint_path = dir.path().join("checkpoint.json");
@@ -2894,8 +2877,7 @@ mod tests {
             labels: HashMap::new(),
             checkpoint_exclude_globs: Vec::new(),
             github_app: None,
-            git_author_name: "arc".into(),
-            git_author_email: "arc@local".into(),
+            git_author: crate::git::GitAuthor::default(),
         };
         engine.run(&g, &config).await.unwrap();
 
@@ -2923,8 +2905,7 @@ mod tests {
             labels: HashMap::new(),
             checkpoint_exclude_globs: Vec::new(),
             github_app: None,
-            git_author_name: "arc".into(),
-            git_author_email: "arc@local".into(),
+            git_author: crate::git::GitAuthor::default(),
         };
         let result = engine.run(&g, &config).await;
         assert!(result.is_err());
@@ -2948,8 +2929,7 @@ mod tests {
             labels: HashMap::new(),
             checkpoint_exclude_globs: Vec::new(),
             github_app: None,
-            git_author_name: "arc".into(),
-            git_author_email: "arc@local".into(),
+            git_author: crate::git::GitAuthor::default(),
         };
         engine.run(&g, &config).await.unwrap();
 
@@ -2986,8 +2966,7 @@ mod tests {
             labels: HashMap::new(),
             checkpoint_exclude_globs: Vec::new(),
             github_app: None,
-            git_author_name: "arc".into(),
-            git_author_email: "arc@local".into(),
+            git_author: crate::git::GitAuthor::default(),
         };
         let outcome = engine.run(&g, &config).await.unwrap();
         assert_eq!(outcome.status, StageStatus::Success);
@@ -3048,8 +3027,7 @@ mod tests {
             labels: HashMap::new(),
             checkpoint_exclude_globs: Vec::new(),
             github_app: None,
-            git_author_name: "arc".into(),
-            git_author_email: "arc@local".into(),
+            git_author: crate::git::GitAuthor::default(),
         };
         engine.run(&g, &config).await.unwrap();
 
@@ -3137,8 +3115,7 @@ mod tests {
             labels: HashMap::new(),
             checkpoint_exclude_globs: Vec::new(),
             github_app: None,
-            git_author_name: "arc".into(),
-            git_author_email: "arc@local".into(),
+            git_author: crate::git::GitAuthor::default(),
         };
         engine.run(&g, &config).await.unwrap();
 
@@ -3169,8 +3146,7 @@ mod tests {
             labels: HashMap::from([("env".into(), "test".into())]),
             checkpoint_exclude_globs: Vec::new(),
             github_app: None,
-            git_author_name: "arc".into(),
-            git_author_email: "arc@local".into(),
+            git_author: crate::git::GitAuthor::default(),
         };
         engine.run(&g, &config).await.unwrap();
 
@@ -3197,8 +3173,7 @@ mod tests {
             labels: HashMap::new(),
             checkpoint_exclude_globs: Vec::new(),
             github_app: None,
-            git_author_name: "arc".into(),
-            git_author_email: "arc@local".into(),
+            git_author: crate::git::GitAuthor::default(),
         };
         engine.run(&g, &config).await.unwrap();
 
@@ -3225,8 +3200,7 @@ mod tests {
             labels: HashMap::new(),
             checkpoint_exclude_globs: Vec::new(),
             github_app: None,
-            git_author_name: "arc".into(),
-            git_author_email: "arc@local".into(),
+            git_author: crate::git::GitAuthor::default(),
         };
         engine.run(&g, &config).await.unwrap();
 
@@ -3256,8 +3230,7 @@ mod tests {
             labels: HashMap::new(),
             checkpoint_exclude_globs: Vec::new(),
             github_app: None,
-            git_author_name: "arc".into(),
-            git_author_email: "arc@local".into(),
+            git_author: crate::git::GitAuthor::default(),
         };
         engine.run(&g, &config).await.unwrap();
 
@@ -3415,8 +3388,7 @@ mod tests {
             labels: HashMap::new(),
             checkpoint_exclude_globs: Vec::new(),
             github_app: None,
-            git_author_name: "arc".into(),
-            git_author_email: "arc@local".into(),
+            git_author: crate::git::GitAuthor::default(),
         };
         engine.run(&g, &config).await.unwrap();
 
@@ -3457,8 +3429,7 @@ mod tests {
             labels: HashMap::new(),
             checkpoint_exclude_globs: Vec::new(),
             github_app: None,
-            git_author_name: "arc".into(),
-            git_author_email: "arc@local".into(),
+            git_author: crate::git::GitAuthor::default(),
         };
         engine.run(&g, &config).await.unwrap();
 
@@ -3517,8 +3488,7 @@ mod tests {
             labels: HashMap::new(),
             checkpoint_exclude_globs: Vec::new(),
             github_app: None,
-            git_author_name: "arc".into(),
-            git_author_email: "arc@local".into(),
+            git_author: crate::git::GitAuthor::default(),
         };
         let outcome = engine.run(&g, &config).await.unwrap();
 
@@ -3580,8 +3550,7 @@ mod tests {
             labels: HashMap::new(),
             checkpoint_exclude_globs: Vec::new(),
             github_app: None,
-            git_author_name: "arc".into(),
-            git_author_email: "arc@local".into(),
+            git_author: crate::git::GitAuthor::default(),
         };
         let result = engine.run(&g, &config).await;
 
@@ -3647,8 +3616,7 @@ mod tests {
             labels: HashMap::new(),
             checkpoint_exclude_globs: Vec::new(),
             github_app: None,
-            git_author_name: "arc".into(),
-            git_author_email: "arc@local".into(),
+            git_author: crate::git::GitAuthor::default(),
         };
         let result = engine.run(&g, &config).await;
         assert!(result.is_ok());
@@ -3703,8 +3671,7 @@ mod tests {
             labels: HashMap::new(),
             checkpoint_exclude_globs: Vec::new(),
             github_app: None,
-            git_author_name: "arc".into(),
-            git_author_email: "arc@local".into(),
+            git_author: crate::git::GitAuthor::default(),
         };
         let outcome = engine.run(&g, &config).await.unwrap();
         assert_eq!(outcome.status, StageStatus::Success);
@@ -3760,8 +3727,7 @@ mod tests {
             labels: HashMap::new(),
             checkpoint_exclude_globs: Vec::new(),
             github_app: None,
-            git_author_name: "arc".into(),
-            git_author_email: "arc@local".into(),
+            git_author: crate::git::GitAuthor::default(),
         };
         let outcome = engine.run(&g, &config).await.unwrap();
 
@@ -3792,8 +3758,7 @@ mod tests {
             labels: HashMap::new(),
             checkpoint_exclude_globs: Vec::new(),
             github_app: None,
-            git_author_name: "arc".into(),
-            git_author_email: "arc@local".into(),
+            git_author: crate::git::GitAuthor::default(),
         };
         let outcome = engine.run(&g, &config).await.unwrap();
         assert_eq!(outcome.status, StageStatus::Success);
@@ -3820,8 +3785,7 @@ mod tests {
             labels: HashMap::new(),
             checkpoint_exclude_globs: Vec::new(),
             github_app: None,
-            git_author_name: "arc".into(),
-            git_author_email: "arc@local".into(),
+            git_author: crate::git::GitAuthor::default(),
         };
         let result = engine.run(&g, &config).await;
         assert!(result.is_err());
@@ -3847,8 +3811,7 @@ mod tests {
             labels: HashMap::new(),
             checkpoint_exclude_globs: Vec::new(),
             github_app: None,
-            git_author_name: "arc".into(),
-            git_author_email: "arc@local".into(),
+            git_author: crate::git::GitAuthor::default(),
         };
         let outcome = engine.run(&g, &config).await.unwrap();
         assert_eq!(outcome.status, StageStatus::Success);
@@ -3887,8 +3850,7 @@ mod tests {
             labels: HashMap::new(),
             checkpoint_exclude_globs: Vec::new(),
             github_app: None,
-            git_author_name: "arc".into(),
-            git_author_email: "arc@local".into(),
+            git_author: crate::git::GitAuthor::default(),
         };
 
         // Set cancel after a short delay (while the slow handler is running)
@@ -3964,8 +3926,7 @@ mod tests {
             labels: HashMap::new(),
             checkpoint_exclude_globs: Vec::new(),
             github_app: None,
-            git_author_name: "arc".into(),
-            git_author_email: "arc@local".into(),
+            git_author: crate::git::GitAuthor::default(),
         };
         let result = engine.run(&g, &config).await;
         assert!(result.is_err());
@@ -3994,8 +3955,7 @@ mod tests {
             labels: HashMap::new(),
             checkpoint_exclude_globs: Vec::new(),
             github_app: None,
-            git_author_name: "arc".into(),
-            git_author_email: "arc@local".into(),
+            git_author: crate::git::GitAuthor::default(),
         };
         let result = engine.run(&g, &config).await;
         assert!(result.is_err());
@@ -4026,8 +3986,7 @@ mod tests {
             labels: HashMap::new(),
             checkpoint_exclude_globs: Vec::new(),
             github_app: None,
-            git_author_name: "arc".into(),
-            git_author_email: "arc@local".into(),
+            git_author: crate::git::GitAuthor::default(),
         };
         let result = engine.run(&g, &config).await;
         assert!(result.is_err());
@@ -4063,8 +4022,7 @@ mod tests {
             labels: HashMap::new(),
             checkpoint_exclude_globs: Vec::new(),
             github_app: None,
-            git_author_name: "arc".into(),
-            git_author_email: "arc@local".into(),
+            git_author: crate::git::GitAuthor::default(),
         };
         let result = engine.run(&g, &config).await;
         assert!(result.is_err());
@@ -4098,8 +4056,7 @@ mod tests {
             labels: HashMap::new(),
             checkpoint_exclude_globs: Vec::new(),
             github_app: None,
-            git_author_name: "arc".into(),
-            git_author_email: "arc@local".into(),
+            git_author: crate::git::GitAuthor::default(),
         };
         let result = engine.run(&g, &config).await;
         assert!(result.is_err());
@@ -4130,8 +4087,7 @@ mod tests {
             labels: HashMap::new(),
             checkpoint_exclude_globs: Vec::new(),
             github_app: None,
-            git_author_name: "arc".into(),
-            git_author_email: "arc@local".into(),
+            git_author: crate::git::GitAuthor::default(),
         };
         let result = engine.run(&g, &config).await;
         assert!(result.is_err());
@@ -4223,8 +4179,7 @@ mod tests {
             labels: HashMap::new(),
             checkpoint_exclude_globs: Vec::new(),
             github_app: None,
-            git_author_name: "arc".into(),
-            git_author_email: "arc@local".into(),
+            git_author: crate::git::GitAuthor::default(),
         };
 
         // The engine returns Err because the Fail outcome has no outgoing fail edge,
@@ -4431,8 +4386,7 @@ mod tests {
             labels: HashMap::new(),
             checkpoint_exclude_globs: Vec::new(),
             github_app: None,
-            git_author_name: "arc".into(),
-            git_author_email: "arc@local".into(),
+            git_author: crate::git::GitAuthor::default(),
         };
         let result = engine.run(&g, &config).await;
         assert!(result.is_err());
@@ -4466,8 +4420,7 @@ mod tests {
             labels: HashMap::new(),
             checkpoint_exclude_globs: Vec::new(),
             github_app: None,
-            git_author_name: "arc".into(),
-            git_author_email: "arc@local".into(),
+            git_author: crate::git::GitAuthor::default(),
         };
         let result = engine.run(&g, &config).await;
         assert!(result.is_err());
@@ -4508,8 +4461,7 @@ mod tests {
             labels: HashMap::new(),
             checkpoint_exclude_globs: Vec::new(),
             github_app: None,
-            git_author_name: "arc".into(),
-            git_author_email: "arc@local".into(),
+            git_author: crate::git::GitAuthor::default(),
         };
         let result = engine.run(&g, &config).await;
         assert!(result.is_err());
@@ -4590,8 +4542,7 @@ mod tests {
             labels: HashMap::new(),
             checkpoint_exclude_globs: Vec::new(),
             github_app: None,
-            git_author_name: "arc".into(),
-            git_author_email: "arc@local".into(),
+            git_author: crate::git::GitAuthor::default(),
         };
         let result = engine.run(&g, &config).await;
         assert!(result.is_err());
@@ -4683,8 +4634,7 @@ mod tests {
             labels: HashMap::new(),
             checkpoint_exclude_globs: Vec::new(),
             github_app: None,
-            git_author_name: "arc".into(),
-            git_author_email: "arc@local".into(),
+            git_author: crate::git::GitAuthor::default(),
         };
         let result = engine.run(&g, &config).await;
         assert!(result.is_err());
@@ -4753,8 +4703,7 @@ mod tests {
             labels: HashMap::new(),
             checkpoint_exclude_globs: Vec::new(),
             github_app: None,
-            git_author_name: "arc".into(),
-            git_author_email: "arc@local".into(),
+            git_author: crate::git::GitAuthor::default(),
         };
         let outcome = engine.run(&g, &config).await.unwrap();
         assert_eq!(outcome.status, StageStatus::Success);
@@ -4810,8 +4759,7 @@ mod tests {
             labels: HashMap::new(),
             checkpoint_exclude_globs: Vec::new(),
             github_app: None,
-            git_author_name: "arc".into(),
-            git_author_email: "arc@local".into(),
+            git_author: crate::git::GitAuthor::default(),
         };
         let outcome = engine.run(&g, &config).await.unwrap();
         assert_eq!(outcome.status, StageStatus::Success);
@@ -4868,8 +4816,7 @@ mod tests {
             labels: HashMap::new(),
             checkpoint_exclude_globs: Vec::new(),
             github_app: None,
-            git_author_name: "arc".into(),
-            git_author_email: "arc@local".into(),
+            git_author: crate::git::GitAuthor::default(),
         };
         let _outcome = engine.run(&g, &config).await.unwrap();
 
