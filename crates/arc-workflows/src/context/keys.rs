@@ -24,6 +24,7 @@ pub const INTERNAL_WORK_DIR: &str = "internal.work_dir";
 pub const INTERNAL_FIDELITY: &str = "internal.fidelity";
 pub const INTERNAL_THREAD_ID: &str = "internal.thread_id";
 pub const INTERNAL_NODE_VISIT_COUNT: &str = "internal.node_visit_count";
+pub const INTERNAL_PARENT_PREAMBLE: &str = "internal.parent_preamble";
 
 // --- current.* keys ---
 pub const CURRENT_PREAMBLE: &str = "current.preamble";
@@ -72,6 +73,16 @@ pub fn graph_attr_key(attr: &str) -> String {
 #[must_use]
 pub fn retry_count_key(node_id: &str) -> String {
     format!("{INTERNAL_RETRY_COUNT_PREFIX}{node_id}")
+}
+
+/// Returns `true` for engine-internal keys that should not propagate from child
+/// to parent workflow contexts.
+#[must_use]
+pub fn is_engine_internal_key(key: &str) -> bool {
+    key.starts_with(INTERNAL_PREFIX)
+        || key.starts_with(GRAPH_PREFIX)
+        || key.starts_with(THREAD_PREFIX)
+        || key.starts_with(CURRENT_PREFIX)
 }
 
 /// Fidelity mode controlling how much prior context is provided to LLM sessions.
@@ -201,5 +212,25 @@ mod tests {
     #[test]
     fn fidelity_unknown_mode_errors() {
         assert!("bogus".parse::<Fidelity>().is_err());
+    }
+
+    #[test]
+    fn is_engine_internal_key_classifies_correctly() {
+        // Keys that ARE engine-internal (should not propagate)
+        assert!(is_engine_internal_key("internal.run_id"));
+        assert!(is_engine_internal_key("internal.fidelity"));
+        assert!(is_engine_internal_key("internal.parent_preamble"));
+        assert!(is_engine_internal_key("graph.goal"));
+        assert!(is_engine_internal_key("thread.main.current_node"));
+        assert!(is_engine_internal_key("current.preamble"));
+        assert!(is_engine_internal_key("current_node"));
+
+        // Keys that are NOT engine-internal (should propagate)
+        assert!(!is_engine_internal_key("response.plan"));
+        assert!(!is_engine_internal_key("command.output"));
+        assert!(!is_engine_internal_key("outcome"));
+        assert!(!is_engine_internal_key("last_stage"));
+        assert!(!is_engine_internal_key("review.result"));
+        assert!(!is_engine_internal_key("user.name"));
     }
 }

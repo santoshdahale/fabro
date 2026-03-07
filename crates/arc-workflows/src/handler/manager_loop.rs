@@ -7,6 +7,7 @@ use std::time::Duration;
 use async_trait::async_trait;
 
 use crate::condition::evaluate_condition;
+use crate::context::keys;
 use crate::context::Context;
 use crate::engine::{RunConfig, WorkflowRunEngine};
 use crate::error::ArcError;
@@ -148,8 +149,15 @@ impl Handler for SubWorkflowHandler {
             labels: HashMap::new(),
         };
 
-        // Clone parent context for child; snapshot before for diffing
+        // Clone parent context for child; inject parent preamble
         let child_context = context.clone_context();
+        let parent_preamble = context.preamble();
+        if !parent_preamble.is_empty() {
+            child_context.set(
+                keys::INTERNAL_PARENT_PREAMBLE,
+                serde_json::json!(parent_preamble),
+            );
+        }
         let before_snapshot = context.snapshot();
 
         // Spawn child engine
@@ -171,9 +179,19 @@ impl Handler for SubWorkflowHandler {
                         Err(e) => return Ok(Outcome::fail_classify(format!("Child task panicked: {e}"))),
                     };
 
-                    // Compute context diff
+                    // Compute context diff, filtering engine-internal keys
                     let after_snapshot = child_final_context.snapshot();
-                    let diff = context_diff(&before_snapshot, &after_snapshot);
+                    let raw_diff = context_diff(&before_snapshot, &after_snapshot);
+                    let diff: HashMap<String, serde_json::Value> = raw_diff
+                        .into_iter()
+                        .filter(|(key, _)| !keys::is_engine_internal_key(key))
+                        .collect();
+
+                    tracing::debug!(
+                        node = %node.id,
+                        propagated_keys = ?diff.keys().collect::<Vec<_>>(),
+                        "Sub-workflow context diff filtered"
+                    );
 
                     let mut outcome = Outcome {
                         status: child_outcome.status.clone(),
@@ -641,5 +659,205 @@ mod tests {
         let after = HashMap::new();
         let diff = context_diff(&before, &after);
         assert!(diff.is_empty());
+    }
+
+    #[test]
+    fn context_diff_excludes_engine_internal_keys() {
+        let before = HashMap::new();
+        let mut after = HashMap::new();
+        after.insert("graph.goal".to_string(), serde_json::json!("child goal"));
+        after.insert(
+            "internal.run_id".to_string(),
+            serde_json::json!("child-run"),
+        );
+        after.insert(
+            "thread.main.current_node".to_string(),
+            serde_json::json!("exit"),
+        );
+        after.insert("current_node".to_string(), serde_json::json!("exit"));
+        after.insert(
+            "response.plan".to_string(),
+            serde_json::json!("the plan"),
+        );
+        after.insert(
+            "review.result".to_string(),
+            serde_json::json!("approved"),
+        );
+
+        let raw_diff = context_diff(&before, &after);
+        let filtered: HashMap<String, serde_json::Value> = raw_diff
+            .into_iter()
+            .filter(|(key, _)| !keys::is_engine_internal_key(key))
+            .collect();
+
+        assert_eq!(filtered.len(), 2);
+        assert!(filtered.contains_key("response.plan"));
+        assert!(filtered.contains_key("review.result"));
+    }
+
+    #[tokio::test]
+    async fn context_flows_parent_to_child_and_back_excludes_internals() {
+        struct ContextEchoHandler;
+
+        #[async_trait]
+        impl Handler for ContextEchoHandler {
+            async fn execute(
+                &self,
+                _node: &Node,
+                context: &Context,
+                _graph: &Graph,
+                _logs_root: &Path,
+                _services: &EngineServices,
+            ) -> Result<Outcome, ArcError> {
+                let target = context.get_string("review.target", "");
+                let mut outcome = Outcome::success();
+                outcome
+                    .context_updates
+                    .insert("review.result".to_string(), serde_json::json!("approved"));
+                outcome
+                    .context_updates
+                    .insert("review.echo".to_string(), serde_json::json!(target));
+                Ok(outcome)
+            }
+        }
+
+        let mut registry = HandlerRegistry::new(Box::new(ContextEchoHandler));
+        registry.register("start", Box::new(StartHandler));
+        registry.register("exit", Box::new(ExitHandler));
+        let services = EngineServices {
+            registry: std::sync::Arc::new(registry),
+            emitter: std::sync::Arc::new(EventEmitter::new()),
+            sandbox: std::sync::Arc::new(arc_agent::LocalSandbox::new(
+                std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from(".")),
+            )),
+            git_state: std::sync::RwLock::new(None),
+            hook_runner: None,
+        };
+
+        let handler = SubWorkflowHandler;
+        let mut node = Node::new("manager");
+        node.attrs.insert(
+            "stack.child_dot_source".to_string(),
+            AttrValue::String(
+                "digraph Child { start [shape=Mdiamond]; work [shape=box]; exit [shape=Msquare]; start -> work -> exit }"
+                    .to_string(),
+            ),
+        );
+        node.attrs
+            .insert("manager.max_cycles".to_string(), AttrValue::Integer(100));
+        node.attrs.insert(
+            "manager.poll_interval".to_string(),
+            AttrValue::Duration(Duration::from_millis(10)),
+        );
+
+        let context = Context::new();
+        context.set("review.target", serde_json::json!("src/main.rs"));
+
+        let graph = Graph::new("test");
+        let dir = tempfile::tempdir().unwrap();
+
+        let outcome = handler
+            .execute(&node, &context, &graph, dir.path(), &services)
+            .await
+            .unwrap();
+
+        assert_eq!(outcome.status, StageStatus::Success);
+        // User-defined keys propagate
+        assert_eq!(
+            outcome.context_updates.get("review.result"),
+            Some(&serde_json::json!("approved"))
+        );
+        // Engine-internal keys do NOT propagate
+        assert!(!outcome.context_updates.contains_key("internal.run_id"));
+        assert!(!outcome.context_updates.contains_key("graph.goal"));
+        assert!(!outcome
+            .context_updates
+            .keys()
+            .any(|k| k.starts_with("thread.")));
+        assert!(!outcome
+            .context_updates
+            .keys()
+            .any(|k| k.starts_with("current")));
+    }
+
+    #[tokio::test]
+    async fn child_receives_parent_preamble() {
+        struct PreambleEchoHandler;
+
+        #[async_trait]
+        impl Handler for PreambleEchoHandler {
+            async fn execute(
+                &self,
+                _node: &Node,
+                context: &Context,
+                _graph: &Graph,
+                _logs_root: &Path,
+                _services: &EngineServices,
+            ) -> Result<Outcome, ArcError> {
+                let parent_preamble =
+                    context.get_string(keys::INTERNAL_PARENT_PREAMBLE, "");
+                let mut outcome = Outcome::success();
+                outcome.context_updates.insert(
+                    "echo.parent_preamble".to_string(),
+                    serde_json::json!(parent_preamble),
+                );
+                Ok(outcome)
+            }
+        }
+
+        let mut registry = HandlerRegistry::new(Box::new(PreambleEchoHandler));
+        registry.register("start", Box::new(StartHandler));
+        registry.register("exit", Box::new(ExitHandler));
+        let services = EngineServices {
+            registry: std::sync::Arc::new(registry),
+            emitter: std::sync::Arc::new(EventEmitter::new()),
+            sandbox: std::sync::Arc::new(arc_agent::LocalSandbox::new(
+                std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from(".")),
+            )),
+            git_state: std::sync::RwLock::new(None),
+            hook_runner: None,
+        };
+
+        let handler = SubWorkflowHandler;
+        let mut node = Node::new("manager");
+        node.attrs.insert(
+            "stack.child_dot_source".to_string(),
+            AttrValue::String(
+                "digraph Child { start [shape=Mdiamond]; work [shape=box]; exit [shape=Msquare]; start -> work -> exit }"
+                    .to_string(),
+            ),
+        );
+        node.attrs
+            .insert("manager.max_cycles".to_string(), AttrValue::Integer(100));
+        node.attrs.insert(
+            "manager.poll_interval".to_string(),
+            AttrValue::Duration(Duration::from_millis(10)),
+        );
+
+        // Set a preamble on the parent context
+        let context = Context::new();
+        context.set(
+            keys::CURRENT_PREAMBLE,
+            serde_json::json!("Parent did step A and step B"),
+        );
+
+        let graph = Graph::new("test");
+        let dir = tempfile::tempdir().unwrap();
+
+        let outcome = handler
+            .execute(&node, &context, &graph, dir.path(), &services)
+            .await
+            .unwrap();
+
+        assert_eq!(outcome.status, StageStatus::Success);
+        let echoed = outcome
+            .context_updates
+            .get("echo.parent_preamble")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+        assert!(
+            echoed.contains("Parent did step A and step B"),
+            "Child should receive the parent preamble, got: {echoed}"
+        );
     }
 }

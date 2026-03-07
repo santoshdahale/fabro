@@ -29,7 +29,7 @@ pub fn build_preamble(
     let goal = graph.goal();
     let run_id = context.run_id();
 
-    match fidelity {
+    let preamble = match fidelity {
         Fidelity::Full => String::new(),
         Fidelity::Truncate => {
             format!("Goal: {goal}\nRun ID: {run_id}\n")
@@ -64,6 +64,13 @@ pub fn build_preamble(
             graph,
             SummaryDetail::High,
         ),
+    };
+
+    let parent_preamble = context.get_string(keys::INTERNAL_PARENT_PREAMBLE, "");
+    if !parent_preamble.is_empty() && !preamble.is_empty() {
+        format!("## Parent workflow context\n{parent_preamble}\n\n## Current sub-workflow\n{preamble}")
+    } else {
+        preamble
     }
 }
 
@@ -2029,6 +2036,60 @@ mod tests {
         assert!(
             !preamble.contains("Completed stages"),
             "should not show stages header when empty"
+        );
+    }
+
+    #[test]
+    fn build_preamble_prepends_parent_preamble_when_present() {
+        let graph = Graph::new("test");
+        let context = Context::new();
+        context.set(
+            keys::INTERNAL_PARENT_PREAMBLE,
+            serde_json::json!("Parent completed plan and review"),
+        );
+        let completed_nodes: Vec<String> = Vec::new();
+        let node_outcomes: HashMap<String, Outcome> = HashMap::new();
+
+        let preamble = build_preamble(
+            keys::Fidelity::Compact,
+            &context,
+            &graph,
+            &completed_nodes,
+            &node_outcomes,
+        );
+
+        assert!(
+            preamble.contains("## Parent workflow context"),
+            "should contain parent section header"
+        );
+        assert!(
+            preamble.contains("Parent completed plan and review"),
+            "should contain parent preamble text"
+        );
+        assert!(
+            preamble.contains("## Current sub-workflow"),
+            "should contain current sub-workflow section header"
+        );
+    }
+
+    #[test]
+    fn build_preamble_no_parent_preamble_when_absent() {
+        let graph = Graph::new("test");
+        let context = Context::new();
+        let completed_nodes: Vec<String> = Vec::new();
+        let node_outcomes: HashMap<String, Outcome> = HashMap::new();
+
+        let preamble = build_preamble(
+            keys::Fidelity::Compact,
+            &context,
+            &graph,
+            &completed_nodes,
+            &node_outcomes,
+        );
+
+        assert!(
+            !preamble.contains("Parent workflow context"),
+            "should not contain parent section when no parent preamble"
         );
     }
 }
