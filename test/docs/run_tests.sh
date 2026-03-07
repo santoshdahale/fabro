@@ -6,10 +6,23 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 ARC="${ARC:-$REPO_ROOT/target/release/arc}"
 
 PHASE="${1:-validate}"
+VERBOSE="${VERBOSE:-0}"
 PARALLEL="${PARALLEL:-1}"
+# Force sequential execution when verbose to avoid interleaved output
+[[ "$VERBOSE" == "1" ]] && PARALLEL=1
 
 RESULTS_DIR="$(mktemp -d)"
 trap 'rm -rf "$RESULTS_DIR"' EXIT
+
+# Capture command output to log file; when VERBOSE=1, also stream to terminal.
+capture() {
+    local log="$1"; shift
+    if [[ "$VERBOSE" == "1" ]]; then
+        "$@" 2>&1 | tee "$log"
+    else
+        "$@" > "$log" 2>&1
+    fi
+}
 
 run_one() {
     local dot="$1"
@@ -30,7 +43,7 @@ run_one() {
 
     case "$PHASE" in
         validate)
-            if "$ARC" validate "$dot" > "$result_file.log" 2>&1; then
+            if capture "$result_file.log" "$ARC" validate "$dot"; then
                 if grep -qi 'warn' "$result_file.log"; then
                     echo "FAIL" > "$result_file"
                     echo "  FAIL  $rel (warnings)"
@@ -48,7 +61,7 @@ run_one() {
             local target="$dot_name"
             [[ -f "$toml" ]] && target="run-${stem}.toml"
 
-            if (cd "$dot_dir" && "$ARC" run start "$target" --preflight > "$result_file.log" 2>&1); then
+            if (cd "$dot_dir" && capture "$result_file.log" "$ARC" run start "$target" --preflight); then
                 echo "PASS" > "$result_file"
                 echo "  PASS  $rel"
             else
@@ -65,7 +78,7 @@ run_one() {
             [[ "$PHASE" == "dry-run" ]] && flags+=(--dry-run)
             [[ "$PHASE" == "haiku" ]] && flags+=(--model claude-haiku-4-5)
 
-            if (cd "$dot_dir" && "$ARC" run start "$target" "${flags[@]}" > "$result_file.log" 2>&1); then
+            if (cd "$dot_dir" && capture "$result_file.log" "$ARC" run start "$target" "${flags[@]}"); then
                 echo "PASS" > "$result_file"
                 echo "  PASS  $rel"
             else
