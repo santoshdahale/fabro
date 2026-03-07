@@ -160,8 +160,6 @@ struct ActiveStage {
     has_model: bool,
     spinner: ProgressBar,
     tool_calls: VecDeque<ToolCallEntry>,
-    turn_count: u32,
-    tool_call_count: u32,
 }
 
 const MAX_TOOL_CALLS: usize = 5;
@@ -183,6 +181,9 @@ pub struct ProgressUI {
     renderer: ProgressRenderer,
     verbose: bool,
     active_stages: HashMap<String, ActiveStage>,
+    /// Turn and tool-call counts per stage, tracked independently of the
+    /// renderer so that Plain (non-TTY) mode reports accurate stats.
+    stage_counts: HashMap<String, (u32, u32)>,
     setup_command_count: usize,
     sandbox_bar: Option<ProgressBar>,
     setup_bar: Option<ProgressBar>,
@@ -204,6 +205,7 @@ impl ProgressUI {
             renderer,
             verbose,
             active_stages: HashMap::new(),
+            stage_counts: HashMap::new(),
             setup_command_count: 0,
             sandbox_bar: None,
             setup_bar: None,
@@ -285,9 +287,9 @@ impl ProgressUI {
                     .map(|c| format!("{}   ", format_cost(c)))
                     .unwrap_or_default();
                 let stats_str = if self.verbose {
-                    let stage = self.active_stages.get(node_id);
-                    let turn_count = stage.map_or(0, |s| s.turn_count);
-                    let tool_call_count = stage.map_or(0, |s| s.tool_call_count);
+                    let counts = self.stage_counts.get(node_id);
+                    let turn_count = counts.map_or(0, |c| c.0);
+                    let tool_call_count = counts.map_or(0, |c| c.1);
                     let total_tokens = usage
                         .as_ref()
                         .map(|u| u.input_tokens + u.output_tokens)
@@ -623,6 +625,7 @@ impl ProgressUI {
     // ── Stages ──────────────────────────────────────────────────────────
 
     fn on_stage_started(&mut self, node_id: &str, name: &str, script: Option<&str>) {
+        self.stage_counts.insert(node_id.to_string(), (0, 0));
         let display_name = match script {
             Some(s) => {
                 let dim = Style::new().dim();
@@ -648,8 +651,6 @@ impl ProgressUI {
                     has_model: false,
                     spinner: bar,
                     tool_calls: VecDeque::new(),
-                    turn_count: 0,
-                    tool_call_count: 0,
                 },
             );
         }
@@ -689,9 +690,11 @@ impl ProgressUI {
     fn on_agent_event(&mut self, stage_node_id: &str, event: &AgentEvent) {
         match event {
             AgentEvent::AssistantMessage { model, .. } => {
+                if let Some(counts) = self.stage_counts.get_mut(stage_node_id) {
+                    counts.0 += 1;
+                }
                 if let ProgressRenderer::Tty(_) = &self.renderer {
                     if let Some(stage) = self.active_stages.get_mut(stage_node_id) {
-                        stage.turn_count += 1;
                         if !stage.has_model {
                             stage.has_model = true;
                             let dim = Style::new().dim();
@@ -714,8 +717,8 @@ impl ProgressUI {
                 is_error,
                 ..
             } => {
-                if let Some(stage) = self.active_stages.get_mut(stage_node_id) {
-                    stage.tool_call_count += 1;
+                if let Some(counts) = self.stage_counts.get_mut(stage_node_id) {
+                    counts.1 += 1;
                 }
                 self.on_tool_call_completed(stage_node_id, tool_call_id, *is_error);
             }
