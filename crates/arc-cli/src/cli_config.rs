@@ -39,11 +39,18 @@ pub struct LlmDefaults {
 }
 
 #[derive(Clone, Debug, Default, Deserialize, PartialEq)]
+pub struct CliGitConfig {
+    #[serde(default)]
+    pub author: arc_api::server_config::GitAuthorConfig,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, PartialEq)]
 pub struct CliConfig {
     pub mode: Option<ExecutionMode>,
     pub server: Option<ServerDefaults>,
     pub agent: Option<AgentDefaults>,
     pub llm: Option<LlmDefaults>,
+    pub git: Option<CliGitConfig>,
 }
 
 #[derive(Debug, PartialEq)]
@@ -322,6 +329,25 @@ ca = "~/.arc/tls/ca.crt"
         };
         let resolved = resolve_mode(None, Some("https://cli.example.com"), &config);
         assert_eq!(resolved.server_base_url, "https://cli.example.com");
+    }
+
+    #[test]
+    fn parse_git_author_config() {
+        let toml = r#"
+[git.author]
+name = "my-arc"
+email = "me@local"
+"#;
+        let config: CliConfig = toml::from_str(toml).unwrap();
+        let git = config.git.unwrap();
+        assert_eq!(git.author.name.as_deref(), Some("my-arc"));
+        assert_eq!(git.author.email.as_deref(), Some("me@local"));
+    }
+
+    #[test]
+    fn parse_git_author_absent() {
+        let config: CliConfig = toml::from_str("").unwrap();
+        assert_eq!(config.git, None);
     }
 
     #[test]

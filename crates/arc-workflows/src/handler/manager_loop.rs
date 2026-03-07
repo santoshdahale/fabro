@@ -137,6 +137,7 @@ impl Handler for SubWorkflowHandler {
         let cancel_token = Arc::new(AtomicBool::new(false));
         let child_cancel = Arc::clone(&cancel_token);
 
+        let git_state = services.git_state();
         let child_config = RunConfig {
             logs_root: child_logs,
             cancel_token: Some(cancel_token),
@@ -149,6 +150,8 @@ impl Handler for SubWorkflowHandler {
             labels: HashMap::new(),
             checkpoint_exclude_globs: Vec::new(),
             github_app: None,
+            git_author_name: git_state.as_ref().map(|gs| gs.git_author_name.clone()).unwrap_or_else(|| "arc".into()),
+            git_author_email: git_state.as_ref().map(|gs| gs.git_author_email.clone()).unwrap_or_else(|| "arc@local".into()),
         };
 
         // Clone parent context for child; inject parent preamble

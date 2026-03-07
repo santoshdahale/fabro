@@ -66,12 +66,20 @@ pub enum GitProvider {
 }
 
 #[derive(Debug, Clone, Default, Deserialize, PartialEq, Serialize)]
+pub struct GitAuthorConfig {
+    pub name: Option<String>,
+    pub email: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize, PartialEq, Serialize)]
 pub struct GitConfig {
     #[serde(default)]
     pub provider: GitProvider,
     pub app_id: Option<String>,
     pub client_id: Option<String>,
     pub slug: Option<String>,
+    #[serde(default)]
+    pub author: GitAuthorConfig,
 }
 
 #[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
@@ -262,6 +270,34 @@ client_id = "Iv1.abc123"
         assert_eq!(config.git.provider, GitProvider::Github);
         assert_eq!(config.git.app_id, None);
         assert_eq!(config.git.client_id, None);
+        assert_eq!(config.git.author.name, None);
+        assert_eq!(config.git.author.email, None);
+    }
+
+    #[test]
+    fn parse_git_author_config() {
+        let toml = r#"
+[git.author]
+name = "arc-bot"
+email = "arc-bot@company.com"
+"#;
+        let config: ServerConfig = toml::from_str(toml).unwrap();
+        assert_eq!(config.git.author.name.as_deref(), Some("arc-bot"));
+        assert_eq!(
+            config.git.author.email.as_deref(),
+            Some("arc-bot@company.com")
+        );
+    }
+
+    #[test]
+    fn parse_git_author_partial() {
+        let toml = r#"
+[git.author]
+name = "custom-name"
+"#;
+        let config: ServerConfig = toml::from_str(toml).unwrap();
+        assert_eq!(config.git.author.name.as_deref(), Some("custom-name"));
+        assert_eq!(config.git.author.email, None);
     }
 
     #[test]

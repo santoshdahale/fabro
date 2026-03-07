@@ -181,10 +181,12 @@ pub async fn run_command(
     run_defaults: RunDefaults,
     styles: &'static Styles,
     github_app: Option<crate::github_app::GitHubAppCredentials>,
+    git_author_name: String,
+    git_author_email: String,
 ) -> anyhow::Result<()> {
     // Handle --run-branch resume: read everything from git metadata
     if let Some(branch) = args.run_branch.clone() {
-        return run_from_branch(args, &branch, styles).await;
+        return run_from_branch(args, &branch, styles, git_author_name, git_author_email).await;
     }
 
     let workflow_path = args
@@ -695,6 +697,8 @@ pub async fn run_command(
             .collect(),
         checkpoint_exclude_globs,
         github_app: github_app.clone(),
+        git_author_name,
+        git_author_email,
     };
 
     let run_start = Instant::now();
@@ -926,6 +930,8 @@ async fn run_from_branch(
     args: RunArgs,
     run_branch: &str,
     styles: &'static Styles,
+    git_author_name: String,
+    git_author_email: String,
 ) -> anyhow::Result<()> {
     // Extract run_id from branch name: "arc/run/{run_id}" -> "{run_id}"
     let run_id = run_branch
@@ -1062,6 +1068,8 @@ async fn run_from_branch(
         labels: HashMap::new(),
         checkpoint_exclude_globs: Vec::new(),
         github_app: None,
+        git_author_name,
+        git_author_email,
     };
 
     let run_start = Instant::now();

@@ -136,7 +136,14 @@ pub async fn serve_command(args: ServeArgs, styles: &'static Styles) -> anyhow::
         (auth_mode, client_auth, max_concurrent_runs)
     };
 
-    let state = crate::server::create_app_state_with_options(db, factory, dry_run_mode, max_concurrent_runs);
+    let (git_author_name, git_author_email) = {
+        let cfg = shared_config.read().expect("config lock poisoned");
+        (
+            cfg.git.author.name.clone().unwrap_or_else(|| "arc".into()),
+            cfg.git.author.email.clone().unwrap_or_else(|| "arc@local".into()),
+        )
+    };
+    let state = crate::server::create_app_state_with_options(db, factory, dry_run_mode, max_concurrent_runs, git_author_name, git_author_email);
     crate::server::spawn_scheduler(Arc::clone(&state));
     let router = build_router(state, auth_mode);
 
