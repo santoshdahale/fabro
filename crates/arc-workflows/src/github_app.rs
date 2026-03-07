@@ -187,7 +187,7 @@ pub async fn create_installation_access_token(
     );
     let body = serde_json::json!({
         "repositories": [repo],
-        "permissions": { "contents": "read" }
+        "permissions": { "contents": "write" }
     });
 
     let token_resp = client
@@ -436,7 +436,7 @@ mod tests {
             .mock("POST", "/app/installations/123/access_tokens")
             .match_header("Authorization", "Bearer test-jwt")
             .match_body(mockito::Matcher::JsonString(
-                r#"{"repositories":["repo"],"permissions":{"contents":"read"}}"#.to_string(),
+                r#"{"repositories":["repo"],"permissions":{"contents":"write"}}"#.to_string(),
             ))
             .with_status(201)
             .with_body(r#"{"token": "ghs_xxx"}"#)

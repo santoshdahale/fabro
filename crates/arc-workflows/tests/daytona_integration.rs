@@ -1312,3 +1312,127 @@ async fn daytona_iat_not_installed_gives_clear_error() {
         "error should mention 'not installed', got: {err}"
     );
 }
+
+// ---------------------------------------------------------------------------
+// Push run branch to origin after each checkpoint (Remote mode + GitHub App)
+// ---------------------------------------------------------------------------
+
+/// E2E: After each remote checkpoint, the run branch is pushed to origin.
+/// Verifies the branch appears on the remote via `git ls-remote`.
+#[tokio::test]
+#[ignore]
+async fn daytona_git_push_run_branch_to_origin() {
+    let creds = load_github_app_credentials();
+    let env = create_env_with_github_app(Some(creds)).await;
+    env.initialize().await.unwrap();
+    let env: Arc<dyn Sandbox> = Arc::new(env);
+
+    // Install git if not available
+    let git_check = env
+        .exec_command("git --version", 10_000, None, None, None)
+        .await;
+    if git_check.as_ref().map_or(true, |r| r.exit_code != 0) {
+        let install = env
+            .exec_command(
+                "apt-get update -qq && apt-get install -y -qq git >/dev/null 2>&1",
+                120_000,
+                None,
+                None,
+                None,
+            )
+            .await
+            .expect("apt-get install git should not error");
+        assert_eq!(
+            install.exit_code, 0,
+            "git install failed: {}",
+            install.stderr
+        );
+    }
+
+    // Set up git in the sandbox
+    let (run_id, base_sha, branch_name) = setup_daytona_git(&*env).await;
+
+    // Pipeline: start -> work -> exit
+    let mut graph = Graph::new("DaytonaGitPush");
+    graph.attrs.insert(
+        "goal".to_string(),
+        AttrValue::String("Test push run branch to origin".to_string()),
+    );
+
+    let mut start = Node::new("start");
+    start
+        .attrs
+        .insert("shape".to_string(), AttrValue::String("Mdiamond".to_string()));
+    graph.nodes.insert("start".to_string(), start);
+
+    let mut exit = Node::new("exit");
+    exit.attrs
+        .insert("shape".to_string(), AttrValue::String("Msquare".to_string()));
+    graph.nodes.insert("exit".to_string(), exit);
+
+    let mut work = Node::new("work");
+    work.attrs
+        .insert("label".to_string(), AttrValue::String("Work".to_string()));
+    graph.nodes.insert("work".to_string(), work);
+
+    graph.edges.push(Edge::new("start", "work"));
+    graph.edges.push(Edge::new("work", "exit"));
+
+    let dir = tempfile::tempdir().unwrap();
+
+    let mut registry = HandlerRegistry::new(Box::new(FileWriterHandler));
+    registry.register("start", Box::new(StartHandler));
+    registry.register("exit", Box::new(ExitHandler));
+
+    let engine = WorkflowRunEngine::new(registry, Arc::new(EventEmitter::new()), env.clone());
+    let config = RunConfig {
+        logs_root: dir.path().to_path_buf(),
+        cancel_token: None,
+        dry_run: false,
+        run_id: run_id.clone(),
+        git_checkpoint: Some(GitCheckpointMode::Remote(dir.path().to_path_buf())),
+        base_sha: Some(base_sha),
+        run_branch: Some(branch_name.clone()),
+        meta_branch: None,
+        labels: std::collections::HashMap::new(),
+    };
+
+    let outcome = engine
+        .run(&graph, &config)
+        .await
+        .expect("pipeline should succeed");
+    assert_eq!(outcome.status, StageStatus::Success);
+
+    // Verify the run branch was pushed to origin
+    let ls_remote_cmd = format!("git ls-remote --heads origin {branch_name}");
+    let ls_result = env
+        .exec_command(&ls_remote_cmd, 30_000, None, None, None)
+        .await
+        .expect("git ls-remote should succeed");
+    assert_eq!(
+        ls_result.exit_code, 0,
+        "git ls-remote failed: {}",
+        ls_result.stdout
+    );
+    assert!(
+        ls_result.stdout.contains(&branch_name),
+        "run branch should exist on origin after push, got: {}",
+        ls_result.stdout.trim()
+    );
+
+    // Clean up the remote branch
+    let delete_cmd = format!("git push origin --delete {branch_name}");
+    let delete_result = env
+        .exec_command(&delete_cmd, 30_000, None, None, None)
+        .await;
+    if let Ok(r) = &delete_result {
+        if r.exit_code != 0 {
+            eprintln!(
+                "Warning: failed to delete remote branch {branch_name}: {}",
+                r.stdout
+            );
+        }
+    }
+
+    env.cleanup().await.unwrap();
+}

@@ -141,6 +141,8 @@ pub struct DaytonaSandbox {
     sandbox: tokio::sync::OnceCell<daytona_sdk::Sandbox>,
     rg_available: tokio::sync::OnceCell<bool>,
     event_callback: Option<SandboxEventCallback>,
+    /// HTTPS origin URL stored after clone so we can refresh push credentials later.
+    origin_url: tokio::sync::OnceCell<String>,
 }
 
 impl DaytonaSandbox {
@@ -157,6 +159,7 @@ impl DaytonaSandbox {
             sandbox: tokio::sync::OnceCell::new(),
             rg_available: tokio::sync::OnceCell::const_new(),
             event_callback: None,
+            origin_url: tokio::sync::OnceCell::new(),
         }
     }
 
@@ -521,6 +524,7 @@ impl Sandbox for DaytonaSandbox {
                     }
                 };
 
+                let clone_token = password.clone();
                 let clone_result = git_svc
                     .clone(
                         &url,
@@ -539,9 +543,40 @@ impl Sandbox for DaytonaSandbox {
                         let clone_duration =
                             u64::try_from(clone_start.elapsed().as_millis()).unwrap_or(u64::MAX);
                         self.emit(SandboxEvent::GitCloneCompleted {
-                            url,
+                            url: url.clone(),
                             duration_ms: clone_duration,
                         });
+
+                        // Store origin URL and set push credentials for later pushes
+                        if let Some(token) = clone_token {
+                            let _ = self.origin_url.set(url);
+                            let process_svc = sandbox.process().await.ok();
+                            if let Some(ps) = process_svc {
+                                let origin = self.origin_url.get().expect("just set");
+                                let auth_url = origin.replacen(
+                                    "https://",
+                                    &format!("https://x-access-token:{token}@"),
+                                    1,
+                                );
+                                let cmd = format!(
+                                    "git -c maintenance.auto=0 remote set-url origin '{}'",
+                                    auth_url.replace('\'', "'\\''"),
+                                );
+                                let opts = daytona_sdk::ExecuteCommandOptions {
+                                    cwd: Some(WORKING_DIRECTORY.to_string()),
+                                    ..Default::default()
+                                };
+                                let wrapped = wrap_bash_command(&cmd);
+                                if let Ok(r) = ps.execute_command(&wrapped, opts).await {
+                                    if r.exit_code != 0 {
+                                        tracing::warn!(
+                                            exit_code = r.exit_code,
+                                            "Failed to set push credentials on origin"
+                                        );
+                                    }
+                                }
+                            }
+                        }
                     }
                     Err(e) if self.github_app.is_none() => {
                         let err = format!(
@@ -655,6 +690,42 @@ impl Sandbox for DaytonaSandbox {
             .get()
             .map(|s| s.name.clone())
             .unwrap_or_default()
+    }
+
+    async fn refresh_push_credentials(&self) -> Result<(), String> {
+        let origin_url = match self.origin_url.get() {
+            Some(url) => url,
+            None => return Ok(()), // no authenticated origin — nothing to refresh
+        };
+        let creds = match &self.github_app {
+            Some(c) => c,
+            None => return Ok(()),
+        };
+
+        let (owner, repo) = crate::github_app::parse_github_owner_repo(origin_url)
+            .map_err(|e| format!("Failed to parse origin URL for credential refresh: {e}"))?;
+
+        let (_username, password) =
+            crate::github_app::resolve_clone_credentials(creds, &owner, &repo)
+                .await
+                .map_err(|e| format!("Failed to refresh GitHub App token: {e}"))?;
+
+        if let Some(token) = password {
+            let auth_url = origin_url.replacen(
+                "https://",
+                &format!("https://x-access-token:{token}@"),
+                1,
+            );
+            let cmd = format!(
+                "git -c maintenance.auto=0 remote set-url origin '{}'",
+                auth_url.replace('\'', "'\\''"),
+            );
+            self.exec_command(&cmd, 10_000, None, None, None)
+                .await
+                .map_err(|e| format!("Failed to set refreshed push credentials: {e}"))?;
+        }
+
+        Ok(())
     }
 
     async fn read_file(

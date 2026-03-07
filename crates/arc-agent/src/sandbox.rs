@@ -92,6 +92,10 @@ macro_rules! delegate_sandbox {
             fn sandbox_info(&self) -> String {
                 self.$field.sandbox_info()
             }
+
+            async fn refresh_push_credentials(&self) -> Result<(), String> {
+                self.$field.refresh_push_credentials().await
+            }
         }
     };
 }
@@ -328,6 +332,12 @@ pub trait Sandbox: Send + Sync {
     /// Used when `--preserve-sandbox` is active to tell the user how to reconnect.
     fn sandbox_info(&self) -> String {
         String::new()
+    }
+
+    /// Refresh git push credentials (e.g. rotate an expiring GitHub App token).
+    /// Default is a no-op; Daytona overrides to update the remote URL with a fresh token.
+    async fn refresh_push_credentials(&self) -> Result<(), String> {
+        Ok(())
     }
 }
 

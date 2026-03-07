@@ -646,6 +646,25 @@ pub async fn git_checkpoint_remote(
     }
 }
 
+/// Push the run branch to origin inside a remote sandbox (best-effort).
+async fn git_push_remote(sandbox: &dyn Sandbox, branch: &str) {
+    if let Err(e) = sandbox.refresh_push_credentials().await {
+        tracing::warn!(error = %e, "Failed to refresh push credentials");
+    }
+    let cmd = format!("{GIT_REMOTE} push origin {branch}");
+    match sandbox.exec_command(&cmd, 60_000, None, None, None).await {
+        Ok(r) if r.exit_code == 0 => {
+            tracing::info!(branch, "Pushed run branch to origin");
+        }
+        Ok(r) => {
+            tracing::warn!(branch, exit_code = r.exit_code, "Failed to push run branch");
+        }
+        Err(e) => {
+            tracing::warn!(branch, error = %e, "Failed to push run branch");
+        }
+    }
+}
+
 /// Run a git diff inside a remote sandbox.
 async fn git_diff_remote(sandbox: &dyn Sandbox, base: &str) -> Option<String> {
     let cmd = format!("{GIT_REMOTE} diff {base} HEAD");
@@ -1853,6 +1872,13 @@ impl WorkflowRunEngine {
                             status: outcome.status.to_string(),
                             git_commit_sha: sha.clone(),
                         });
+
+                    // Push run branch to origin after remote checkpoint
+                    if matches!(mode, GitCheckpointMode::Remote(_)) {
+                        if let Some(ref branch) = config.run_branch {
+                            git_push_remote(&*self.services.sandbox, branch).await;
+                        }
+                    }
 
                     // Save diff.patch for this stage
                     let prev = last_git_sha
