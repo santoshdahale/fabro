@@ -2568,6 +2568,7 @@ mod settings {
                 provider: GitProvider::Github,
                 app_id: Some("12345".into()),
                 client_id: Some("Iv1.abc123".into()),
+                slug: Some("arc-dev".into()),
             },
             feature_flags: FeatureFlags {
                 session_sandboxes: false,

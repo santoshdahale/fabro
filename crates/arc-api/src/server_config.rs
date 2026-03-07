@@ -71,6 +71,7 @@ pub struct GitConfig {
     pub provider: GitProvider,
     pub app_id: Option<String>,
     pub client_id: Option<String>,
+    pub slug: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]

@@ -17,6 +17,7 @@ interface GitConfig {
   provider: "github";
   app_id: string | null;
   client_id: string | null;
+  slug: string | null;
 }
 
 interface FeatureFlags {
@@ -54,6 +55,7 @@ const GIT_DEFAULTS: GitConfig = {
   provider: "github",
   app_id: null,
   client_id: null,
+  slug: null,
 };
 
 const FEATURE_FLAGS_DEFAULTS: FeatureFlags = {

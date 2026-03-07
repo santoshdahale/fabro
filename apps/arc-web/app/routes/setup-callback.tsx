@@ -4,6 +4,7 @@ import { randomBytes } from "node:crypto";
 import { redirect } from "react-router";
 import { parse, stringify } from "smol-toml";
 import { ARC_CONFIG_PATH, reloadAppConfig } from "../lib/config.server";
+import { mergeEnv } from "../lib/merge-env";
 import type { Route } from "./+types/setup-callback";
 
 const ENV_PATH = resolve(import.meta.dirname, "../../../../.env");
@@ -27,6 +28,7 @@ export async function loader({ request }: Route.LoaderArgs) {
 
   const data = (await response.json()) as {
     id: number;
+    slug: string;
     client_id: string;
     client_secret: string;
     webhook_secret: string;
@@ -47,12 +49,13 @@ export async function loader({ request }: Route.LoaderArgs) {
     provider: "github",
     app_id: String(data.id),
     client_id: data.client_id,
+    slug: data.slug,
   };
   await mkdir(dirname(ARC_CONFIG_PATH), { recursive: true });
   await writeFile(ARC_CONFIG_PATH, stringify(tomlConfig), "utf-8");
   reloadAppConfig();
 
-  // Write secrets to .env
+  // Write secrets to .env (merge to avoid duplicates on re-run)
   let existing = "";
   try {
     existing = await readFile(ENV_PATH, "utf-8");
@@ -60,14 +63,15 @@ export async function loader({ request }: Route.LoaderArgs) {
     // file doesn't exist yet
   }
 
-  const newVars = [
-    `export SESSION_SECRET=${sessionSecret}`,
-    `export GITHUB_APP_CLIENT_SECRET=${data.client_secret}`,
-    `export GITHUB_APP_WEBHOOK_SECRET=${data.webhook_secret}`,
-    `export GITHUB_APP_PRIVATE_KEY=${Buffer.from(data.pem).toString("base64")}`,
-  ].join("\n");
-
-  const envContent = existing ? `${existing.trimEnd()}\n\n${newVars}\n` : `${newVars}\n`;
+  const envContent = mergeEnv(
+    existing,
+    new Map([
+      ["SESSION_SECRET", sessionSecret],
+      ["GITHUB_APP_CLIENT_SECRET", data.client_secret],
+      ["GITHUB_APP_WEBHOOK_SECRET", data.webhook_secret],
+      ["GITHUB_APP_PRIVATE_KEY", Buffer.from(data.pem).toString("base64")],
+    ]),
+  );
   await writeFile(ENV_PATH, envContent, "utf-8");
 
   process.env.SESSION_SECRET = sessionSecret;
