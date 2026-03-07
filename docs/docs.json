@@ -73,6 +73,17 @@
             ]
           },
           {
+            "group": "Integrations",
+            "icon": "puzzle-piece",
+            "pages": [
+              "integrations/github",
+              "integrations/daytona",
+              "integrations/slack",
+              "integrations/exe-dev",
+              "integrations/brave-search"
+            ]
+          },
+          {
             "group": "Reference",
             "icon": "book",
             "pages": [
@@ -120,7 +131,10 @@
             "group": "Deployment",
             "icon": "server",
             "pages": [
-              "administration/deployment"
+              "administration/deploy-railway",
+              "administration/deploy-render",
+              "administration/deploy-fly-io",
+              "administration/deploy-digital-ocean"
             ]
           }
         ]
