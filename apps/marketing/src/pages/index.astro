@@ -1,9 +1,419 @@
 ---
 import Layout from "../layouts/Layout.astro";
+
+const dotExample = `<span class="text-teal-300">digraph</span> <span class="text-ice-50">plan_implement_verify</span> {
+  <span class="text-ice-300">goal = "Build and verify a feature"</span>
+
+  <span class="text-teal-500">start</span>  [shape=Mdiamond]
+  <span class="text-teal-500">plan</span>   [shape=box]
+  <span class="text-teal-500">review</span> [shape=diamond]
+  <span class="text-teal-500">impl</span>   [shape=box]
+  <span class="text-teal-500">verify</span> [shape=box]
+  <span class="text-teal-500">done</span>   [shape=Msquare]
+
+  <span class="text-ice-300">start  -&gt; plan</span>
+  <span class="text-ice-300">plan   -&gt; review</span>
+  <span class="text-ice-300">review -&gt; plan</span>   [label=<span class="text-coral">"revise"</span>]
+  <span class="text-ice-300">review -&gt; impl</span>   [label=<span class="text-mint">"approve"</span>]
+  <span class="text-ice-300">impl   -&gt; verify</span>
+  <span class="text-ice-300">verify -&gt; impl</span>   [label=<span class="text-coral">"fail"</span>]
+  <span class="text-ice-300">verify -&gt; done</span>   [label=<span class="text-mint">"pass"</span>]
+}`;
+
+const cssExample = `<span class="text-ice-300">/* Fast model for planning */</span>
+<span class="text-teal-300">box</span> {
+  <span class="text-teal-500">model</span>: <span class="text-ice-50">gemini/gemini-2.5-flash</span>;
+}
+
+<span class="text-ice-300">/* Frontier for verification */</span>
+<span class="text-teal-300">#verify</span> {
+  <span class="text-teal-500">model</span>: <span class="text-ice-50">anthropic/claude-opus-4</span>;
+}
+
+<span class="text-ice-300">/* Code generation */</span>
+<span class="text-teal-300">#impl</span> {
+  <span class="text-teal-500">model</span>: <span class="text-ice-50">anthropic/claude-sonnet-4</span>;
+}`;
 ---
 
-<Layout title="Arc">
+<Layout title="Arc — AI Software Factory">
+  <!-- Nav -->
+  <nav class="fixed top-0 z-50 w-full border-b border-navy-800 bg-navy-950/80 backdrop-blur-md">
+    <div class="mx-auto flex max-w-6xl items-center justify-between px-6 py-4">
+      <a href="/" class="flex items-center gap-3">
+        <img src="/symbol.svg" alt="Arc" class="h-8 w-8" />
+        <span class="text-xl font-bold tracking-tight text-ice-50">Arc</span>
+      </a>
+      <div class="flex items-center gap-6">
+        <a href="https://docs.arc.computer" class="text-sm text-ice-300 hover:text-ice-50 transition-colors">Docs</a>
+        <a href="https://github.com/qltysh/arc" class="text-sm text-ice-300 hover:text-ice-50 transition-colors">GitHub</a>
+        <a
+          href="https://docs.arc.computer/getting-started/quick-start"
+          class="rounded-lg bg-teal-700 px-4 py-2 text-sm font-medium text-white hover:bg-teal-500 transition-colors"
+        >
+          Get started
+        </a>
+      </div>
+    </div>
+  </nav>
+
   <main>
-    <h1>Arc</h1>
+    <!-- Hero -->
+    <section class="relative overflow-hidden pt-32 pb-24">
+      <div class="absolute inset-0 bg-[radial-gradient(ellipse_at_top,_var(--color-navy-800)_0%,_transparent_60%)]"></div>
+      <div class="relative mx-auto max-w-4xl px-6 text-center">
+        <p class="mb-4 inline-block rounded-full border border-teal-700/40 bg-teal-700/10 px-4 py-1.5 text-sm font-medium text-teal-300">
+          Open Source
+        </p>
+        <h1 class="text-5xl font-bold leading-tight tracking-tight text-ice-50 sm:text-6xl">
+          The AI software factory for<br />
+          <span class="text-teal-500">expert engineering teams</span>
+        </h1>
+        <p class="mx-auto mt-6 max-w-2xl text-lg leading-relaxed text-ice-300">
+          Ship production code through long-horizon deterministic workflows, built-in verification,
+          and full observability — without trading quality for speed.
+        </p>
+        <div class="mt-10 flex items-center justify-center gap-4">
+          <a
+            href="https://docs.arc.computer/getting-started/quick-start"
+            class="rounded-lg bg-teal-700 px-6 py-3 text-sm font-semibold text-white hover:bg-teal-500 transition-colors"
+          >
+            Get started
+          </a>
+          <a
+            href="https://docs.arc.computer"
+            class="rounded-lg border border-navy-600 px-6 py-3 text-sm font-semibold text-ice-300 hover:border-ice-300 hover:text-ice-50 transition-colors"
+          >
+            Read the docs
+          </a>
+        </div>
+      </div>
+    </section>
+
+    <!-- Core Promise -->
+    <section class="border-t border-navy-800 py-24">
+      <div class="mx-auto max-w-3xl px-6 text-center">
+        <h2 class="text-3xl font-bold tracking-tight text-ice-50">
+          Controlled, auditable pipelines for real engineering
+        </h2>
+        <p class="mt-4 text-lg leading-relaxed text-ice-300">
+          Instead of one-shot code generation, Arc runs workflows: plan, implement, verify, review, ship — using
+          the right model at each step, with guardrails that fail closed.
+        </p>
+      </div>
+    </section>
+
+    <!-- Feature Grid -->
+    <section class="border-t border-navy-800 py-24">
+      <div class="mx-auto max-w-6xl px-6">
+        <div class="grid gap-8 md:grid-cols-2 lg:grid-cols-3">
+          <div class="rounded-xl border border-navy-800 bg-navy-800/30 p-8">
+            <div class="mb-4 flex h-10 w-10 items-center justify-center rounded-lg bg-teal-700/20">
+              <svg class="h-5 w-5 text-teal-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
+              </svg>
+            </div>
+            <h3 class="text-lg font-semibold text-ice-50">Deterministic long-horizon runs</h3>
+            <p class="mt-2 text-sm leading-relaxed text-ice-300">
+              Predictable automation with guardrails and rerun-ability. Human-in-the-loop when needed, fully automated when it's not.
+            </p>
+          </div>
+
+          <div class="rounded-xl border border-navy-800 bg-navy-800/30 p-8">
+            <div class="mb-4 flex h-10 w-10 items-center justify-center rounded-lg bg-teal-700/20">
+              <svg class="h-5 w-5 text-teal-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4" />
+              </svg>
+            </div>
+            <h3 class="text-lg font-semibold text-ice-50">Verification-first pipeline</h3>
+            <p class="mt-2 text-sm leading-relaxed text-ice-300">
+              Builds, tests, static analysis, LLM review, and human approval — baked into every workflow, not bolted on after.
+            </p>
+          </div>
+
+          <div class="rounded-xl border border-navy-800 bg-navy-800/30 p-8">
+            <div class="mb-4 flex h-10 w-10 items-center justify-center rounded-lg bg-teal-700/20">
+              <svg class="h-5 w-5 text-teal-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M4 5a1 1 0 011-1h14a1 1 0 011 1v2a1 1 0 01-1 1H5a1 1 0 01-1-1V5zM4 13a1 1 0 011-1h6a1 1 0 011 1v6a1 1 0 01-1 1H5a1 1 0 01-1-1v-6zM16 13a1 1 0 011-1h2a1 1 0 011 1v6a1 1 0 01-1 1h-2a1 1 0 01-1-1v-6z" />
+              </svg>
+            </div>
+            <h3 class="text-lg font-semibold text-ice-50">Multi-model orchestration</h3>
+            <p class="mt-2 text-sm leading-relaxed text-ice-300">
+              Use the right model for each step. CSS-like stylesheets assign fast models for breadth, frontier models for correctness.
+            </p>
+          </div>
+
+          <div class="rounded-xl border border-navy-800 bg-navy-800/30 p-8">
+            <div class="mb-4 flex h-10 w-10 items-center justify-center rounded-lg bg-teal-700/20">
+              <svg class="h-5 w-5 text-teal-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                <path stroke-linecap="round" stroke-linejoin="round" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+              </svg>
+            </div>
+            <h3 class="text-lg font-semibold text-ice-50">Total observability</h3>
+            <p class="mt-2 text-sm leading-relaxed text-ice-300">
+              Trace every step down to each tool call. Inspect inputs, outputs, and timing. Compare runs and diagnose regressions.
+            </p>
+          </div>
+
+          <div class="rounded-xl border border-navy-800 bg-navy-800/30 p-8">
+            <div class="mb-4 flex h-10 w-10 items-center justify-center rounded-lg bg-teal-700/20">
+              <svg class="h-5 w-5 text-teal-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M5 12h14M5 12a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v4a2 2 0 01-2 2M5 12a2 2 0 00-2 2v4a2 2 0 002 2h14a2 2 0 002-2v-4a2 2 0 00-2-2" />
+              </svg>
+            </div>
+            <h3 class="text-lg font-semibold text-ice-50">Cloud sandboxes</h3>
+            <p class="mt-2 text-sm leading-relaxed text-ice-300">
+              Ephemeral sandboxes for safe execution. Preview environments to validate changes end-to-end. SSH access when you need it.
+            </p>
+          </div>
+
+          <div class="rounded-xl border border-navy-800 bg-navy-800/30 p-8">
+            <div class="mb-4 flex h-10 w-10 items-center justify-center rounded-lg bg-teal-700/20">
+              <svg class="h-5 w-5 text-teal-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4" />
+              </svg>
+            </div>
+            <h3 class="text-lg font-semibold text-ice-50">Open source, forkable</h3>
+            <p class="mt-2 text-sm leading-relaxed text-ice-300">
+              Written in Rust. AGPL-licensed. Fork it, extend it, make it the center of your engineering process.
+            </p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Built for Real Engineering -->
+    <section class="border-t border-navy-800 py-24">
+      <div class="mx-auto max-w-6xl px-6">
+        <div class="grid items-start gap-16 lg:grid-cols-2">
+          <div>
+            <h2 class="text-3xl font-bold tracking-tight text-ice-50">
+              Built for real engineering, not promptware
+            </h2>
+            <p class="mt-4 text-lg leading-relaxed text-ice-300">
+              Arc is built like infrastructure: solid architecture, strong defaults, and the reliability you expect from production tooling.
+            </p>
+            <ul class="mt-8 space-y-4">
+              <li class="flex items-start gap-3">
+                <span class="mt-1.5 h-1.5 w-1.5 flex-shrink-0 rounded-full bg-teal-500"></span>
+                <span class="text-ice-300">Written in Rust for performance, safety, and a durable core</span>
+              </li>
+              <li class="flex items-start gap-3">
+                <span class="mt-1.5 h-1.5 w-1.5 flex-shrink-0 rounded-full bg-teal-500"></span>
+                <span class="text-ice-300">Designed for long-horizon tasks across real codebases, not toy demos</span>
+              </li>
+              <li class="flex items-start gap-3">
+                <span class="mt-1.5 h-1.5 w-1.5 flex-shrink-0 rounded-full bg-teal-500"></span>
+                <span class="text-ice-300">Open source — fork it, extend it, and make it the center of your business</span>
+              </li>
+            </ul>
+          </div>
+
+          <!-- Workflow-as-Code example -->
+          <div class="rounded-xl border border-navy-800 bg-navy-800/30 p-6">
+            <div class="mb-3 flex items-center gap-2">
+              <span class="h-3 w-3 rounded-full bg-coral"></span>
+              <span class="h-3 w-3 rounded-full bg-amber"></span>
+              <span class="h-3 w-3 rounded-full bg-mint"></span>
+              <span class="ml-3 text-xs text-ice-300 font-mono">workflow.dot</span>
+            </div>
+            <pre class="overflow-x-auto text-sm leading-relaxed"><code class="font-mono" set:html={dotExample} /></pre>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Verification -->
+    <section class="border-t border-navy-800 py-24">
+      <div class="mx-auto max-w-6xl px-6">
+        <div class="grid items-start gap-16 lg:grid-cols-2">
+          <div class="order-2 lg:order-1">
+            <div class="grid grid-cols-2 gap-4">
+              <div class="rounded-lg border border-navy-800 bg-navy-800/30 p-5">
+                <div class="mb-2 text-xs font-medium uppercase tracking-wider text-teal-500">Gate</div>
+                <div class="text-sm font-medium text-ice-50">Build + Tests</div>
+                <p class="mt-1 text-xs text-ice-300">Hard gate. Fails block the pipeline.</p>
+              </div>
+              <div class="rounded-lg border border-navy-800 bg-navy-800/30 p-5">
+                <div class="mb-2 text-xs font-medium uppercase tracking-wider text-teal-500">Gate</div>
+                <div class="text-sm font-medium text-ice-50">Static Analysis</div>
+                <p class="mt-1 text-xs text-ice-300">Policy checks enforced at every stage.</p>
+              </div>
+              <div class="rounded-lg border border-navy-800 bg-navy-800/30 p-5">
+                <div class="mb-2 text-xs font-medium uppercase tracking-wider text-teal-500">Layer</div>
+                <div class="text-sm font-medium text-ice-50">LLM Review</div>
+                <p class="mt-1 text-xs text-ice-300">Additional layer, not a substitute for real checks.</p>
+              </div>
+              <div class="rounded-lg border border-navy-800 bg-navy-800/30 p-5">
+                <div class="mb-2 text-xs font-medium uppercase tracking-wider text-teal-500">Loop</div>
+                <div class="text-sm font-medium text-ice-50">Human Review</div>
+                <p class="mt-1 text-xs text-ice-300">Integrated cleanly into the workflow graph.</p>
+              </div>
+            </div>
+          </div>
+          <div class="order-1 lg:order-2">
+            <h2 class="text-3xl font-bold tracking-tight text-ice-50">
+              Verification is a first-class concept
+            </h2>
+            <p class="mt-4 text-lg leading-relaxed text-ice-300">
+              Arc doesn't just produce output — it validates it. Builds and tests are gates, not suggestions.
+              LLM review adds a layer. Human review loops close the gap.
+            </p>
+            <p class="mt-6 text-sm font-medium text-teal-500">
+              Mergeable results that survive CI and code review.
+            </p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Multi-model -->
+    <section class="border-t border-navy-800 py-24">
+      <div class="mx-auto max-w-6xl px-6">
+        <div class="grid items-start gap-16 lg:grid-cols-2">
+          <div>
+            <h2 class="text-3xl font-bold tracking-tight text-ice-50">
+              Multi-model, multi-provider
+            </h2>
+            <p class="mt-4 text-lg leading-relaxed text-ice-300">
+              Different steps deserve different models. Arc orchestrates an ensemble so you get the best
+              quality per dollar — fast models for breadth, frontier models for correctness.
+            </p>
+            <ul class="mt-8 space-y-4">
+              <li class="flex items-start gap-3">
+                <span class="mt-1.5 h-1.5 w-1.5 flex-shrink-0 rounded-full bg-teal-500"></span>
+                <span class="text-ice-300">CSS-like stylesheets assign models to workflow stages</span>
+              </li>
+              <li class="flex items-start gap-3">
+                <span class="mt-1.5 h-1.5 w-1.5 flex-shrink-0 rounded-full bg-teal-500"></span>
+                <span class="text-ice-300">Provider flexibility — avoid lock-in, keep leverage</span>
+              </li>
+              <li class="flex items-start gap-3">
+                <span class="mt-1.5 h-1.5 w-1.5 flex-shrink-0 rounded-full bg-teal-500"></span>
+                <span class="text-ice-300">Ensemble strategies to maximize quality and minimize cost</span>
+              </li>
+            </ul>
+          </div>
+
+          <div class="rounded-xl border border-navy-800 bg-navy-800/30 p-6">
+            <div class="mb-3 flex items-center gap-2">
+              <span class="h-3 w-3 rounded-full bg-coral"></span>
+              <span class="h-3 w-3 rounded-full bg-amber"></span>
+              <span class="h-3 w-3 rounded-full bg-mint"></span>
+              <span class="ml-3 text-xs text-ice-300 font-mono">models.css</span>
+            </div>
+            <pre class="overflow-x-auto text-sm leading-relaxed"><code class="font-mono" set:html={cssExample} /></pre>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Observability -->
+    <section class="border-t border-navy-800 py-24">
+      <div class="mx-auto max-w-3xl px-6 text-center">
+        <h2 class="text-3xl font-bold tracking-tight text-ice-50">
+          Ground-up observability
+        </h2>
+        <p class="mt-4 text-lg leading-relaxed text-ice-300">
+          If you can't see what happened, you can't trust it. Full traceability across runs — inspect every model
+          call, every tool invocation, every decision point. Compare runs, diagnose regressions, tune workflows.
+        </p>
+      </div>
+    </section>
+
+    <!-- Why Arc -->
+    <section class="border-t border-navy-800 py-24">
+      <div class="mx-auto max-w-4xl px-6 text-center">
+        <h2 class="text-3xl font-bold tracking-tight text-ice-50">
+          Shippable outcomes, not impressive output
+        </h2>
+        <p class="mt-4 text-lg text-ice-300">
+          Most AI coding tools optimize for impressive output. Arc optimizes for what actually merges.
+        </p>
+        <div class="mt-12 grid gap-6 text-left sm:grid-cols-2">
+          <div class="flex items-start gap-4">
+            <span class="mt-0.5 flex-shrink-0 text-teal-500 font-mono text-lg">&rarr;</span>
+            <div>
+              <div class="font-medium text-ice-50">Reviewable changes</div>
+              <div class="text-sm text-ice-300">Not massive diffs</div>
+            </div>
+          </div>
+          <div class="flex items-start gap-4">
+            <span class="mt-0.5 flex-shrink-0 text-teal-500 font-mono text-lg">&rarr;</span>
+            <div>
+              <div class="font-medium text-ice-50">Verification gates</div>
+              <div class="text-sm text-ice-300">Not vibes</div>
+            </div>
+          </div>
+          <div class="flex items-start gap-4">
+            <span class="mt-0.5 flex-shrink-0 text-teal-500 font-mono text-lg">&rarr;</span>
+            <div>
+              <div class="font-medium text-ice-50">Audit trails</div>
+              <div class="text-sm text-ice-300">Not opaque agents</div>
+            </div>
+          </div>
+          <div class="flex items-start gap-4">
+            <span class="mt-0.5 flex-shrink-0 text-teal-500 font-mono text-lg">&rarr;</span>
+            <div>
+              <div class="font-medium text-ice-50">Repeatable workflows</div>
+              <div class="text-sm text-ice-300">Not one-off prompts</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Workflow as Code -->
+    <section class="border-t border-navy-800 py-24">
+      <div class="mx-auto max-w-3xl px-6 text-center">
+        <h2 class="text-3xl font-bold tracking-tight text-ice-50">
+          Workflow-as-Code
+        </h2>
+        <p class="mt-4 text-lg leading-relaxed text-ice-300">
+          Define how work gets done in version-controlled graph files, then run it consistently.
+          Composable steps. Auditable history. Repeatable results. IaC for coding.
+        </p>
+      </div>
+    </section>
+
+    <!-- CTA -->
+    <section class="border-t border-navy-800 py-24">
+      <div class="mx-auto max-w-3xl px-6 text-center">
+        <h2 class="text-3xl font-bold tracking-tight text-ice-50">
+          Workflows you can audit.<br />Output you can trust.
+        </h2>
+        <div class="mt-10 flex items-center justify-center gap-4">
+          <a
+            href="https://docs.arc.computer/getting-started/quick-start"
+            class="rounded-lg bg-teal-700 px-6 py-3 text-sm font-semibold text-white hover:bg-teal-500 transition-colors"
+          >
+            Get started
+          </a>
+          <a
+            href="https://github.com/qltysh/arc"
+            class="rounded-lg border border-navy-600 px-6 py-3 text-sm font-semibold text-ice-300 hover:border-ice-300 hover:text-ice-50 transition-colors"
+          >
+            View on GitHub
+          </a>
+        </div>
+      </div>
+    </section>
   </main>
+
+  <!-- Footer -->
+  <footer class="border-t border-navy-800 py-12">
+    <div class="mx-auto max-w-6xl px-6">
+      <div class="flex flex-col items-center justify-between gap-4 sm:flex-row">
+        <div class="flex items-center gap-3">
+          <img src="/symbol.svg" alt="Arc" class="h-6 w-6" />
+          <span class="text-sm text-ice-300">Arc — Open source, AGPL-licensed</span>
+        </div>
+        <div class="flex items-center gap-6">
+          <a href="https://docs.arc.computer" class="text-sm text-ice-300 hover:text-ice-50 transition-colors">Docs</a>
+          <a href="https://github.com/qltysh/arc" class="text-sm text-ice-300 hover:text-ice-50 transition-colors">GitHub</a>
+        </div>
+      </div>
+    </div>
+  </footer>
 </Layout>
