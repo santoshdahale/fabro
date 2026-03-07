@@ -273,16 +273,10 @@
             ]
           },
           {
-            "group": "Models",
-            "icon": "microchip-ai",
+            "group": "More",
+            "icon": "ellipsis",
             "pages": [
-              "GET /models"
-            ]
-          },
-          {
-            "group": "Settings",
-            "icon": "gear",
-            "pages": [
+              "GET /models",
               "GET /settings"
             ]
           }
