@@ -27,10 +27,6 @@ When a workflow runs on a Daytona sandbox, Arc now pushes the run branch to orig
 
 This required upgrading the GitHub App token permission from `contents:read` to `contents:write`. Tokens are automatically refreshed before they expire.
 
-## Retro detail API
-
-The `/runs/{id}/retro` endpoint now returns a structured `RetroDetail` schema instead of an untyped JSON blob. The `/retros` list endpoint supports new `workflow` and `smoothness` filter parameters for narrowing results.
-
 ## GitHub App tokens for Daytona
 
 Daytona sandboxes now authenticate git clones using GitHub App Installation Access Tokens (IATs) instead of the user's `gh` CLI token. Each token is scoped to `contents: read` on the specific repository being cloned.
@@ -53,6 +49,10 @@ To migrate:
 </Warning>
 
 ## More
+
+<Accordion title="API">
+- `/runs/{id}/retro` now returns a structured `RetroDetail` schema instead of an untyped JSON blob; `/retros` supports new `workflow` and `smoothness` filter parameters
+</Accordion>
 
 <Accordion title="Improvements">
 - Adds pagination parameters to `listRunQuestions`, `listRunStages`, and `listRunVerifications` endpoints
