@@ -1,6 +1,172 @@
 ---
 title: "GitHub"
-description: "Integrate Arc with GitHub for repository access and pull request workflows"
+description: "Integrate Arc with GitHub for repository access and OAuth login"
 ---
 
-Coming soon.
+Arc uses a [GitHub App](https://docs.github.com/en/apps/overview) to authenticate users in the web UI and to clone private repositories into remote sandboxes. The GitHub App is created automatically through a guided setup flow — no manual app configuration required.
+
+## What the GitHub App enables
+
+| Feature | How it's used |
+|---|---|
+| **OAuth login** | Users sign in to the web UI with their GitHub account |
+| **Private repo cloning** | Daytona and Docker sandboxes clone private repositories using short-lived Installation Access Tokens |
+| **Checkpoint pushing** | After each workflow stage, Arc pushes the run branch and metadata branch back to origin from inside the sandbox |
+
+## Setup
+
+### Prerequisites
+
+- A GitHub account (personal or organization)
+- The Arc web app running (`cd apps/arc-web && bun run dev`)
+
+### Register the GitHub App
+
+1. Navigate to the web app (default `http://localhost:5173`). If no GitHub App is configured, you'll be redirected to the setup page automatically.
+
+2. Click **Register GitHub App**. This takes you to GitHub with a pre-filled [App Manifest](https://docs.github.com/en/apps/sharing-github-apps/registering-a-github-app-from-a-manifest) containing:
+
+   | Permission | Level | Purpose |
+   |---|---|---|
+   | Contents | Write | Clone repos, push run branches and checkpoints |
+   | Metadata | Read | Look up repository installation status |
+   | Pull requests | Write | Create and update PRs from workflows |
+   | Checks | Write | Report workflow status on commits |
+   | Issues | Write | Create issues from workflows |
+   | Emails | Read | Read verified email for OAuth login |
+
+3. Review the permissions on GitHub and click **Create GitHub App**.
+
+4. GitHub redirects back to Arc, which automatically:
+   - Exchanges the temporary code for permanent app credentials
+   - Writes `app_id`, `client_id`, and `slug` to `~/.arc/server.toml`
+   - Writes `GITHUB_APP_CLIENT_SECRET`, `GITHUB_APP_WEBHOOK_SECRET`, and `GITHUB_APP_PRIVATE_KEY` to `.env`
+   - Generates a `SESSION_SECRET` for web app sessions
+   - Redirects you to the login page
+
+5. **Install the app** on your GitHub account or organization. Go to `https://github.com/settings/apps/{your-app-slug}/installations` and install it on the repositories Arc should access.
+
+### Verify the configuration
+
+Run the doctor command to check that all GitHub App credentials are in place:
+
+```bash
+arc doctor
+```
+
+The GitHub App check verifies five fields:
+
+| Field | Source |
+|---|---|
+| `git.app_id` | `~/.arc/server.toml` |
+| `git.client_id` | `~/.arc/server.toml` |
+| `GITHUB_APP_CLIENT_SECRET` | `.env` |
+| `GITHUB_APP_WEBHOOK_SECRET` | `.env` |
+| `GITHUB_APP_PRIVATE_KEY` | `.env` |
+
+If all five are set, the check passes. If none are set, it warns (GitHub integration is optional). If some are set but others are missing, it errors with the specific missing fields.
+
+## Configuration
+
+The GitHub App configuration lives in two places:
+
+### `~/.arc/server.toml`
+
+```toml
+[git]
+provider = "github"
+app_id = "123456"
+client_id = "Iv1.abc123def"
+slug = "arc-a3f2"
+```
+
+| Field | Description |
+|---|---|
+| `provider` | Always `"github"` (the only supported provider) |
+| `app_id` | Numeric GitHub App ID |
+| `client_id` | OAuth Client ID for the app |
+| `slug` | App slug, used for linking to the GitHub App settings page |
+
+### `.env`
+
+```bash
+GITHUB_APP_CLIENT_SECRET=...       # OAuth client secret
+GITHUB_APP_WEBHOOK_SECRET=...      # Webhook validation secret (reserved for future use)
+GITHUB_APP_PRIVATE_KEY=...         # RSA private key, base64-encoded PEM
+```
+
+The private key is stored as base64-encoded PEM. Arc also accepts raw PEM format (starting with `-----BEGIN`).
+
+## How it works
+
+### OAuth login
+
+The web app uses the GitHub App's OAuth credentials to authenticate users:
+
+1. User clicks **Sign in with GitHub** on the login page
+2. Arc redirects to GitHub's OAuth authorization endpoint with scopes `read:user` and `user:email`
+3. User authorizes the app on GitHub
+4. GitHub redirects back with an authorization code
+5. Arc exchanges the code for an access token and fetches the user's profile and verified email
+6. Arc checks the username against the `allowed_usernames` list in `server.toml`
+
+Configure allowed users in `server.toml`:
+
+```toml
+[web.auth]
+provider = "github"
+allowed_usernames = ["alice", "bob"]
+```
+
+An empty `allowed_usernames` list rejects all users.
+
+### Repository cloning in sandboxes
+
+When a workflow runs in a remote sandbox (Daytona or Docker), Arc clones the current repository into the sandbox using the GitHub App:
+
+1. Arc detects the local repository's `origin` remote URL and current branch
+2. SSH URLs (e.g. `git@github.com:owner/repo.git`) are converted to HTTPS
+3. Arc signs a short-lived JWT using the App ID and private key (RS256, 10-minute validity)
+4. Using the JWT, Arc looks up the GitHub App installation for the repository (`GET /repos/{owner}/{repo}/installation`)
+5. Arc requests a scoped Installation Access Token with `contents: write` permission on the specific repository
+6. The sandbox clones via HTTPS using `x-access-token` as the username and the token as the password
+
+For public repositories, the clone works without credentials. The token is still generated because it's needed for pushing checkpoints.
+
+### Checkpoint pushing
+
+After each workflow stage, Arc [checkpoints](/execution/checkpoints) by pushing the run branch and metadata branch to origin. Inside remote sandboxes, the git remote URL is configured with the Installation Access Token for authenticated pushing.
+
+For long-running workflows, Arc refreshes the token before each push since Installation Access Tokens are short-lived (typically 1 hour).
+
+## Troubleshooting
+
+### "GitHub App is not installed for {owner}"
+
+The GitHub App exists but hasn't been installed on the organization or user account that owns the repository. Install it at:
+
+```
+https://github.com/organizations/{owner}/settings/installations
+```
+
+Or for personal accounts:
+
+```
+https://github.com/settings/installations
+```
+
+### "GitHub App installation is suspended"
+
+The installation was disabled in GitHub's settings. Re-enable it in the organization's GitHub App settings.
+
+### "GitHub App does not have access to repository {repo}"
+
+The app is installed but doesn't have access to this specific repository. Update the installation's repository permissions to include it (the app may be configured for "Only select repositories").
+
+### "GitHub App authentication failed"
+
+The `app_id` in `server.toml` or the `GITHUB_APP_PRIVATE_KEY` environment variable is incorrect. Re-run the setup flow or verify the values match your GitHub App.
+
+### Clone fails for private repositories
+
+If you see `Git clone failed ... If this is a private repository, configure a GitHub App`, the GitHub App credentials are not configured. Run the setup flow through the web UI or verify with `arc doctor`.
