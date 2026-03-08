@@ -173,17 +173,6 @@
             ]
           },
           {
-            "group": "Sessions",
-            "icon": "comments",
-            "pages": [
-              "GET /sessions",
-              "POST /sessions",
-              "GET /sessions/{id}",
-              "POST /sessions/{id}/messages",
-              "GET /sessions/{id}/events"
-            ]
-          },
-          {
             "group": "Runs",
             "icon": "play",
             "pages": [
@@ -211,7 +200,6 @@
             "pages": [
               "GET /runs/{id}/compare",
               "GET /runs/{id}/usage",
-              "GET /runs/{id}/verification",
               {
                 "group": "Run Internals",
                 "icon": "microchip",
@@ -235,41 +223,35 @@
             ]
           },
           {
-            "group": "Verification",
-            "icon": "shield-check",
-            "pages": [
-              "GET /verification/criteria",
-              "GET /verification/criteria/{id}",
-              "GET /verification/controls",
-              "GET /verification/controls/{id}"
-            ]
-          },
-          {
-            "group": "Insights",
-            "icon": "magnifying-glass-chart",
-            "pages": [
-              "GET /insights/queries",
-              "POST /insights/queries",
-              "PUT /insights/queries/{id}",
-              "DELETE /insights/queries/{id}",
-              "POST /insights/execute",
-              "GET /insights/history"
-            ]
-          },
-          {
-            "group": "Retros",
-            "icon": "clock-rotate-left",
-            "pages": [
-              "GET /runs/{id}/retro",
-              "GET /retros"
-            ]
-          },
-          {
             "group": "More",
             "icon": "ellipsis",
             "pages": [
-              "GET /models",
-              "GET /settings"
+              {
+                "group": "Administration",
+                "icon": "gear",
+                "pages": [
+                  "GET /settings"
+                ]
+              },
+              {
+                "group": "Models",
+                "icon": "microchip",
+                "pages": [
+                  "GET /models",
+                  "POST /models/{id}/test"
+                ]
+              },
+              {
+                "group": "Sessions",
+                "icon": "comments",
+                "pages": [
+                  "GET /sessions",
+                  "POST /sessions",
+                  "GET /sessions/{id}",
+                  "POST /sessions/{id}/messages",
+                  "GET /sessions/{id}/events"
+                ]
+              }
             ]
           }
         ]
