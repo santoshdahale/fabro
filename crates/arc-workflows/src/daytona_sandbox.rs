@@ -896,9 +896,30 @@ impl Sandbox for DaytonaSandbox {
             timeout: Some(std::time::Duration::from_millis(timeout_ms)),
         };
 
+        // The Daytona toolbox's /process/execute endpoint does not yet
+        // process the `envs` field (not in its OpenAPI spec), so we also
+        // prepend `export` statements as a fallback until server support
+        // lands. The SDK sends `envs` too for forward compatibility.
+        let command_with_env = if let Some(vars) = env_vars {
+            if !vars.is_empty() {
+                let exports: Vec<String> = vars
+                    .iter()
+                    .map(|(k, v)| {
+                        let escaped = v.replace('\'', "'\\''");
+                        format!("export {k}='{escaped}'")
+                    })
+                    .collect();
+                format!("{}\n{}", exports.join("\n"), command)
+            } else {
+                command.to_string()
+            }
+        } else {
+            command.to_string()
+        };
+
         // Wrap with `bash -c` so pipes, env vars, and shell features work.
         // The Daytona API uses direct exec, not a shell.
-        let wrapped = wrap_bash_command(command);
+        let wrapped = wrap_bash_command(&command_with_env);
         let result = process_svc
             .execute_command(&wrapped, options)
             .await
