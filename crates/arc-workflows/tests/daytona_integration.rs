@@ -1312,10 +1312,10 @@ async fn daytona_asset_collection() {
 
     let assets_dir = dir
         .path()
-        .join("nodes")
-        .join("create_assets")
+        .join("artifacts")
         .join("assets")
-        .join("attempt_1");
+        .join("create_assets")
+        .join("retry_1");
 
     let report_path = assets_dir.join("test-results/report.xml");
     assert!(
