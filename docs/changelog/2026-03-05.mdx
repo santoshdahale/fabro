@@ -74,7 +74,7 @@ To migrate: Update any DOT workflow prompts referencing `{{script.output}}` or `
 </Warning>
 
 <Warning>
-**`GET /runs/{id}/files` renamed to `GET /runs/{id}/compare`.** The endpoint returns the same data but the path now reflects its purpose of comparing file changes between checkpoints.
+**`GET /runs/{id}/compare` renamed to `GET /runs/{id}/files`.** The endpoint now returns a standard paginated list of `FileDiff` items instead of the `RunCompare` envelope.
 
-To migrate: Update API integrations using `/files` to use `/compare`.
+To migrate: Update API integrations using `/compare` to use `/files`, and adjust response parsing from `{ checkpoints, files, stats }` to `{ data, meta }`.
 </Warning>

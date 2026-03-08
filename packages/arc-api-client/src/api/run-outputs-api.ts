@@ -24,9 +24,9 @@ import { BASE_PATH, COLLECTION_FORMATS, type RequestArgs, BaseAPI, RequiredError
 // @ts-ignore
 import type { ErrorResponse } from '../models';
 // @ts-ignore
-import type { PaginatedRunVerificationList } from '../models';
+import type { PaginatedRunFileList } from '../models';
 // @ts-ignore
-import type { RunCompare } from '../models';
+import type { PaginatedRunVerificationList } from '../models';
 // @ts-ignore
 import type { RunUsage } from '../models';
 /**
@@ -35,17 +35,19 @@ import type { RunUsage } from '../models';
 export const RunOutputsApiAxiosParamCreator = function (configuration?: Configuration) {
     return {
         /**
-         * Returns file-level diffs produced by the run, optionally filtered to a specific checkpoint.
-         * @summary Retrieve Run Compare
+         * Returns a paginated list of file-level diffs produced by the run, optionally filtered to a specific checkpoint.
+         * @summary Retrieve Run Files
          * @param {string} id Unique run identifier (ULID).
          * @param {string} [checkpoint] Filter to a specific checkpoint ID. Omit to include all changes.
+         * @param {number} [pageLimit] Maximum number of items to return per page.
+         * @param {number} [pageOffset] Number of items to skip before returning results.
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        retrieveRunCompare: async (id: string, checkpoint?: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+        retrieveRunFiles: async (id: string, checkpoint?: string, pageLimit?: number, pageOffset?: number, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
             // verify required parameter 'id' is not null or undefined
-            assertParamExists('retrieveRunCompare', 'id', id)
-            const localVarPath = `/runs/{id}/compare`
+            assertParamExists('retrieveRunFiles', 'id', id)
+            const localVarPath = `/runs/{id}/files`
                 .replace(`{${"id"}}`, encodeURIComponent(String(id)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
@@ -67,6 +69,14 @@ export const RunOutputsApiAxiosParamCreator = function (configuration?: Configur
 
             if (checkpoint !== undefined) {
                 localVarQueryParameter['checkpoint'] = checkpoint;
+            }
+
+            if (pageLimit !== undefined) {
+                localVarQueryParameter['page[limit]'] = pageLimit;
+            }
+
+            if (pageOffset !== undefined) {
+                localVarQueryParameter['page[offset]'] = pageOffset;
             }
 
             localVarHeaderParameter['Accept'] = 'application/json';
@@ -182,17 +192,19 @@ export const RunOutputsApiFp = function(configuration?: Configuration) {
     const localVarAxiosParamCreator = RunOutputsApiAxiosParamCreator(configuration)
     return {
         /**
-         * Returns file-level diffs produced by the run, optionally filtered to a specific checkpoint.
-         * @summary Retrieve Run Compare
+         * Returns a paginated list of file-level diffs produced by the run, optionally filtered to a specific checkpoint.
+         * @summary Retrieve Run Files
          * @param {string} id Unique run identifier (ULID).
          * @param {string} [checkpoint] Filter to a specific checkpoint ID. Omit to include all changes.
+         * @param {number} [pageLimit] Maximum number of items to return per page.
+         * @param {number} [pageOffset] Number of items to skip before returning results.
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        async retrieveRunCompare(id: string, checkpoint?: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<RunCompare>> {
-            const localVarAxiosArgs = await localVarAxiosParamCreator.retrieveRunCompare(id, checkpoint, options);
+        async retrieveRunFiles(id: string, checkpoint?: string, pageLimit?: number, pageOffset?: number, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<PaginatedRunFileList>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.retrieveRunFiles(id, checkpoint, pageLimit, pageOffset, options);
             const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
-            const localVarOperationServerBasePath = operationServerMap['RunOutputsApi.retrieveRunCompare']?.[localVarOperationServerIndex]?.url;
+            const localVarOperationServerBasePath = operationServerMap['RunOutputsApi.retrieveRunFiles']?.[localVarOperationServerIndex]?.url;
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
@@ -233,15 +245,17 @@ export const RunOutputsApiFactory = function (configuration?: Configuration, bas
     const localVarFp = RunOutputsApiFp(configuration)
     return {
         /**
-         * Returns file-level diffs produced by the run, optionally filtered to a specific checkpoint.
-         * @summary Retrieve Run Compare
+         * Returns a paginated list of file-level diffs produced by the run, optionally filtered to a specific checkpoint.
+         * @summary Retrieve Run Files
          * @param {string} id Unique run identifier (ULID).
          * @param {string} [checkpoint] Filter to a specific checkpoint ID. Omit to include all changes.
+         * @param {number} [pageLimit] Maximum number of items to return per page.
+         * @param {number} [pageOffset] Number of items to skip before returning results.
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        retrieveRunCompare(id: string, checkpoint?: string, options?: RawAxiosRequestConfig): AxiosPromise<RunCompare> {
-            return localVarFp.retrieveRunCompare(id, checkpoint, options).then((request) => request(axios, basePath));
+        retrieveRunFiles(id: string, checkpoint?: string, pageLimit?: number, pageOffset?: number, options?: RawAxiosRequestConfig): AxiosPromise<PaginatedRunFileList> {
+            return localVarFp.retrieveRunFiles(id, checkpoint, pageLimit, pageOffset, options).then((request) => request(axios, basePath));
         },
         /**
          * Returns token and cost usage broken down by stage and model for a specific run.
@@ -273,15 +287,17 @@ export const RunOutputsApiFactory = function (configuration?: Configuration, bas
  */
 export class RunOutputsApi extends BaseAPI {
     /**
-     * Returns file-level diffs produced by the run, optionally filtered to a specific checkpoint.
-     * @summary Retrieve Run Compare
+     * Returns a paginated list of file-level diffs produced by the run, optionally filtered to a specific checkpoint.
+     * @summary Retrieve Run Files
      * @param {string} id Unique run identifier (ULID).
      * @param {string} [checkpoint] Filter to a specific checkpoint ID. Omit to include all changes.
+     * @param {number} [pageLimit] Maximum number of items to return per page.
+     * @param {number} [pageOffset] Number of items to skip before returning results.
      * @param {*} [options] Override http request option.
      * @throws {RequiredError}
      */
-    public retrieveRunCompare(id: string, checkpoint?: string, options?: RawAxiosRequestConfig) {
-        return RunOutputsApiFp(this.configuration).retrieveRunCompare(id, checkpoint, options).then((request) => request(this.axios, this.basePath));
+    public retrieveRunFiles(id: string, checkpoint?: string, pageLimit?: number, pageOffset?: number, options?: RawAxiosRequestConfig) {
+        return RunOutputsApiFp(this.configuration).retrieveRunFiles(id, checkpoint, pageLimit, pageOffset, options).then((request) => request(this.axios, this.basePath));
     }
 
     /**

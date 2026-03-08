@@ -1,6 +1,4 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { useParams } from "react-router";
-import { ChevronDownIcon, Cog6ToothIcon } from "@heroicons/react/24/outline";
 import {
   MultiFileDiff,
   type AnnotationSide,
@@ -8,13 +6,13 @@ import {
 } from "@pierre/diffs/react";
 import { useTheme } from "../lib/theme";
 import { apiJson } from "../api-client";
-import type { RunCompare } from "@qltysh/arc-api-client";
-import type { Route } from "./+types/run-compare";
+import type { PaginatedRunFileList } from "@qltysh/arc-api-client";
+import type { Route } from "./+types/run-files";
 
 export const handle = { wide: true };
 
 export async function loader({ request, params }: Route.LoaderArgs) {
-  const data = await apiJson<RunCompare>(`/runs/${params.id}/compare`, { request });
+  const data = await apiJson<PaginatedRunFileList>(`/runs/${params.id}/files`, { request });
   return data;
 }
 
@@ -216,29 +214,6 @@ export async function execute(
     },
   },
 ];
-
-const BLOCK_COUNT = 5;
-
-function DiffStat({ additions, deletions }: { additions: number; deletions: number }) {
-  const total = additions + deletions;
-  const addBlocks = total === 0 ? 0 : Math.round((additions / total) * BLOCK_COUNT);
-  const delBlocks = BLOCK_COUNT - addBlocks;
-
-  return (
-    <div className="flex items-center gap-2 font-mono text-xs">
-      <span className="font-semibold text-mint">+{additions.toLocaleString()}</span>
-      <span className="font-semibold text-coral">-{deletions.toLocaleString()}</span>
-      <div className="flex gap-0.5">
-        {Array.from({ length: BLOCK_COUNT }, (_, i) => (
-          <span
-            key={`block-${i}`}
-            className={`inline-block size-2.5 rounded-sm ${i < addBlocks ? "bg-mint" : "bg-coral"}`}
-          />
-        ))}
-      </div>
-    </div>
-  );
-}
 
 interface SteerAnnotation {
   fileName: string;
@@ -508,21 +483,14 @@ function buildAnnotationsForFile(
   return annotations;
 }
 
-export default function RunCompare({ loaderData }: Route.ComponentProps) {
+export default function RunFiles({ loaderData }: Route.ComponentProps) {
   const runFiles = loaderData;
-  const checkpoints = [
-    { id: "all", label: "All changes" },
-    ...runFiles.checkpoints.map((cp) => ({ id: cp.id, label: cp.label })),
-  ];
-  const files = runFiles.files.length > 0
-    ? runFiles.files.map((f) => ({
+  const files = runFiles.data.length > 0
+    ? runFiles.data.map((f) => ({
         oldFile: { name: f.old_file.name, contents: f.old_file.contents },
         newFile: { name: f.new_file.name, contents: f.new_file.contents },
       }))
     : fallbackFiles;
-  const diffStats = runFiles.stats;
-
-  const [checkpoint, setCheckpoint] = useState(checkpoints[0].id);
   const [openSteers, setOpenSteers] = useState(
     () => new Map<string, SteerAnnotation>(),
   );
@@ -560,31 +528,6 @@ export default function RunCompare({ loaderData }: Route.ComponentProps) {
 
   return (
     <div className="flex flex-col gap-4">
-      <div className="flex items-center gap-3">
-        <div className="relative">
-          <select
-            value={checkpoint}
-            onChange={(e) => setCheckpoint(e.target.value)}
-            className="appearance-none rounded-md border border-line bg-panel/80 py-2 pl-3 pr-8 text-sm text-fg-2 outline-none transition-colors focus:border-focus focus:ring-0"
-          >
-            {checkpoints.map((cp) => (
-              <option key={cp.id} value={cp.id}>{cp.label}</option>
-            ))}
-          </select>
-          <ChevronDownIcon className="pointer-events-none absolute right-2 top-1/2 size-4 -translate-y-1/2 text-fg-muted" />
-        </div>
-        <div className="ml-auto flex items-center gap-3">
-          <DiffStat additions={diffStats.additions} deletions={diffStats.deletions} />
-          <button
-            type="button"
-            title="Settings"
-            className="flex size-8 items-center justify-center rounded-md border border-line bg-panel/80 text-fg-3 transition-colors hover:bg-overlay hover:text-fg"
-          >
-            <Cog6ToothIcon className="size-4" />
-          </button>
-        </div>
-      </div>
-
       {files.map(({ oldFile, newFile }) => (
         <DiffWithSteer
           key={newFile.name}

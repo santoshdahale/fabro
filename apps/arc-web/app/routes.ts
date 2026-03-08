@@ -27,7 +27,7 @@ export default [
       route("stages/:stageId", "routes/run-stages.tsx"),
       route("configuration", "routes/run-configuration.tsx"),
       route("graph", "routes/run-graph.tsx"),
-      route("compare", "routes/run-compare.tsx"),
+      route("files", "routes/run-files.tsx"),
       route("verification", "routes/run-verification.tsx"),
       route("usage", "routes/run-usage.tsx"),
       route("retro", "routes/run-retro.tsx"),
