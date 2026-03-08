@@ -3062,6 +3062,7 @@ mod settings {
                 client_id: Some("Iv1.abc123".into()),
                 slug: Some("arc-dev".into()),
                 author: Default::default(),
+                webhooks: None,
             },
             feature_flags: FeatureFlags {
                 session_sandboxes: false,

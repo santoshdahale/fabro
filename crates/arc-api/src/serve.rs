@@ -5,7 +5,7 @@ use std::time::Duration;
 use arc_llm::provider::Provider;
 use arc_util::terminal::Styles;
 use tokio::net::TcpListener;
-use tracing::{info, warn};
+use tracing::{error, info, warn};
 
 use clap::Args;
 
@@ -167,6 +167,41 @@ pub async fn serve_command(args: ServeArgs, styles: &'static Styles) -> anyhow::
         eprintln!("{}", styles.dim.apply_to("(dry-run mode)"));
     }
 
+    // Optionally start webhook listener
+    let webhook_manager = {
+        let cfg = shared_config.read().expect("config lock poisoned");
+        match (&cfg.git.webhooks, &cfg.git.app_id) {
+            (Some(_webhook_config), Some(app_id)) => {
+                let secret = std::env::var("GITHUB_APP_WEBHOOK_SECRET").ok();
+                let private_key_pem = read_github_private_key();
+                match (secret, private_key_pem) {
+                    (Some(secret), Some(pem)) => {
+                        let app_id = app_id.clone();
+                        drop(cfg);
+                        match crate::github_webhooks::WebhookManager::start(
+                            secret.into_bytes(),
+                            &app_id,
+                            &pem,
+                        )
+                        .await
+                        {
+                            Ok(manager) => Some(manager),
+                            Err(err) => {
+                                error!(error = %err, "Failed to start webhook listener");
+                                None
+                            }
+                        }
+                    }
+                    _ => {
+                        warn!("Webhook config present but GITHUB_APP_WEBHOOK_SECRET or GITHUB_APP_PRIVATE_KEY not set; skipping webhook listener");
+                        None
+                    }
+                }
+            }
+            _ => None,
+        }
+    };
+
     // Spawn config polling task
     let config_for_poll = Arc::clone(&shared_config);
     let config_path_for_poll = config_path.clone();
@@ -212,6 +247,11 @@ pub async fn serve_command(args: ServeArgs, styles: &'static Styles) -> anyhow::
         crate::tls::serve_tls(listener, tls_acceptor, router).await?;
     } else {
         axum::serve(listener, router).await?;
+    }
+
+    // Clean up webhook listener on shutdown
+    if let Some(manager) = webhook_manager {
+        manager.shutdown().await;
     }
 
     Ok(())
@@ -262,6 +302,18 @@ fn resolve_model_provider(
         .unwrap_or(Provider::Anthropic);
 
     (model, provider_enum)
+}
+
+/// Read the GitHub App private key from the environment, decoding base64 if needed.
+fn read_github_private_key() -> Option<String> {
+    let raw = std::env::var("GITHUB_APP_PRIVATE_KEY").ok()?;
+    if raw.starts_with("-----") {
+        Some(raw)
+    } else {
+        let pem_bytes =
+            base64::Engine::decode(&base64::engine::general_purpose::STANDARD, &raw).ok()?;
+        String::from_utf8(pem_bytes).ok()
+    }
 }
 
 /// Derive client certificate verification mode from the resolved auth strategies.

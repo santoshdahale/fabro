@@ -1,5 +1,6 @@
 mod demo;
 pub mod error;
+pub mod github_webhooks;
 pub mod jwt_auth;
 pub mod serve;
 pub mod server;

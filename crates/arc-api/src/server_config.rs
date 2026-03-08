@@ -71,6 +71,17 @@ pub struct GitAuthorConfig {
     pub email: Option<String>,
 }
 
+#[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum WebhookStrategy {
+    TailscaleFunnel,
+}
+
+#[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
+pub struct WebhookConfig {
+    pub strategy: WebhookStrategy,
+}
+
 #[derive(Debug, Clone, Default, Deserialize, PartialEq, Serialize)]
 pub struct GitConfig {
     #[serde(default)]
@@ -80,6 +91,7 @@ pub struct GitConfig {
     pub slug: Option<String>,
     #[serde(default)]
     pub author: GitAuthorConfig,
+    pub webhooks: Option<WebhookConfig>,
 }
 
 #[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
@@ -508,6 +520,32 @@ exclude_globs = ["**/node_modules/**", "**/.cache/**"]
         let toml = "";
         let config: ServerConfig = toml::from_str(toml).unwrap();
         assert!(config.run_defaults.checkpoint.exclude_globs.is_empty());
+    }
+
+    #[test]
+    fn parse_git_webhooks_config() {
+        let toml = r#"
+[git]
+provider = "github"
+app_id = "2993730"
+
+[git.webhooks]
+strategy = "tailscale_funnel"
+"#;
+        let config: ServerConfig = toml::from_str(toml).unwrap();
+        let webhooks = config.git.webhooks.unwrap();
+        assert_eq!(webhooks.strategy, WebhookStrategy::TailscaleFunnel);
+    }
+
+    #[test]
+    fn parse_git_webhooks_missing_is_none() {
+        let toml = r#"
+[git]
+provider = "github"
+app_id = "123"
+"#;
+        let config: ServerConfig = toml::from_str(toml).unwrap();
+        assert!(config.git.webhooks.is_none());
     }
 
     #[test]
