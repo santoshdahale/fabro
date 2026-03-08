@@ -79,7 +79,8 @@ fn load_github_app_credentials() -> arc_workflows::github_app::GitHubAppCredenti
 #[tokio::test]
 #[ignore]
 async fn daytona_exec_command() {
-    let env = create_env().await;
+    let creds = load_github_app_credentials();
+    let env = create_env_with_github_app(Some(creds)).await;
     env.initialize().await.unwrap();
 
     let result = env
@@ -95,7 +96,8 @@ async fn daytona_exec_command() {
 #[tokio::test]
 #[ignore]
 async fn daytona_exec_command_with_pipe() {
-    let env = create_env().await;
+    let creds = load_github_app_credentials();
+    let env = create_env_with_github_app(Some(creds)).await;
     env.initialize().await.unwrap();
 
     let result = env
@@ -111,7 +113,8 @@ async fn daytona_exec_command_with_pipe() {
 #[tokio::test]
 #[ignore]
 async fn daytona_exec_command_cancelled() {
-    let env = create_env().await;
+    let creds = load_github_app_credentials();
+    let env = create_env_with_github_app(Some(creds)).await;
     env.initialize().await.unwrap();
 
     let token = tokio_util::sync::CancellationToken::new();
@@ -139,7 +142,8 @@ async fn daytona_exec_command_cancelled() {
 #[tokio::test]
 #[ignore]
 async fn daytona_exec_command_local_timeout() {
-    let env = create_env().await;
+    let creds = load_github_app_credentials();
+    let env = create_env_with_github_app(Some(creds)).await;
     env.initialize().await.unwrap();
 
     // Use a tiny timeout_ms of 100ms, our local timeout is 100 + 5000 = 5100ms.
