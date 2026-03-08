@@ -38,6 +38,13 @@ output_format = "text"
 
 [llm]
 model = "claude-sonnet-4-5"
+
+[log]
+level = "info"
+
+[git.author]
+name = "arc-bot"
+email = "arc-bot@company.com"
 ```
 
 All fields are optional. You can include just the sections and keys you want to override.
@@ -77,6 +84,25 @@ Defaults for `arc llm prompt` and `arc llm chat`.
 <Note>
 The `[llm]` section only sets the default model. Use `[exec]` to configure provider, permissions, and output format for `arc exec`.
 </Note>
+
+## `[log]` section
+
+Configure the default log level. Precedence: `ARC_LOG` env var > `--debug` flag > `[log]` level > `"info"`.
+
+| Key | Description | Values | Default |
+|---|---|---|---|
+| `level` | Log level | `"error"`, `"warn"`, `"info"`, `"debug"`, `"trace"` | `"info"` |
+
+## `[git]` section
+
+### `[git.author]`
+
+Customize the git author identity used for checkpoint commits. Overrides the server default when set.
+
+| Key | Description | Default |
+|---|---|---|
+| `name` | Git author name | `"arc"` |
+| `email` | Git author email | `"arc@local"` |
 
 ## `mode`
 

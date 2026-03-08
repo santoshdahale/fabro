@@ -59,6 +59,7 @@ arc run start --run-branch arc/run/abc123
 | `-v, --verbose` | Enable verbose output |
 | `--sandbox <SANDBOX>` | Sandbox for agent tools: `local`, `docker`, or `daytona` |
 | `--label <KEY=VALUE>` | Attach a label to this run (repeatable) |
+| `--goal <GOAL>` | Override the workflow goal (exposed as `$goal` in prompts) |
 | `--no-retro` | Skip retro generation after the run |
 | `--ssh` | Create SSH access to the Daytona sandbox and print the connection command |
 | `--preserve-sandbox` | Keep the sandbox alive after the run finishes (for debugging) |
@@ -154,17 +155,19 @@ arc llm prompt -S '{"type":"object","properties":{"name":{"type":"string"}}}' "E
 
 ## `arc llm chat`
 
-Start an interactive multi-turn chat session.
+Start an interactive multi-turn chat session. In server mode, the session is backed by the Arc server's session endpoints.
 
 ```bash
 arc llm chat
 arc llm chat -m claude-opus-4-6 -s "You are a helpful coding assistant"
+arc llm chat --mode server
 ```
 
 | Flag | Description |
 |---|---|
 | `-m, --model <MODEL>` | Model to use |
 | `-s, --system <SYSTEM>` | System prompt |
+| `--mode <MODE>` | `standalone` (default) or `server` — in server mode, routes through the Arc API |
 
 ---
 
@@ -176,12 +179,14 @@ List available LLM models from the built-in catalog. Running `arc model` with no
 arc model list
 arc model list -p anthropic
 arc model list -q sonnet
+arc model list --mode server
 ```
 
 | Flag | Description |
 |---|---|
 | `-p, --provider <PROVIDER>` | Filter by provider |
 | `-q, --query <QUERY>` | Search for models matching this string (checks ID, display name, and aliases) |
+| `--mode <MODE>` | `standalone` (default) or `server` — in server mode, fetches the catalog from the Arc API |
 
 ## `arc model test`
 

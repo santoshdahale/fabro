@@ -63,6 +63,13 @@ memory = 8
 disk = 20
 dockerfile = "FROM node:20-slim\nRUN apt-get update && apt-get install -y git"
 
+[sandbox.env]
+API_KEY = "${env.MY_API_KEY}"
+NODE_ENV = "production"
+
+[checkpoint]
+exclude_globs = ["**/node_modules/**", "**/.cache/**"]
+
 [vars]
 repo_name = "arc"
 repo_url = "https://github.com/qltysh/arc"
@@ -169,6 +176,38 @@ dockerfile = "FROM rust:1.85-slim-bookworm\nRUN apt-get update"
 | `snapshot.disk` | Disk in GB for the snapshot. |
 | `snapshot.dockerfile` | Dockerfile content (inline string) or path (`{ path = "..." }`) for building the snapshot image. Paths are resolved relative to the TOML file's directory. |
 | `network` | Network access mode: `"allow_all"` (default), `"block"`, or `{ allow_list = ["..."] }`. See [Sandboxing](/administration/sandboxing#network-access-control). |
+
+#### `[sandbox.env]`
+
+Pass environment variables into sandbox command and agent execution. Values can be literal strings or host environment passthrough using `${env.VARNAME}` syntax:
+
+```toml title="run.toml"
+[sandbox.env]
+API_KEY = "${env.MY_API_KEY}"
+NODE_ENV = "production"
+```
+
+| Syntax | Description |
+|---|---|
+| `"literal"` | Static value passed as-is |
+| `"${env.VARNAME}"` | Resolved from the host environment at load time. Missing vars produce a hard error. |
+
+Host env references must be whole-value only — partial interpolation like `"prefix-${env.X}"` is not supported. Sandbox env vars from `server.toml` defaults and the run config are merged, with the run config winning on key collisions.
+
+### `[checkpoint]`
+
+Configure how git checkpoint commits behave.
+
+```toml title="run.toml"
+[checkpoint]
+exclude_globs = ["**/node_modules/**", "**/.cache/**", "**/dist/**"]
+```
+
+| Field | Description |
+|---|---|
+| `exclude_globs` | Glob patterns for files to exclude from checkpoint commits. Uses git pathspec `:(glob,exclude)` syntax. |
+
+Exclude globs from `server.toml` defaults and the run config are merged (union, deduplicated).
 
 ### `[vars]`
 

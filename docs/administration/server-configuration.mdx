@@ -40,6 +40,13 @@ provider = "Github"
 app_id = "123456"
 client_id = "Iv1.abc123"
 
+[log]
+level = "info"
+
+[git.author]
+name = "arc-bot"
+email = "arc-bot@company.com"
+
 # Run defaults — applied to every run unless overridden by the run config
 [llm]
 model = "claude-sonnet-4-5"
@@ -60,6 +67,9 @@ auto_stop_interval = 60
 
 [sandbox.daytona.labels]
 team = "platform"
+
+[checkpoint]
+exclude_globs = ["**/node_modules/**", "**/.cache/**"]
 
 [vars]
 default_branch = "main"
@@ -84,7 +94,36 @@ CLI flags take precedence over `server.toml` values. See [Run Configuration — 
 
 ### Run defaults
 
-The `[llm]`, `[setup]`, `[sandbox]`, and `[vars]` sections in `server.toml` act as defaults for every run. A run config TOML can override any of these. For `[vars]` and Daytona labels, values are **merged** — the run config wins on key collisions. All other fields use "first non-empty wins" precedence.
+The `[llm]`, `[setup]`, `[sandbox]`, `[checkpoint]`, and `[vars]` sections in `server.toml` act as defaults for every run. A run config TOML can override any of these. For `[vars]`, Daytona labels, and checkpoint exclude globs, values are **merged** — the run config wins on key collisions. All other fields use "first non-empty wins" precedence.
+
+### `[log]` section
+
+Configure the default log level without environment variables. Precedence: `ARC_LOG` env var > `--debug` flag > `[log]` level > `"info"`.
+
+| Key | Description | Default |
+|---|---|---|
+| `level` | Log level: `error`, `warn`, `info`, `debug`, `trace` | `"info"` |
+
+### `[git.author]` section
+
+Customize the git author identity used for checkpoint commits. When not set, defaults to `arc` / `arc@local`.
+
+| Key | Description | Default |
+|---|---|---|
+| `name` | Git author name | `"arc"` |
+| `email` | Git author email | `"arc@local"` |
+
+The CLI can also set `[git.author]` in `cli.toml` to override the server default.
+
+### `[checkpoint]` section
+
+Configure checkpoint behavior for all runs.
+
+| Key | Description |
+|---|---|
+| `exclude_globs` | Glob patterns for files to exclude from checkpoint commits (e.g. `["**/node_modules/**"]`) |
+
+Exclude globs from `server.toml` and run configs are merged (union, deduplicated). See [Run Configuration — Checkpoint](/execution/run-configuration#checkpoint) for per-run configuration.
 
 ## Environment variables
 

@@ -1,0 +1,35 @@
+---
+title: "Sandbox reliability and @file validation"
+date: "2026-03-08"
+---
+
+## Sandbox command reliability
+
+Long-running sandbox commands could previously hang indefinitely on stalled connections or get killed prematurely during complex reasoning turns. Arc now enforces a 5-minute stream read timeout on sandbox connections with 5-second retry backoff, and applies local timeout and cancellation for Daytona `execute_command` calls so zombie processes can't block a stage forever.
+
+The default stall watchdog timeout has also increased from 10 to 30 minutes, giving agents more room for deep reasoning without being killed.
+
+## @file reference validation
+
+The workflow validator now catches unresolved `@file` references before execution starts. Previously, a typo like `@file(src/mising.txt)` would silently pass through as literal text in the prompt. Now you get a clear validation error pointing to the bad reference.
+
+Path handling for `~` home directory and `..` parent directory references is also fixed, so `@file(~/config.toml)` and `@file(../shared/prompt.md)` resolve correctly.
+
+## More
+
+<Accordion title="Workflows">
+- Compaction progress now visible in non-verbose `arc run` output
+- Run ID printed at start of `arc run start` and on resume for easier cross-referencing
+- Git checkpoint commit skipped for start node to reduce noise
+- Added `[log]` config section to `server.toml` and `cli.toml` for log level and format control
+</Accordion>
+
+<Accordion title="Improvements">
+- `apply_patch` error responses now include file contents for better debugging of failed edits
+- v4a patch parser/applier rewritten to match canonical OpenAI codex spec
+</Accordion>
+
+<Accordion title="Fixes">
+- Fixed subagent and system prompt handling when prompt text is empty
+- Fixed parallel stage compaction bars interfering with each other
+</Accordion>
