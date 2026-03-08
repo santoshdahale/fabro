@@ -515,7 +515,7 @@ mod tests {
         assert_eq!(body["id"].as_str().unwrap(), session_id);
         assert!(body["turns"].is_array());
         // Should have at least the initial user turn
-        assert!(body["turns"].as_array().unwrap().len() >= 1);
+        assert!(!body["turns"].as_array().unwrap().is_empty());
         assert_eq!(body["turns"][0]["kind"], "user");
     }
 

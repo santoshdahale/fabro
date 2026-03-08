@@ -95,6 +95,7 @@ pub fn make_read_file_tool() -> RegisteredTool {
                     .env
                     .read_file(file_path, offset_usize, limit_usize)
                     .await?;
+                ctx.env.mark_agent_read(file_path);
                 Ok(content)
             })
         }),
@@ -291,6 +292,14 @@ pub fn make_grep_tool() -> RegisteredTool {
                 };
 
                 let results = ctx.env.grep(pattern, path, &options).await?;
+                let mut seen_files = std::collections::HashSet::new();
+                for line in &results {
+                    if let Some(file_path) = line.split(':').next() {
+                        if !file_path.is_empty() && seen_files.insert(file_path) {
+                            ctx.env.mark_agent_read(file_path);
+                        }
+                    }
+                }
                 Ok(results.join("\n"))
             })
         }),
@@ -355,6 +364,7 @@ pub(crate) fn make_read_many_files_tool() -> RegisteredTool {
                         .ok_or_else(|| "each path must be a string".to_string())?;
                     match ctx.env.read_file(path, None, None).await {
                         Ok(content) => {
+                            ctx.env.mark_agent_read(path);
                             let _ = write!(output, "=== {path} ===\n{content}\n\n");
                         }
                         Err(err) => {
@@ -1410,6 +1420,69 @@ mod tests {
         assert!(
             output.to_lowercase().contains("rust"),
             "results should mention rust, got: {output}"
+        );
+    }
+
+    #[tokio::test]
+    async fn read_file_tool_marks_agent_read() {
+        use crate::read_before_write_sandbox::ReadBeforeWriteSandbox;
+
+        let mock = MockSandbox {
+            files: HashMap::from([("a.ts".into(), "content".into())]),
+            ..Default::default()
+        };
+        let env: Arc<dyn Sandbox> = Arc::new(ReadBeforeWriteSandbox::new(Arc::new(mock)));
+
+        // read_file tool should mark the file as agent-read
+        let tool = make_read_file_tool();
+        (tool.executor)(
+            serde_json::json!({"file_path": "a.ts"}),
+            ToolContext {
+                env: Arc::clone(&env),
+                cancel: CancellationToken::new(),
+                tool_env: None,
+            },
+        )
+        .await
+        .unwrap();
+
+        // write_file should succeed because read_file tool marked it
+        let result = env.write_file("a.ts", "new content").await;
+        assert!(
+            result.is_ok(),
+            "write should succeed after read_file tool marks agent-read"
+        );
+    }
+
+    #[tokio::test]
+    async fn grep_tool_marks_agent_read() {
+        use crate::read_before_write_sandbox::ReadBeforeWriteSandbox;
+
+        let mock = MockSandbox {
+            files: HashMap::from([("b.ts".into(), "content".into())]),
+            grep_results: vec!["b.ts:1:content".into()],
+            ..Default::default()
+        };
+        let env: Arc<dyn Sandbox> = Arc::new(ReadBeforeWriteSandbox::new(Arc::new(mock)));
+
+        // grep tool should mark matched files as agent-read
+        let tool = make_grep_tool();
+        (tool.executor)(
+            serde_json::json!({"pattern": "content"}),
+            ToolContext {
+                env: Arc::clone(&env),
+                cancel: CancellationToken::new(),
+                tool_env: None,
+            },
+        )
+        .await
+        .unwrap();
+
+        // write_file should succeed because grep tool marked it
+        let result = env.write_file("b.ts", "new content").await;
+        assert!(
+            result.is_ok(),
+            "write should succeed after grep tool marks agent-read"
         );
     }
 }

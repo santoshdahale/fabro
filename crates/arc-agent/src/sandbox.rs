@@ -100,6 +100,24 @@ macro_rules! delegate_sandbox {
             async fn set_autostop_interval(&self, minutes: i32) -> Result<(), String> {
                 self.$field.set_autostop_interval(minutes).await
             }
+
+            async fn read_file(
+                &self,
+                path: &str,
+                offset: Option<usize>,
+                limit: Option<usize>,
+            ) -> Result<String, String> {
+                self.$field.read_file(path, offset, limit).await
+            }
+
+            async fn grep(
+                &self,
+                pattern: &str,
+                path: &str,
+                options: &$crate::sandbox::GrepOptions,
+            ) -> Result<Vec<String>, String> {
+                self.$field.grep(pattern, path, options).await
+            }
         }
     };
 }
@@ -349,6 +367,11 @@ pub trait Sandbox: Send + Sync {
     async fn set_autostop_interval(&self, _minutes: i32) -> Result<(), String> {
         Ok(())
     }
+
+    /// Record that the agent has explicitly read (seen) the given file path.
+    /// Called by tool executors after agent-visible reads (e.g. `read_file`, `grep`).
+    /// Default is a no-op; `ReadBeforeWriteSandbox` overrides to populate its read set.
+    fn mark_agent_read(&self, _path: &str) {}
 }
 
 #[cfg(test)]

@@ -517,6 +517,9 @@ pub async fn run_command(
         }
     };
 
+    // Wrap with ReadBeforeWriteSandbox to enforce read-before-write guard
+    let sandbox: Arc<dyn Sandbox> = Arc::new(arc_agent::ReadBeforeWriteSandbox::new(sandbox));
+
     // Initialize sandbox (creates sandbox/container once for the whole run)
     sandbox
         .initialize()

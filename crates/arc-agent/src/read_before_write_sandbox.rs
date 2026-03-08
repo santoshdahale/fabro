@@ -2,12 +2,14 @@ use crate::sandbox::*;
 use std::collections::HashSet;
 use std::path::{Component, PathBuf};
 use std::sync::{Arc, Mutex};
+use tracing::{debug, warn};
 
 /// Decorator that prevents writing to files the agent hasn't read first.
 ///
-/// Tracks which file paths the agent has seen (via `read_file` or `grep`) and
-/// returns an error when `write_file` or `delete_file` targets an existing file
-/// that hasn't been read. Writing to new (non-existent) files is always allowed.
+/// Tracks which file paths the agent has seen (via `mark_agent_read`, called by
+/// tool executors after agent-visible reads) and returns an error when `write_file`
+/// or `delete_file` targets an existing file that hasn't been read.
+/// Writing to new (non-existent) files is always allowed.
 pub struct ReadBeforeWriteSandbox {
     inner: Arc<dyn Sandbox>,
     read_set: Mutex<HashSet<String>>,
@@ -61,6 +63,7 @@ impl ReadBeforeWriteSandbox {
     async fn guard_write(&self, path: &str) -> Result<(), String> {
         let exists = self.inner.file_exists(path).await?;
         if exists && !self.has_read(path) {
+            warn!(path = %path, "Write blocked: file not read by agent");
             Err(format!(
                 "Cannot write to '{path}': file exists but has not been read. \
                  Use read_file to read the file before writing to it."
@@ -73,17 +76,6 @@ impl ReadBeforeWriteSandbox {
 
 crate::delegate_sandbox! {
     ReadBeforeWriteSandbox => inner {
-        async fn read_file(
-            &self,
-            path: &str,
-            offset: Option<usize>,
-            limit: Option<usize>,
-        ) -> Result<String, String> {
-            let result = self.inner.read_file(path, offset, limit).await?;
-            self.mark_read(path);
-            Ok(result)
-        }
-
         async fn write_file(&self, path: &str, content: &str) -> Result<(), String> {
             self.guard_write(path).await?;
             self.inner.write_file(path, content).await
@@ -94,21 +86,9 @@ crate::delegate_sandbox! {
             self.inner.delete_file(path).await
         }
 
-        async fn grep(
-            &self,
-            pattern: &str,
-            path: &str,
-            options: &GrepOptions,
-        ) -> Result<Vec<String>, String> {
-            let results = self.inner.grep(pattern, path, options).await?;
-            for line in &results {
-                if let Some(file_path) = line.split(':').next() {
-                    if !file_path.is_empty() {
-                        self.mark_read(file_path);
-                    }
-                }
-            }
-            Ok(results)
+        fn mark_agent_read(&self, path: &str) {
+            debug!(path = %path, "File marked as agent-read");
+            self.mark_read(path);
         }
     }
 }
@@ -147,9 +127,24 @@ mod tests {
         assert!(result.is_ok());
     }
 
-    // Cycle 3: read then write → success
+    // Cycle 3: mark_agent_read then write → success
     #[tokio::test]
     async fn read_then_write_succeeds() {
+        let mock = MockSandbox {
+            files: HashMap::from([("a.ts".into(), "content".into())]),
+            ..Default::default()
+        };
+        let env = ReadBeforeWriteSandbox::new(Arc::new(mock));
+
+        env.mark_agent_read("a.ts");
+        let result = env.write_file("a.ts", "new content").await;
+
+        assert!(result.is_ok());
+    }
+
+    // Cycle 4: read_file alone does NOT satisfy guard
+    #[tokio::test]
+    async fn read_file_alone_does_not_satisfy_guard() {
         let mock = MockSandbox {
             files: HashMap::from([("a.ts".into(), "content".into())]),
             ..Default::default()
@@ -159,12 +154,12 @@ mod tests {
         env.read_file("a.ts", None, None).await.unwrap();
         let result = env.write_file("a.ts", "new content").await;
 
-        assert!(result.is_ok());
+        assert!(result.is_err());
     }
 
-    // Cycle 4: grep results populate read set
+    // Cycle 5: grep alone does NOT populate read set
     #[tokio::test]
-    async fn grep_populates_read_set() {
+    async fn grep_does_not_populate_read_set() {
         let mock = MockSandbox {
             files: HashMap::from([("b.ts".into(), "content".into())]),
             grep_results: vec!["b.ts:1:content".into()],
@@ -177,10 +172,26 @@ mod tests {
             .unwrap();
         let result = env.write_file("b.ts", "new").await;
 
+        assert!(result.is_err());
+    }
+
+    // Cycle 6: mark_agent_read from grep results then write → success
+    #[tokio::test]
+    async fn mark_agent_read_from_grep_then_write_succeeds() {
+        let mock = MockSandbox {
+            files: HashMap::from([("b.ts".into(), "content".into())]),
+            grep_results: vec!["b.ts:1:content".into()],
+            ..Default::default()
+        };
+        let env = ReadBeforeWriteSandbox::new(Arc::new(mock));
+
+        env.mark_agent_read("b.ts");
+        let result = env.write_file("b.ts", "new").await;
+
         assert!(result.is_ok());
     }
 
-    // Cycle 5: glob does NOT populate read set
+    // Cycle 7: glob does NOT populate read set
     #[tokio::test]
     async fn glob_does_not_populate_read_set() {
         let mock = MockSandbox {
@@ -196,7 +207,7 @@ mod tests {
         assert!(result.is_err());
     }
 
-    // Cycle 6: path normalization — relative vs absolute
+    // Cycle 8: path normalization — relative vs absolute via mark_agent_read
     #[tokio::test]
     async fn path_normalization_relative_and_absolute() {
         let mock = MockSandbox {
@@ -209,13 +220,13 @@ mod tests {
         };
         let env = ReadBeforeWriteSandbox::new(Arc::new(mock));
 
-        env.read_file("a.ts", None, None).await.unwrap();
+        env.mark_agent_read("a.ts");
         let result = env.write_file("/work/a.ts", "new content").await;
 
         assert!(result.is_ok());
     }
 
-    // Cycle 7: delete unread file → error
+    // Cycle 9: delete unread file → error
     #[tokio::test]
     async fn delete_unread_file_returns_error() {
         let mock = MockSandbox {
@@ -229,7 +240,7 @@ mod tests {
         assert!(result.is_err());
     }
 
-    // Cycle 8: error message is actionable
+    // Cycle 10: error message is actionable
     #[tokio::test]
     async fn error_message_is_actionable() {
         let mock = MockSandbox {

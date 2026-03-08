@@ -10208,7 +10208,7 @@ async fn git_checkpoint_host_emits_events_and_diff_patch() {
         .collect();
     // work node gets a checkpoint commit (start is skipped, exit is terminal)
     assert!(
-        git_events.len() >= 1,
+        !git_events.is_empty(),
         "expected at least 1 GitCheckpoint event, got {}",
         git_events.len()
     );

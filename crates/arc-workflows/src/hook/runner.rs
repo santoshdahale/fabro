@@ -33,7 +33,7 @@ impl HookRunner {
         let compiled_matchers = Self::compile_matchers(&config);
         Self {
             config,
-            executor: executor,
+            executor,
             compiled_matchers,
         }
     }

@@ -728,15 +728,15 @@ mod tests {
         let graph = Graph::new("test");
         let context = Context::new();
         context.set(keys::INTERNAL_FIDELITY, serde_json::json!("compact"));
-        context.set(&keys::retry_count_key("plan"), serde_json::json!(1));
+        context.set(keys::retry_count_key("plan"), serde_json::json!(1));
         context.set(keys::CURRENT_NODE, serde_json::json!("work"));
         context.set(
-            &keys::graph_attr_key("default_fidelity"),
+            keys::graph_attr_key("default_fidelity"),
             serde_json::json!("compact"),
         );
         context.set("thread.main.current_node", serde_json::json!("work"));
         context.set(
-            &keys::response_key("plan"),
+            keys::response_key("plan"),
             serde_json::json!("some response"),
         );
         context.set(keys::LAST_STAGE, serde_json::json!("plan"));
@@ -925,12 +925,12 @@ mod tests {
         let graph = Graph::new("test");
         let context = Context::new();
         context.set(
-            &keys::graph_attr_key("default_fidelity"),
+            keys::graph_attr_key("default_fidelity"),
             serde_json::json!("compact"),
         );
         context.set("thread.main.current_node", serde_json::json!("work"));
         context.set(
-            &keys::response_key("plan"),
+            keys::response_key("plan"),
             serde_json::json!("some LLM response"),
         );
         context.set(keys::LAST_STAGE, serde_json::json!("plan"));

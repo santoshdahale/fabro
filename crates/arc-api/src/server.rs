@@ -558,7 +558,9 @@ async fn execute_run(state: Arc<AppState>, run_id: String) {
 
     let registry = (state.registry_factory)(Arc::clone(&interviewer) as Arc<dyn Interviewer>);
     let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
-    let sandbox: Arc<dyn arc_agent::Sandbox> = Arc::new(LocalSandbox::new(cwd));
+    let sandbox: Arc<dyn arc_agent::Sandbox> = Arc::new(arc_agent::ReadBeforeWriteSandbox::new(
+        Arc::new(LocalSandbox::new(cwd)),
+    ));
     let mut engine = WorkflowRunEngine::with_interviewer(
         registry,
         Arc::new(emitter),
@@ -1964,7 +1966,7 @@ mod tests {
         assert_eq!(response.status(), StatusCode::OK);
         let body = body_json(response.into_body()).await;
         assert_eq!(body["data"].as_array().unwrap().len(), 0);
-        assert_eq!(body["meta"]["has_more"].as_bool().unwrap(), false);
+        assert!(!body["meta"]["has_more"].as_bool().unwrap());
 
         // Start a run
         let req = Request::builder()
@@ -1994,7 +1996,7 @@ mod tests {
         assert_eq!(items.len(), 1);
         assert_eq!(items[0]["id"].as_str().unwrap(), run_id);
         assert!(items[0]["status"].as_str().is_some());
-        assert_eq!(body["meta"]["has_more"].as_bool().unwrap(), false);
+        assert!(!body["meta"]["has_more"].as_bool().unwrap());
     }
 
     #[tokio::test]

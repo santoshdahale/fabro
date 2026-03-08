@@ -485,14 +485,14 @@ matcher = "agent_loop"
     fn parse_feature_flags() {
         let toml = "[feature_flags]\nsession_sandboxes = true";
         let config: ServerConfig = toml::from_str(toml).unwrap();
-        assert_eq!(config.feature_flags.session_sandboxes, true);
+        assert!(config.feature_flags.session_sandboxes);
     }
 
     #[test]
     fn parse_feature_flags_defaults() {
         let toml = "";
         let config: ServerConfig = toml::from_str(toml).unwrap();
-        assert_eq!(config.feature_flags.session_sandboxes, false);
+        assert!(!config.feature_flags.session_sandboxes);
     }
 
     #[test]
