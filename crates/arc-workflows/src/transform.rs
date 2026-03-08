@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::path::{Path, PathBuf};
 
 use crate::graph::{AttrValue, Edge, Graph, Node};
 use crate::stylesheet::{apply_stylesheet, parse_stylesheet};
@@ -108,6 +109,83 @@ impl Transform for StylesheetApplicationTransform {
             return;
         };
         apply_stylesheet(&stylesheet, graph);
+    }
+}
+
+/// Resolve a potential `@path` file reference.
+///
+/// If `value` starts with `@`, the referenced file exists locally, and is NOT
+/// tracked by git, the file contents are returned (inlined). Otherwise the
+/// original value is returned unchanged.
+pub fn resolve_file_ref(value: &str, base_dir: &Path) -> String {
+    let path_str = match value.strip_prefix('@') {
+        Some(p) => p,
+        None => return value.to_string(),
+    };
+
+    let file_path = base_dir.join(path_str);
+    if !file_path.is_file() {
+        return value.to_string();
+    }
+
+    // Discover repo root from base_dir
+    let repo_root = std::process::Command::new("git")
+        .args(["rev-parse", "--show-toplevel"])
+        .current_dir(base_dir)
+        .output()
+        .ok()
+        .filter(|o| o.status.success())
+        .map(|o| PathBuf::from(String::from_utf8_lossy(&o.stdout).trim().to_string()));
+
+    if let Some(root) = repo_root {
+        if crate::git::is_tracked(&root, &file_path) {
+            return value.to_string();
+        }
+    }
+
+    match std::fs::read_to_string(&file_path) {
+        Ok(contents) => contents,
+        Err(e) => {
+            tracing::warn!(path = %file_path.display(), error = %e, "Failed to read @file reference");
+            value.to_string()
+        }
+    }
+}
+
+/// Inlines untracked `@file` references in node prompts and the graph-level goal.
+pub struct FileInliningTransform {
+    base_dir: PathBuf,
+}
+
+impl FileInliningTransform {
+    #[must_use]
+    pub fn new(base_dir: PathBuf) -> Self {
+        Self { base_dir }
+    }
+}
+
+impl Transform for FileInliningTransform {
+    fn apply(&self, graph: &mut Graph) {
+        // Inline @file refs in node prompts
+        for node in graph.nodes.values_mut() {
+            if let Some(AttrValue::String(prompt)) = node.attrs.get("prompt") {
+                let resolved = resolve_file_ref(prompt, &self.base_dir);
+                if resolved != *prompt {
+                    node.attrs
+                        .insert("prompt".to_string(), AttrValue::String(resolved));
+                }
+            }
+        }
+
+        // Inline @file refs in graph-level goal
+        if let Some(AttrValue::String(goal)) = graph.attrs.get("goal") {
+            let resolved = resolve_file_ref(goal, &self.base_dir);
+            if resolved != *goal {
+                graph
+                    .attrs
+                    .insert("goal".to_string(), AttrValue::String(resolved));
+            }
+        }
     }
 }
 
@@ -514,6 +592,181 @@ mod tests {
                 .get("condition")
                 .and_then(AttrValue::as_str),
             Some("outcome=success")
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // resolve_file_ref tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn resolve_file_ref_passthrough_non_at() {
+        let dir = tempfile::tempdir().unwrap();
+        assert_eq!(resolve_file_ref("hello world", dir.path()), "hello world");
+    }
+
+    #[test]
+    fn resolve_file_ref_passthrough_missing_file() {
+        let dir = tempfile::tempdir().unwrap();
+        assert_eq!(
+            resolve_file_ref("@nonexistent.md", dir.path()),
+            "@nonexistent.md"
+        );
+    }
+
+    #[test]
+    fn resolve_file_ref_passthrough_tracked_file() {
+        let dir = tempfile::tempdir().unwrap();
+        // Init repo and commit a file
+        std::process::Command::new("git")
+            .args(["init"])
+            .current_dir(dir.path())
+            .output()
+            .unwrap();
+        std::fs::write(dir.path().join("tracked.md"), "tracked content").unwrap();
+        std::process::Command::new("git")
+            .args(["add", "tracked.md"])
+            .current_dir(dir.path())
+            .output()
+            .unwrap();
+        std::process::Command::new("git")
+            .args([
+                "-c", "user.name=test",
+                "-c", "user.email=test@test",
+                "commit", "-m", "add",
+            ])
+            .current_dir(dir.path())
+            .output()
+            .unwrap();
+
+        assert_eq!(
+            resolve_file_ref("@tracked.md", dir.path()),
+            "@tracked.md"
+        );
+    }
+
+    #[test]
+    fn resolve_file_ref_inlines_untracked_file() {
+        let dir = tempfile::tempdir().unwrap();
+        // Init repo
+        std::process::Command::new("git")
+            .args(["init"])
+            .current_dir(dir.path())
+            .output()
+            .unwrap();
+        std::process::Command::new("git")
+            .args([
+                "-c", "user.name=test",
+                "-c", "user.email=test@test",
+                "commit", "--allow-empty", "-m", "init",
+            ])
+            .current_dir(dir.path())
+            .output()
+            .unwrap();
+
+        std::fs::write(dir.path().join("local.md"), "inlined content").unwrap();
+
+        assert_eq!(
+            resolve_file_ref("@local.md", dir.path()),
+            "inlined content"
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // FileInliningTransform tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn file_inlining_transform_inlines_prompt_and_goal() {
+        let dir = tempfile::tempdir().unwrap();
+        // Init repo
+        std::process::Command::new("git")
+            .args(["init"])
+            .current_dir(dir.path())
+            .output()
+            .unwrap();
+        std::process::Command::new("git")
+            .args([
+                "-c", "user.name=test",
+                "-c", "user.email=test@test",
+                "commit", "--allow-empty", "-m", "init",
+            ])
+            .current_dir(dir.path())
+            .output()
+            .unwrap();
+
+        std::fs::write(dir.path().join("prompt.md"), "Do the work").unwrap();
+        std::fs::write(dir.path().join("goal.md"), "Ship feature").unwrap();
+
+        let mut graph = Graph::new("test");
+        graph.attrs.insert(
+            "goal".to_string(),
+            AttrValue::String("@goal.md".to_string()),
+        );
+        let mut node = Node::new("work");
+        node.attrs.insert(
+            "prompt".to_string(),
+            AttrValue::String("@prompt.md".to_string()),
+        );
+        graph.nodes.insert("work".to_string(), node);
+
+        let transform = FileInliningTransform::new(dir.path().to_path_buf());
+        transform.apply(&mut graph);
+
+        assert_eq!(
+            graph.nodes["work"]
+                .attrs
+                .get("prompt")
+                .and_then(AttrValue::as_str),
+            Some("Do the work")
+        );
+        assert_eq!(
+            graph.attrs.get("goal").and_then(AttrValue::as_str),
+            Some("Ship feature")
+        );
+    }
+
+    #[test]
+    fn file_inlining_transform_leaves_tracked_files() {
+        let dir = tempfile::tempdir().unwrap();
+        std::process::Command::new("git")
+            .args(["init"])
+            .current_dir(dir.path())
+            .output()
+            .unwrap();
+        std::fs::write(dir.path().join("prompt.md"), "committed content").unwrap();
+        std::process::Command::new("git")
+            .args(["add", "prompt.md"])
+            .current_dir(dir.path())
+            .output()
+            .unwrap();
+        std::process::Command::new("git")
+            .args([
+                "-c", "user.name=test",
+                "-c", "user.email=test@test",
+                "commit", "-m", "add",
+            ])
+            .current_dir(dir.path())
+            .output()
+            .unwrap();
+
+        let mut graph = Graph::new("test");
+        let mut node = Node::new("work");
+        node.attrs.insert(
+            "prompt".to_string(),
+            AttrValue::String("@prompt.md".to_string()),
+        );
+        graph.nodes.insert("work".to_string(), node);
+
+        let transform = FileInliningTransform::new(dir.path().to_path_buf());
+        transform.apply(&mut graph);
+
+        assert_eq!(
+            graph.nodes["work"]
+                .attrs
+                .get("prompt")
+                .and_then(AttrValue::as_str),
+            Some("@prompt.md")
         );
     }
 }

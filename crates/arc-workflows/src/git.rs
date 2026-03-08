@@ -291,6 +291,18 @@ pub fn push_ref(repo: &Path, url: &str, refname: &str) -> Result<()> {
     Ok(())
 }
 
+/// Check whether a file is tracked by git in the given repo.
+/// Returns `false` if the file is untracked or git is unavailable.
+pub fn is_tracked(repo: &Path, file: &Path) -> bool {
+    git_cmd(repo)
+        .args(["ls-files", "--error-unmatch"])
+        .arg(file)
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .is_ok_and(|s| s.success())
+}
+
 /// Sanitize a string for use as a git ref component.
 /// Lowercases, replaces non-alphanumeric chars with dashes, collapses runs.
 pub fn sanitize_ref_component(s: &str) -> String {
@@ -1099,5 +1111,45 @@ mod tests {
             .unwrap();
         let stdout = String::from_utf8_lossy(&output.stdout);
         assert!(stdout.contains("test-push"), "remote should have test-push branch");
+    }
+
+    #[test]
+    fn is_tracked_returns_true_for_committed_file() {
+        let dir = tempfile::tempdir().unwrap();
+        init_repo(dir.path());
+        let file = dir.path().join("tracked.txt");
+        fs::write(&file, "hello").unwrap();
+        Command::new("git")
+            .args(["add", "tracked.txt"])
+            .current_dir(dir.path())
+            .output()
+            .unwrap();
+        Command::new("git")
+            .args([
+                "-c", "user.name=test",
+                "-c", "user.email=test@test",
+                "commit", "-m", "add file",
+            ])
+            .current_dir(dir.path())
+            .output()
+            .unwrap();
+        assert!(is_tracked(dir.path(), &file));
+    }
+
+    #[test]
+    fn is_tracked_returns_false_for_untracked_file() {
+        let dir = tempfile::tempdir().unwrap();
+        init_repo(dir.path());
+        let file = dir.path().join("untracked.txt");
+        fs::write(&file, "hello").unwrap();
+        assert!(!is_tracked(dir.path(), &file));
+    }
+
+    #[test]
+    fn is_tracked_returns_false_for_non_repo_dir() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("some.txt");
+        fs::write(&file, "hello").unwrap();
+        assert!(!is_tracked(dir.path(), &file));
     }
 }

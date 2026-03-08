@@ -242,8 +242,24 @@ pub async fn run_command(
         Some(vars) => run_config::expand_vars(&source, vars)?,
         None => source,
     };
-    let (mut graph, diagnostics) = WorkflowBuilder::new().prepare(&source)?;
+    let dot_dir = dot_path.parent().unwrap_or(std::path::Path::new("."));
+    let mut builder = WorkflowBuilder::new();
+    builder.register_transform(Box::new(
+        crate::transform::FileInliningTransform::new(dot_dir.to_path_buf()),
+    ));
+    let (mut graph, diagnostics) = builder.prepare(&source)?;
     apply_goal_override(&mut graph, args.goal.as_deref());
+
+    // Inline @file references in the (possibly overridden) goal
+    if let Some(crate::graph::types::AttrValue::String(goal)) = graph.attrs.get("goal") {
+        let resolved = crate::transform::resolve_file_ref(goal, dot_dir);
+        if resolved != *goal {
+            graph.attrs.insert(
+                "goal".to_string(),
+                crate::graph::types::AttrValue::String(resolved),
+            );
+        }
+    }
 
     eprintln!(
         "{} {} {}",
