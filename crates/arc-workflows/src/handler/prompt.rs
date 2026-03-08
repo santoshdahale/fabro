@@ -251,49 +251,47 @@ mod tests {
         assert_eq!(response_content, "one-shot response");
     }
 
+    struct OneShotCapturingBackend {
+        captured_prompt: Arc<std::sync::Mutex<Option<String>>>,
+        captured_system_prompt: Arc<std::sync::Mutex<Option<Option<String>>>>,
+    }
+
+    #[async_trait]
+    impl CodergenBackend for OneShotCapturingBackend {
+        async fn run(
+            &self,
+            _node: &Node,
+            _prompt: &str,
+            _context: &Context,
+            _thread_id: Option<&str>,
+            _emitter: &Arc<crate::event::EventEmitter>,
+            _stage_dir: &Path,
+            _sandbox: &Arc<dyn arc_agent::Sandbox>,
+        ) -> Result<CodergenResult, ArcError> {
+            panic!("run() should not be called for prompt handler");
+        }
+
+        async fn one_shot(
+            &self,
+            _node: &Node,
+            prompt: &str,
+            system_prompt: Option<&str>,
+            _stage_dir: &Path,
+        ) -> Result<CodergenResult, ArcError> {
+            *self.captured_prompt.lock().unwrap() = Some(prompt.to_string());
+            *self.captured_system_prompt.lock().unwrap() =
+                Some(system_prompt.map(String::from));
+            Ok(CodergenResult::Text {
+                text: "classified".to_string(),
+                usage: None,
+                files_touched: Vec::new(),
+            })
+        }
+    }
+
     #[tokio::test]
     async fn prompt_handler_prepends_preamble() {
         use std::sync::Mutex;
-
-        use arc_agent::Sandbox;
-
-        struct OneShotCapturingBackend {
-            captured_prompt: Arc<Mutex<Option<String>>>,
-            captured_system_prompt: Arc<Mutex<Option<Option<String>>>>,
-        }
-
-        #[async_trait]
-        impl CodergenBackend for OneShotCapturingBackend {
-            async fn run(
-                &self,
-                _node: &Node,
-                _prompt: &str,
-                _context: &Context,
-                _thread_id: Option<&str>,
-                _emitter: &Arc<crate::event::EventEmitter>,
-                _stage_dir: &Path,
-                _sandbox: &Arc<dyn Sandbox>,
-            ) -> Result<CodergenResult, ArcError> {
-                panic!("run() should not be called for prompt handler");
-            }
-
-            async fn one_shot(
-                &self,
-                _node: &Node,
-                prompt: &str,
-                system_prompt: Option<&str>,
-                _stage_dir: &Path,
-            ) -> Result<CodergenResult, ArcError> {
-                *self.captured_prompt.lock().unwrap() = Some(prompt.to_string());
-                *self.captured_system_prompt.lock().unwrap() =
-                    Some(system_prompt.map(String::from));
-                Ok(CodergenResult::Text {
-                    text: "classified".to_string(),
-                    usage: None,
-                    files_touched: Vec::new(),
-                })
-            }
-        }
 
         let captured = Arc::new(Mutex::new(None));
         let backend = OneShotCapturingBackend {
@@ -329,46 +327,9 @@ mod tests {
     async fn prompt_handler_passes_system_prompt_when_project_memory_enabled() {
         use std::sync::Mutex;
 
-        use arc_agent::Sandbox;
-
-        struct CapturingBackend {
-            captured_system_prompt: Arc<Mutex<Option<Option<String>>>>,
-        }
-
-        #[async_trait]
-        impl CodergenBackend for CapturingBackend {
-            async fn run(
-                &self,
-                _node: &Node,
-                _prompt: &str,
-                _context: &Context,
-                _thread_id: Option<&str>,
-                _emitter: &Arc<crate::event::EventEmitter>,
-                _stage_dir: &Path,
-                _sandbox: &Arc<dyn Sandbox>,
-            ) -> Result<CodergenResult, ArcError> {
-                panic!("run() should not be called for prompt handler");
-            }
-
-            async fn one_shot(
-                &self,
-                _node: &Node,
-                _prompt: &str,
-                system_prompt: Option<&str>,
-                _stage_dir: &Path,
-            ) -> Result<CodergenResult, ArcError> {
-                *self.captured_system_prompt.lock().unwrap() =
-                    Some(system_prompt.map(String::from));
-                Ok(CodergenResult::Text {
-                    text: "ok".to_string(),
-                    usage: None,
-                    files_touched: Vec::new(),
-                })
-            }
-        }
-
         let captured_sys = Arc::new(Mutex::new(None));
-        let backend = CapturingBackend {
+        let backend = OneShotCapturingBackend {
+            captured_prompt: Arc::new(Mutex::new(None)),
             captured_system_prompt: captured_sys.clone(),
         };
         let handler = PromptHandler::new(Some(Box::new(backend)));
@@ -398,46 +359,9 @@ mod tests {
     async fn prompt_handler_passes_none_system_prompt_when_project_memory_false() {
         use std::sync::Mutex;
 
-        use arc_agent::Sandbox;
-
-        struct CapturingBackend {
-            captured_system_prompt: Arc<Mutex<Option<Option<String>>>>,
-        }
-
-        #[async_trait]
-        impl CodergenBackend for CapturingBackend {
-            async fn run(
-                &self,
-                _node: &Node,
-                _prompt: &str,
-                _context: &Context,
-                _thread_id: Option<&str>,
-                _emitter: &Arc<crate::event::EventEmitter>,
-                _stage_dir: &Path,
-                _sandbox: &Arc<dyn Sandbox>,
-            ) -> Result<CodergenResult, ArcError> {
-                panic!("run() should not be called for prompt handler");
-            }
-
-            async fn one_shot(
-                &self,
-                _node: &Node,
-                _prompt: &str,
-                system_prompt: Option<&str>,
-                _stage_dir: &Path,
-            ) -> Result<CodergenResult, ArcError> {
-                *self.captured_system_prompt.lock().unwrap() =
-                    Some(system_prompt.map(String::from));
-                Ok(CodergenResult::Text {
-                    text: "ok".to_string(),
-                    usage: None,
-                    files_touched: Vec::new(),
-                })
-            }
-        }
-
         let captured_sys = Arc::new(Mutex::new(None));
-        let backend = CapturingBackend {
+        let backend = OneShotCapturingBackend {
+            captured_prompt: Arc::new(Mutex::new(None)),
             captured_system_prompt: captured_sys.clone(),
         };
         let handler = PromptHandler::new(Some(Box::new(backend)));
