@@ -163,6 +163,12 @@ struct ActiveStage {
     compaction_bar: Option<ProgressBar>,
 }
 
+impl ActiveStage {
+    fn last_bar(&self) -> &ProgressBar {
+        self.tool_calls.back().map_or(&self.spinner, |e| &e.bar)
+    }
+}
+
 const MAX_TOOL_CALLS: usize = 5;
 
 // ── Renderer variants ───────────────────────────────────────────────────
@@ -741,13 +747,12 @@ impl ProgressUI {
                 match &self.renderer {
                     ProgressRenderer::Tty(tty) => {
                         if let Some(stage) = self.active_stages.get_mut(stage_node_id) {
-                            let after = stage
-                                .tool_calls
-                                .back()
-                                .map_or(&stage.spinner, |e| &e.bar);
-                            let bar =
-                                tty.multi
-                                    .insert_after(after, ProgressBar::new_spinner());
+                            if let Some(old) = stage.compaction_bar.take() {
+                                old.finish_and_clear();
+                            }
+                            let bar = tty
+                                .multi
+                                .insert_after(stage.last_bar(), ProgressBar::new_spinner());
                             bar.set_style(style_tool_running());
                             bar.set_message("\u{27f3} compacting context\u{2026}");
                             bar.enable_steady_tick(Duration::from_millis(100));
@@ -768,11 +773,11 @@ impl ProgressUI {
                 );
                 match &self.renderer {
                     ProgressRenderer::Tty(_) => {
-                        let bar = self
+                        if let Some(bar) = self
                             .active_stages
                             .get_mut(stage_node_id)
-                            .and_then(|s| s.compaction_bar.take());
-                        if let Some(bar) = bar {
+                            .and_then(|s| s.compaction_bar.take())
+                        {
                             bar.set_style(style_tool_done());
                             bar.finish_with_message(msg);
                         } else {
@@ -860,7 +865,7 @@ impl ProgressUI {
                     }
                 }
                 let bar = tty.multi.insert_after(
-                    stage.tool_calls.back().map_or(&stage.spinner, |e| &e.bar),
+                    stage.last_bar(),
                     ProgressBar::new_spinner(),
                 );
                 bar.set_style(style_tool_running());
@@ -888,7 +893,7 @@ impl ProgressUI {
         if let ProgressRenderer::Tty(tty) = &self.renderer {
             if let Some(stage) = self.active_stages.get_mut(&parent_id) {
                 let bar = tty.multi.insert_after(
-                    stage.tool_calls.back().map_or(&stage.spinner, |e| &e.bar),
+                    stage.last_bar(),
                     ProgressBar::new_spinner(),
                 );
                 bar.set_style(style_tool_running());
@@ -961,13 +966,9 @@ impl ProgressUI {
     fn insert_info_line_for_stage(&mut self, stage_node_id: &str, message: &str) {
         match &self.renderer {
             ProgressRenderer::Tty(tty) => {
-                let after = self
-                    .active_stages
-                    .get(stage_node_id)
-                    .map(|s| s.tool_calls.back().map_or(&s.spinner, |e| &e.bar));
-                let bar = if let Some(after_bar) = after {
+                let bar = if let Some(stage) = self.active_stages.get(stage_node_id) {
                     tty.multi
-                        .insert_after(after_bar, ProgressBar::new_spinner())
+                        .insert_after(stage.last_bar(), ProgressBar::new_spinner())
                 } else {
                     tty.multi.add(ProgressBar::new_spinner())
                 };
