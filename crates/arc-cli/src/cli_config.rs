@@ -3,6 +3,7 @@ use std::path::{Path, PathBuf};
 
 use arc_agent::cli::{OutputFormat, PermissionLevel};
 use arc_mcp::config::{McpServerConfig, McpTransport};
+use arc_workflows::cli::run_config::PullRequestConfig;
 use serde::Deserialize;
 use tracing::debug;
 
@@ -78,6 +79,7 @@ pub struct CliConfig {
     pub verbose: bool,
     #[serde(default)]
     pub log: arc_api::server_config::LogConfig,
+    pub pull_request: Option<PullRequestConfig>,
     #[serde(default)]
     pub mcp_servers: HashMap<String, McpServerEntry>,
 }
@@ -406,6 +408,23 @@ email = "me@local"
         };
         let resolved = resolve_mode(None, None, &config);
         assert_eq!(resolved.tls, Some(tls));
+    }
+
+    #[test]
+    fn parse_pull_request_enabled() {
+        let toml = r#"
+[pull_request]
+enabled = true
+"#;
+        let config: CliConfig = toml::from_str(toml).unwrap();
+        let pr = config.pull_request.unwrap();
+        assert!(pr.enabled);
+    }
+
+    #[test]
+    fn parse_pull_request_absent() {
+        let config: CliConfig = toml::from_str("").unwrap();
+        assert_eq!(config.pull_request, None);
     }
 
     #[test]

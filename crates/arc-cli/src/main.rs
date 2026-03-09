@@ -271,9 +271,14 @@ async fn main() -> Result<()> {
                     .or_else(|| server_config.git.author.email.clone()),
             );
 
+            let mut run_defaults = server_config.run_defaults;
+            if cli_config.pull_request.is_some() {
+                run_defaults.pull_request = cli_config.pull_request;
+            }
+
             arc_workflows::cli::run::run_command(
                 args,
-                server_config.run_defaults,
+                run_defaults,
                 styles,
                 github_app,
                 git_author,
