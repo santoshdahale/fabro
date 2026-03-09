@@ -10,6 +10,7 @@ use arc_util::terminal::Styles;
 use chrono::{Local, Utc};
 use tracing::debug;
 
+use super::tilde_path;
 use crate::checkpoint::Checkpoint;
 use crate::engine::{GitCheckpointMode, RunConfig, WorkflowRunEngine};
 use crate::event::EventEmitter;
@@ -898,7 +899,7 @@ pub async fn run_command(
         logs_root: logs_dir.clone(),
         cancel_token: None,
         dry_run: dry_run_mode,
-        run_id,
+        run_id: run_id.clone(),
         git_checkpoint: if sandbox.is_remote() {
             remote_base_sha
                 .as_ref()
@@ -1096,14 +1097,15 @@ pub async fn run_command(
     // 8. Print result
     eprintln!("\n{}", styles.bold.apply_to("=== Run Result ==="),);
 
+    eprintln!("{}", styles.dim.apply_to(format!("Run:       {run_id}")));
     let status_str = outcome.status.to_string().to_uppercase();
     let status_color = match outcome.status {
         StageStatus::Success | StageStatus::PartialSuccess => &styles.bold_green,
         _ => &styles.bold_red,
     };
-    eprintln!("Status: {}", status_color.apply_to(&status_str),);
+    eprintln!("Status:    {}", status_color.apply_to(&status_str),);
     eprintln!(
-        "Duration: {}",
+        "Duration:  {}",
         HumanDuration(Duration::from_millis(run_duration_ms))
     );
 
@@ -1115,7 +1117,7 @@ pub async fn run_command(
                 eprintln!(
                     "{}",
                     styles.dim.apply_to(format!(
-                        "Cost: {} ({} toks)",
+                        "Cost:      {} ({} toks)",
                         format_cost(acc.total_cost),
                         format_tokens_human(total_tokens)
                     ))
@@ -1125,14 +1127,14 @@ pub async fn run_command(
                     "{}",
                     styles
                         .dim
-                        .apply_to(format!("Toks: {}", format_tokens_human(total_tokens)))
+                        .apply_to(format!("Toks:      {}", format_tokens_human(total_tokens)))
                 );
             }
             if acc.total_cache_read_tokens > 0 {
                 eprintln!(
                     "{}",
                     styles.dim.apply_to(format!(
-                        "Cache: {} read, {} write",
+                        "Cache:     {} read, {} write",
                         format_tokens_human(acc.total_cache_read_tokens),
                         format_tokens_human(acc.total_cache_write_tokens),
                     )),
@@ -1150,8 +1152,15 @@ pub async fn run_command(
         }
     }
 
+    eprintln!(
+        "{}",
+        styles
+            .dim
+            .apply_to(format!("Logs:      {}", tilde_path(&logs_dir)))
+    );
+
     if let Some(failure) = outcome.failure_reason() {
-        eprintln!("{}", styles.red.apply_to(format!("Failure: {failure}")),);
+        eprintln!("Failure:   {}", styles.red.apply_to(failure));
     }
 
     print_final_output(&logs_dir, styles);
@@ -1462,7 +1471,7 @@ async fn run_from_branch(
         logs_root: logs_dir.clone(),
         cancel_token: None,
         dry_run: dry_run_mode,
-        run_id,
+        run_id: run_id.clone(),
         git_checkpoint: if sandbox.is_remote() {
             Some(GitCheckpointMode::Remote(original_cwd.clone()))
         } else {
@@ -1529,15 +1538,22 @@ async fn run_from_branch(
     let outcome = engine_result?;
 
     eprintln!("\n{}", styles.bold.apply_to("=== Run Result ==="),);
+    eprintln!("{}", styles.dim.apply_to(format!("Run:       {run_id}")));
     let status_str = outcome.status.to_string().to_uppercase();
     let status_color = match outcome.status {
         StageStatus::Success | StageStatus::PartialSuccess => &styles.bold_green,
         _ => &styles.bold_red,
     };
-    eprintln!("Status: {}", status_color.apply_to(&status_str),);
+    eprintln!("Status:    {}", status_color.apply_to(&status_str),);
     eprintln!(
-        "Duration: {}",
+        "Duration:  {}",
         HumanDuration(Duration::from_millis(run_duration_ms))
+    );
+    eprintln!(
+        "{}",
+        styles
+            .dim
+            .apply_to(format!("Logs:      {}", tilde_path(&logs_dir)))
     );
 
     print_final_output(&logs_dir, styles);
