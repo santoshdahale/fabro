@@ -8,6 +8,8 @@ fn main() {
         .unwrap()
         .parent()
         .unwrap()
+        .parent()
+        .unwrap()
         .join("docs/api-reference/arc-api.yaml");
 
     println!("cargo::rerun-if-changed={}", spec_path.display());

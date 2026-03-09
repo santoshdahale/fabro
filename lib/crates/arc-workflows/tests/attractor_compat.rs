@@ -4,7 +4,7 @@ use arc_workflows::parser::parse;
 
 fn parse_attractor_dot(filename: &str) -> Result<arc_workflows::graph::types::Graph, String> {
     let path = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../../test/attractor")
+        .join("../../../test/attractor")
         .join(filename);
     let content = std::fs::read_to_string(&path)
         .map_err(|e| format!("failed to read {}: {e}", path.display()))?;

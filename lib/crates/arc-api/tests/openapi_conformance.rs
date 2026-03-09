@@ -36,6 +36,8 @@ fn load_spec() -> openapiv3::OpenAPI {
         .unwrap()
         .parent()
         .unwrap()
+        .parent()
+        .unwrap()
         .join("docs/api-reference/arc-api.yaml");
     let text = std::fs::read_to_string(&spec_path).expect("failed to read spec");
     serde_yaml::from_str(&text).expect("failed to parse spec")
@@ -113,6 +115,8 @@ async fn all_spec_routes_are_routable() {
 /// Load the spec as serde_json::Value for schema introspection.
 fn load_spec_json() -> serde_json::Value {
     let spec_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .unwrap()
         .parent()
         .unwrap()
         .parent()

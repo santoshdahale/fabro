@@ -493,7 +493,7 @@ fn exec_read_and_edit() {
 #[test]
 fn validate_simple() {
     arc()
-        .args(["validate", "../../test/simple.dot"])
+        .args(["validate", "../../../test/simple.dot"])
         .assert()
         .success()
         .stderr(predicate::str::contains("Validation: OK"));
@@ -502,7 +502,7 @@ fn validate_simple() {
 #[test]
 fn validate_branching() {
     arc()
-        .args(["validate", "../../test/branching.dot"])
+        .args(["validate", "../../../test/branching.dot"])
         .assert()
         .success()
         .stderr(predicate::str::contains("Validation: OK"));
@@ -511,7 +511,7 @@ fn validate_branching() {
 #[test]
 fn validate_conditions() {
     arc()
-        .args(["validate", "../../test/conditions.dot"])
+        .args(["validate", "../../../test/conditions.dot"])
         .assert()
         .success()
         .stderr(predicate::str::contains("Validation: OK"));
@@ -520,7 +520,7 @@ fn validate_conditions() {
 #[test]
 fn validate_parallel() {
     arc()
-        .args(["validate", "../../test/parallel.dot"])
+        .args(["validate", "../../../test/parallel.dot"])
         .assert()
         .success()
         .stderr(predicate::str::contains("Validation: OK"));
@@ -529,7 +529,7 @@ fn validate_parallel() {
 #[test]
 fn validate_styled() {
     arc()
-        .args(["validate", "../../test/styled.dot"])
+        .args(["validate", "../../../test/styled.dot"])
         .assert()
         .success()
         .stderr(predicate::str::contains("Validation: OK"));
@@ -538,7 +538,7 @@ fn validate_styled() {
 #[test]
 fn validate_legacy_tool() {
     arc()
-        .args(["validate", "../../test/legacy_tool.dot"])
+        .args(["validate", "../../../test/legacy_tool.dot"])
         .assert()
         .success()
         .stderr(predicate::str::contains("Validation: OK"));
@@ -547,7 +547,7 @@ fn validate_legacy_tool() {
 #[test]
 fn validate_invalid() {
     arc()
-        .args(["validate", "../../test/invalid.dot"])
+        .args(["validate", "../../../test/invalid.dot"])
         .assert()
         .failure();
 }
@@ -576,7 +576,7 @@ fn dry_run_simple() {
             "run",
             "--dry-run",
             "--auto-approve",
-            "../../test/simple.dot",
+            "../../../test/simple.dot",
         ])
         .assert()
         .success();
@@ -589,7 +589,7 @@ fn dry_run_branching() {
             "run",
             "--dry-run",
             "--auto-approve",
-            "../../test/branching.dot",
+            "../../../test/branching.dot",
         ])
         .assert()
         .success();
@@ -602,7 +602,7 @@ fn dry_run_conditions() {
             "run",
             "--dry-run",
             "--auto-approve",
-            "../../test/conditions.dot",
+            "../../../test/conditions.dot",
         ])
         .assert()
         .success();
@@ -615,7 +615,7 @@ fn dry_run_parallel() {
             "run",
             "--dry-run",
             "--auto-approve",
-            "../../test/parallel.dot",
+            "../../../test/parallel.dot",
         ])
         .assert()
         .success();
@@ -628,7 +628,7 @@ fn dry_run_styled() {
             "run",
             "--dry-run",
             "--auto-approve",
-            "../../test/styled.dot",
+            "../../../test/styled.dot",
         ])
         .assert()
         .success();
@@ -641,7 +641,7 @@ fn dry_run_legacy_tool() {
             "run",
             "--dry-run",
             "--auto-approve",
-            "../../test/legacy_tool.dot",
+            "../../../test/legacy_tool.dot",
         ])
         .assert()
         .success();
@@ -700,7 +700,7 @@ fn dry_run_writes_jsonl_and_live_json() {
             "--auto-approve",
             "--logs-dir",
             logs_dir.to_str().unwrap(),
-            "../../test/simple.dot",
+            "../../../test/simple.dot",
         ])
         .assert()
         .success();
