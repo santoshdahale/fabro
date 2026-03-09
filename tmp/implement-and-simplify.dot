@@ -10,6 +10,7 @@ digraph ImplementAndSimplify {
     start [shape=Mdiamond, label="Start"]
     exit  [shape=Msquare, label="Exit"]
 
+    toolchain         [label="Toolchain", shape=parallelogram, script="cargo --version 2>&1", max_retries=0]
     preflight_compile [label="Preflight Compile", shape=parallelogram, script="cargo check 2>&1", max_retries=0]
     preflight_lint    [label="Preflight Lint", shape=parallelogram, script="cargo clippy -- -D warnings 2>&1", max_retries=0]
     fix_lints         [label="Fix Lints", prompt="The preflight lint step failed. Read the build output from context and fix all clippy lint warnings.", max_visits=3]
@@ -19,7 +20,9 @@ digraph ImplementAndSimplify {
     verify            [label="Verify", shape=parallelogram, script="cargo clippy -- -D warnings 2>&1 && cargo test 2>&1", goal_gate=true, retry_target="fixup"]
     fixup             [label="Fixup", prompt="The verify step failed. Read the build output from context and fix all clippy lint warnings and test failures.", max_visits=3]
 
-    start -> preflight_compile
+    start -> toolchain
+    toolchain -> preflight_compile [condition="outcome=success"]
+    toolchain -> exit
     preflight_compile -> preflight_lint [condition="outcome=success"]
     preflight_compile -> exit
     preflight_lint -> preflight_tests [condition="outcome=success"]
