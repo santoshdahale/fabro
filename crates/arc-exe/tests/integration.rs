@@ -1,5 +1,5 @@
 use arc_agent::sandbox::Sandbox;
-use arc_exe::{ExeSandbox, OpensshRunner};
+use arc_exe::{ExeConfig, ExeSandbox, OpensshRunner};
 
 /// Full lifecycle test against a real exe.dev account.
 /// Requires SSH agent with exe.dev credentials.
@@ -12,7 +12,7 @@ async fn exe_sandbox_full_lifecycle() {
         .await
         .expect("SSH to exe.dev failed — is your SSH agent running?");
 
-    let sandbox = ExeSandbox::new(Box::new(mgmt_ssh), None);
+    let sandbox = ExeSandbox::new(Box::new(mgmt_ssh), ExeConfig::default(), None, None);
 
     // Initialize (creates VM)
     sandbox.initialize().await.unwrap();

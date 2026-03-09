@@ -152,6 +152,15 @@ impl WorkflowRunConfig {
                     (None, Some(_)) => task.daytona = default.daytona.clone(),
                     _ => {}
                 }
+                match (&mut task.exe, &default.exe) {
+                    (Some(task_e), Some(default_e)) => {
+                        if task_e.image.is_none() {
+                            task_e.image = default_e.image.clone();
+                        }
+                    }
+                    (None, Some(_)) => task.exe = default.exe.clone(),
+                    _ => {}
+                }
                 if let Some(ref default_env) = default.env {
                     let mut merged = default_env.clone();
                     if let Some(ref task_env) = task.env {

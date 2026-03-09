@@ -53,7 +53,9 @@ pub trait SshRunner: Send + Sync {
 
 /// Configuration for an exe.dev sandbox (TOML target for `[sandbox.exe]`).
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]
-pub struct ExeConfig {}
+pub struct ExeConfig {
+    pub image: Option<String>,
+}
 
 /// Parameters for cloning a git repo into the sandbox during initialization.
 #[derive(Clone, Debug)]
@@ -82,13 +84,20 @@ pub struct ExeSandbox {
     /// In production, this connects to the VM host via OpensshRunner.
     /// In tests, this is replaced with a closure that returns a MockSshRunner.
     data_ssh_factory: DataSshFactory,
+    config: ExeConfig,
     clone_params: Option<GitCloneParams>,
+    run_id: Option<String>,
     origin_url: tokio::sync::OnceCell<String>,
 }
 
 impl ExeSandbox {
     /// Creates a new `ExeSandbox` with a management-plane SSH runner.
-    pub fn new(mgmt_ssh: Box<dyn SshRunner>, clone_params: Option<GitCloneParams>) -> Self {
+    pub fn new(
+        mgmt_ssh: Box<dyn SshRunner>,
+        config: ExeConfig,
+        clone_params: Option<GitCloneParams>,
+        run_id: Option<String>,
+    ) -> Self {
         Self {
             mgmt_ssh,
             data_ssh: tokio::sync::OnceCell::new(),
@@ -104,7 +113,9 @@ impl ExeSandbox {
                         .map(|r| Box::new(r) as Box<dyn SshRunner>)
                 })
             }),
+            config,
             clone_params,
+            run_id,
             origin_url: tokio::sync::OnceCell::new(),
         }
     }
@@ -270,7 +281,11 @@ impl Sandbox for ExeSandbox {
         let init_start = Instant::now();
 
         // Create a new VM via the management plane
-        let output = self.mgmt_ssh.run_command("new --json").await.map_err(|e| {
+        let mut cmd = "new --json".to_string();
+        if let Some(ref image) = self.config.image {
+            cmd.push_str(&format!(" --image {image}"));
+        }
+        let output = self.mgmt_ssh.run_command(&cmd).await.map_err(|e| {
             let err = format!("Failed to create exe.dev VM: {e}");
             let duration_ms = u64::try_from(init_start.elapsed().as_millis()).unwrap_or(u64::MAX);
             self.emit(SandboxEvent::InitializeFailed {
@@ -696,7 +711,11 @@ impl Sandbox for ExeSandbox {
     }
 
     fn sandbox_info(&self) -> String {
-        self.vm_name.get().cloned().unwrap_or_default()
+        match (self.vm_name.get(), &self.run_id) {
+            (Some(name), Some(id)) => format!("{name} (run {id})"),
+            (Some(name), None) => name.clone(),
+            _ => String::new(),
+        }
     }
 }
 
@@ -851,7 +870,7 @@ mod tests {
     /// Helper: create an ExeSandbox with mock data SSH already initialized (skipping lifecycle).
     fn sandbox_with_mock_data(data_ssh: impl SshRunner + 'static) -> ExeSandbox {
         let mgmt = MockSshRunner::new();
-        let sandbox = ExeSandbox::new(Box::new(mgmt), None);
+        let sandbox = ExeSandbox::new(Box::new(mgmt), ExeConfig::default(), None, None);
         let _ = sandbox.vm_name.set("test-vm".to_string());
         let _ = sandbox.data_host.set("test-vm.exe.xyz".to_string());
         let _ = sandbox.data_ssh.set(Box::new(data_ssh));
@@ -895,7 +914,7 @@ mod tests {
     #[test]
     fn ssh_command_errors_before_init() {
         let mgmt = MockSshRunner::new();
-        let sandbox = ExeSandbox::new(Box::new(mgmt), None);
+        let sandbox = ExeSandbox::new(Box::new(mgmt), ExeConfig::default(), None, None);
         assert!(sandbox.ssh_command().is_err());
     }
 
@@ -1271,7 +1290,7 @@ mod tests {
 
         let data_for_init = MockSshRunner::new();
 
-        let mut sandbox = ExeSandbox::new(Box::new(mgmt), None);
+        let mut sandbox = ExeSandbox::new(Box::new(mgmt), ExeConfig::default(), None, None);
         // Override factory to return our mock data SSH
         let data_box: Arc<Mutex<Option<Box<dyn SshRunner>>>> =
             Arc::new(Mutex::new(Some(Box::new(data_for_init))));
@@ -1303,7 +1322,7 @@ mod tests {
         let events: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
         let events_cb = Arc::clone(&events);
 
-        let mut sandbox = ExeSandbox::new(Box::new(mgmt), None);
+        let mut sandbox = ExeSandbox::new(Box::new(mgmt), ExeConfig::default(), None, None);
         sandbox.set_event_callback(Arc::new(move |event| {
             events_cb.lock().unwrap().push(format!("{event:?}"));
         }));
@@ -1342,7 +1361,7 @@ mod tests {
         // Response for `rm <vm_name>`
         mgmt.queue_response("", "", 0);
 
-        let sandbox = ExeSandbox::new(Box::new(mgmt), None);
+        let sandbox = ExeSandbox::new(Box::new(mgmt), ExeConfig::default(), None, None);
         let _ = sandbox.vm_name.set("doomed-vm".to_string());
 
         sandbox.cleanup().await.unwrap();
@@ -1354,7 +1373,7 @@ mod tests {
     #[tokio::test]
     async fn cleanup_before_initialize_is_noop() {
         let mgmt = MockSshRunner::new();
-        let sandbox = ExeSandbox::new(Box::new(mgmt), None);
+        let sandbox = ExeSandbox::new(Box::new(mgmt), ExeConfig::default(), None, None);
         // Should not error — no VM to destroy
         sandbox.cleanup().await.unwrap();
     }
@@ -1385,7 +1404,12 @@ mod tests {
             display_url: "https://github.com/org/repo.git".to_string(),
             branch: Some("main".to_string()),
         };
-        let mut sandbox = ExeSandbox::new(Box::new(mgmt), Some(clone_params));
+        let mut sandbox = ExeSandbox::new(
+            Box::new(mgmt),
+            ExeConfig::default(),
+            Some(clone_params),
+            None,
+        );
         sandbox.data_ssh_factory = Box::new(move |_host: &str| {
             let data_box = Arc::clone(&data_box);
             Box::pin(async move {
@@ -1430,7 +1454,7 @@ mod tests {
         let data_box: Arc<Mutex<Option<Box<dyn SshRunner>>>> =
             Arc::new(Mutex::new(Some(Box::new(data))));
 
-        let mut sandbox = ExeSandbox::new(Box::new(mgmt), None);
+        let mut sandbox = ExeSandbox::new(Box::new(mgmt), ExeConfig::default(), None, None);
         sandbox.data_ssh_factory = Box::new(move |_host: &str| {
             let data_box = Arc::clone(&data_box);
             Box::pin(async move {
@@ -1476,7 +1500,12 @@ mod tests {
             display_url: "https://github.com/org/repo.git".to_string(),
             branch: None,
         };
-        let mut sandbox = ExeSandbox::new(Box::new(mgmt), Some(clone_params));
+        let mut sandbox = ExeSandbox::new(
+            Box::new(mgmt),
+            ExeConfig::default(),
+            Some(clone_params),
+            None,
+        );
         sandbox.set_event_callback(Arc::new(move |event| {
             events_cb.lock().unwrap().push(format!("{event:?}"));
         }));

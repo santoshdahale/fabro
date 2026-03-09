@@ -175,6 +175,17 @@ fn resolve_daytona_config(
         })
 }
 
+/// Resolve exe.dev config: TOML config > run defaults.
+fn resolve_exe_config(
+    run_cfg: Option<&WorkflowRunConfig>,
+    run_defaults: &RunDefaults,
+) -> Option<arc_exe::ExeConfig> {
+    run_cfg
+        .and_then(|c| c.sandbox.as_ref())
+        .and_then(|e| e.exe.clone())
+        .or_else(|| run_defaults.sandbox.as_ref().and_then(|s| s.exe.clone()))
+}
+
 /// Resolve the fallback chain from config.
 ///
 /// `apply_defaults` must be called on `run_cfg` before this — it merges
@@ -480,6 +491,7 @@ pub async fn run_command(
 
     let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
     let daytona_config = resolve_daytona_config(run_cfg.as_ref(), &run_defaults);
+    let exe_config = resolve_exe_config(run_cfg.as_ref(), &run_defaults);
 
     // Wrap emitter in Arc now so we can share it with exec env callbacks
     let emitter = Arc::new(emitter);
@@ -564,7 +576,13 @@ pub async fn run_command(
             let mgmt_ssh = arc_exe::OpensshRunner::connect_raw("exe.dev")
                 .await
                 .map_err(|e| anyhow::anyhow!("Failed to connect to exe.dev: {e}"))?;
-            let mut env = arc_exe::ExeSandbox::new(Box::new(mgmt_ssh), clone_params);
+            let config = exe_config.unwrap_or_default();
+            let mut env = arc_exe::ExeSandbox::new(
+                Box::new(mgmt_ssh),
+                config,
+                clone_params,
+                Some(run_id.clone()),
+            );
             let emitter_cb = Arc::clone(&emitter);
             env.set_event_callback(Arc::new(move |event| {
                 emitter_cb.emit(&crate::event::WorkflowRunEvent::Sandbox { event });
@@ -1438,6 +1456,7 @@ async fn run_preflight(
     // 2. Sandbox boot check
     let original_cwd = std::env::current_dir()?;
     let daytona_config = resolve_daytona_config(run_cfg.as_ref(), run_defaults);
+    let exe_config = resolve_exe_config(run_cfg.as_ref(), run_defaults);
 
     let sandbox_result: Result<Arc<dyn Sandbox>, String> = match sandbox_provider {
         SandboxProvider::Docker => {
@@ -1464,7 +1483,8 @@ async fn run_preflight(
         },
         SandboxProvider::Exe => match arc_exe::OpensshRunner::connect_raw("exe.dev").await {
             Ok(mgmt_ssh) => {
-                let env = arc_exe::ExeSandbox::new(Box::new(mgmt_ssh), None);
+                let config = exe_config.unwrap_or_default();
+                let env = arc_exe::ExeSandbox::new(Box::new(mgmt_ssh), config, None, None);
                 Ok(Arc::new(env) as Arc<dyn Sandbox>)
             }
             Err(e) => Err(format!("exe.dev SSH connection failed: {e}")),
