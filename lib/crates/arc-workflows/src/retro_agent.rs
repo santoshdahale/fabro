@@ -1,14 +1,15 @@
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use arc_agent::{
     AnthropicProfile, GeminiProfile, OpenAiProfile, ProviderProfile, Sandbox, Session,
-    SessionConfig,
+    SessionConfig, SessionEvent, Turn,
 };
 use arc_llm::client::Client;
 use arc_llm::provider::Provider;
 use arc_llm::types::ToolDefinition;
+use tokio::task::JoinHandle;
 
 use crate::retro::RetroNarrative;
 
@@ -165,6 +166,12 @@ pub async fn run_retro_agent(
 
     session.initialize().await;
 
+    // Set up event writer before processing
+    let retro_dir = logs_root.join("retro");
+    std::fs::create_dir_all(&retro_dir)?;
+    let rx = session.subscribe();
+    let event_writer_handle = spawn_retro_event_writer(rx, retro_dir.join("retro_session.jsonl"));
+
     let prompt = format!(
         "Analyze the workflow run data at `{retro_data_dir}/` and generate a retrospective. \
          The key file is `{retro_data_dir}/progress.jsonl` which contains the full event stream. \
@@ -173,19 +180,62 @@ pub async fn run_retro_agent(
          rather than reading the entire file. When done, call the `submit_retro` tool with your analysis."
     );
 
-    session
+    // Write prompt.md
+    let _ = std::fs::write(retro_dir.join("prompt.md"), &prompt);
+
+    let process_result = session
         .process_input(&prompt)
         .await
-        .map_err(|e| anyhow::anyhow!("Retro agent session failed: {e}"))?;
+        .map_err(|e| anyhow::anyhow!("Retro agent session failed: {e}"));
 
-    // Extract the captured narrative
-    let narrative = captured
-        .lock()
-        .unwrap_or_else(|e| e.into_inner())
-        .take()
-        .ok_or_else(|| anyhow::anyhow!("Retro agent did not call submit_retro"))?;
+    // Extract response from session history
+    let response_text = session
+        .history()
+        .turns()
+        .iter()
+        .rev()
+        .find_map(|t| match t {
+            Turn::Assistant { content, .. } => Some(content.as_str()),
+            _ => None,
+        })
+        .unwrap_or_default();
 
-    Ok(narrative)
+    // Extract result / determine outcome
+    let (outcome, failure_reason, narrative_result) = match process_result {
+        Ok(()) => {
+            let maybe_narrative = captured
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .take();
+            match maybe_narrative {
+                Some(narrative) => ("success", None, Ok(narrative)),
+                None => (
+                    "error",
+                    Some("Retro agent did not call submit_retro".to_string()),
+                    Err(anyhow::anyhow!("Retro agent did not call submit_retro")),
+                ),
+            }
+        }
+        Err(e) => {
+            let reason = e.to_string();
+            ("error", Some(reason), Err(e))
+        }
+    };
+
+    // Write artifacts (on both success and failure)
+    write_retro_artifacts(
+        &retro_dir,
+        response_text,
+        provider.as_str(),
+        model,
+        outcome,
+        failure_reason.as_deref(),
+    );
+
+    // Wait for event writer to finish
+    let _ = event_writer_handle.await;
+
+    narrative_result
 }
 
 /// Return a placeholder narrative for dry-run mode. Exercises the full
@@ -199,6 +249,60 @@ pub fn dry_run_narrative() -> RetroNarrative {
         friction_points: vec![],
         open_items: vec![],
     }
+}
+
+/// Write retro artifact files (response.md, provider_used.json, status.json) into `retro_dir`.
+/// Called on both success and failure paths so artifacts are always available for debugging.
+fn write_retro_artifacts(
+    retro_dir: &Path,
+    response: &str,
+    provider: &str,
+    model: &str,
+    outcome: &str,
+    failure_reason: Option<&str>,
+) {
+    let _ = std::fs::write(retro_dir.join("response.md"), response);
+
+    let provider_used = serde_json::json!({
+        "mode": "agent",
+        "provider": provider,
+        "model": model,
+    });
+    if let Ok(json) = serde_json::to_string_pretty(&provider_used) {
+        let _ = std::fs::write(retro_dir.join("provider_used.json"), json);
+    }
+
+    let status = serde_json::json!({
+        "outcome": outcome,
+        "failure_reason": failure_reason,
+        "timestamp": chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
+    });
+    if let Ok(json) = serde_json::to_string_pretty(&status) {
+        let _ = std::fs::write(retro_dir.join("status.json"), json);
+    }
+}
+
+/// Spawn a background task that reads `SessionEvent`s from the broadcast receiver
+/// and appends them as JSONL to the given path.
+fn spawn_retro_event_writer(
+    mut rx: tokio::sync::broadcast::Receiver<SessionEvent>,
+    path: PathBuf,
+) -> JoinHandle<()> {
+    tokio::spawn(async move {
+        use std::io::Write;
+        while let Ok(event) = rx.recv().await {
+            if let Ok(line) = serde_json::to_string(&event) {
+                let line = arc_util::redact::redact_jsonl_line(&line);
+                if let Ok(mut f) = std::fs::OpenOptions::new()
+                    .create(true)
+                    .append(true)
+                    .open(&path)
+                {
+                    let _ = writeln!(f, "{line}");
+                }
+            }
+        }
+    })
 }
 
 fn build_profile(provider: Provider, model: &str) -> Box<dyn ProviderProfile> {
@@ -241,6 +345,8 @@ async fn upload_data_files(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use arc_agent::AgentEvent;
+    use std::time::SystemTime;
 
     #[test]
     fn submit_retro_schema_is_valid_json() {
@@ -292,5 +398,130 @@ mod tests {
         assert!(narrative.learnings.is_empty());
         assert!(narrative.friction_points.is_empty());
         assert!(narrative.open_items.is_empty());
+    }
+
+    #[test]
+    fn write_retro_artifacts_does_not_clobber_prompt_md() {
+        let dir = tempfile::tempdir().unwrap();
+        let retro_dir = dir.path().join("retro");
+        std::fs::create_dir_all(&retro_dir).unwrap();
+        // prompt.md is written separately by run_retro_agent, not by write_retro_artifacts
+        std::fs::write(retro_dir.join("prompt.md"), "Analyze the run data").unwrap();
+        write_retro_artifacts(
+            &retro_dir,
+            "response text",
+            "anthropic",
+            "claude-sonnet-4-20250514",
+            "success",
+            None,
+        );
+        let content = std::fs::read_to_string(retro_dir.join("prompt.md")).unwrap();
+        assert_eq!(content, "Analyze the run data");
+    }
+
+    #[test]
+    fn writes_response_md() {
+        let dir = tempfile::tempdir().unwrap();
+        let retro_dir = dir.path().join("retro");
+        std::fs::create_dir_all(&retro_dir).unwrap();
+        write_retro_artifacts(
+            &retro_dir,
+            "The run completed successfully with minor issues.",
+            "anthropic",
+            "claude-sonnet-4-20250514",
+            "success",
+            None,
+        );
+        let content = std::fs::read_to_string(retro_dir.join("response.md")).unwrap();
+        assert_eq!(content, "The run completed successfully with minor issues.");
+    }
+
+    #[test]
+    fn writes_provider_used_json() {
+        let dir = tempfile::tempdir().unwrap();
+        let retro_dir = dir.path().join("retro");
+        std::fs::create_dir_all(&retro_dir).unwrap();
+        write_retro_artifacts(
+            &retro_dir,
+            "resp",
+            "openai",
+            "gpt-4o",
+            "success",
+            None,
+        );
+        let content = std::fs::read_to_string(retro_dir.join("provider_used.json")).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&content).unwrap();
+        assert_eq!(parsed["mode"], "agent");
+        assert_eq!(parsed["provider"], "openai");
+        assert_eq!(parsed["model"], "gpt-4o");
+    }
+
+    #[test]
+    fn writes_status_json_success() {
+        let dir = tempfile::tempdir().unwrap();
+        let retro_dir = dir.path().join("retro");
+        std::fs::create_dir_all(&retro_dir).unwrap();
+        write_retro_artifacts(
+            &retro_dir,
+            "resp",
+            "anthropic",
+            "claude-sonnet-4-20250514",
+            "success",
+            None,
+        );
+        let content = std::fs::read_to_string(retro_dir.join("status.json")).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&content).unwrap();
+        assert_eq!(parsed["outcome"], "success");
+        assert!(parsed["failure_reason"].is_null());
+        assert!(parsed["timestamp"].as_str().unwrap().contains("T"));
+    }
+
+    #[test]
+    fn writes_status_json_failure() {
+        let dir = tempfile::tempdir().unwrap();
+        let retro_dir = dir.path().join("retro");
+        std::fs::create_dir_all(&retro_dir).unwrap();
+        write_retro_artifacts(
+            &retro_dir,
+            "resp",
+            "anthropic",
+            "claude-sonnet-4-20250514",
+            "error",
+            Some("Retro agent did not call submit_retro"),
+        );
+        let content = std::fs::read_to_string(retro_dir.join("status.json")).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&content).unwrap();
+        assert_eq!(parsed["outcome"], "error");
+        assert_eq!(
+            parsed["failure_reason"],
+            "Retro agent did not call submit_retro"
+        );
+    }
+
+    #[tokio::test]
+    async fn event_writer_writes_session_events_to_jsonl() {
+        let dir = tempfile::tempdir().unwrap();
+        let jsonl_path = dir.path().join("retro_session.jsonl");
+
+        let (tx, rx) = tokio::sync::broadcast::channel::<SessionEvent>(16);
+        let handle = spawn_retro_event_writer(rx, jsonl_path.clone());
+
+        tx.send(SessionEvent {
+            event: AgentEvent::SessionStarted,
+            timestamp: SystemTime::now(),
+            session_id: "retro-test".into(),
+        })
+        .unwrap();
+
+        // Drop sender so the receiver loop ends
+        drop(tx);
+        handle.await.unwrap();
+
+        let content = std::fs::read_to_string(&jsonl_path).unwrap();
+        let lines: Vec<&str> = content.lines().collect();
+        assert_eq!(lines.len(), 1);
+        let parsed: serde_json::Value = serde_json::from_str(lines[0]).unwrap();
+        assert_eq!(parsed["session_id"], "retro-test");
+        assert!(lines[0].contains("SessionStarted"));
     }
 }
