@@ -718,16 +718,13 @@ async fn git_push_meta_host(
     let run_id_part = local_ref.strip_prefix("refs/arc/").unwrap_or(&local_ref);
     let refname = format!("{local_ref}:refs/heads/arc/meta/{run_id_part}");
     let rp = repo_path.clone();
-    let result = tokio::time::timeout(
-        std::time::Duration::from_secs(60),
-        tokio::task::spawn_blocking(move || crate::git::push_ref(&rp, &push_url, &refname)),
-    )
+    let result = crate::git::blocking_push_with_timeout(60, move || {
+        crate::git::push_ref(&rp, &push_url, &refname)
+    })
     .await;
     match result {
-        Ok(Ok(Ok(()))) => tracing::info!(meta_branch, "Pushed metadata branch to origin"),
-        Ok(Ok(Err(e))) => tracing::warn!(error = %e, "Failed to push metadata branch"),
-        Ok(Err(e)) => tracing::warn!(error = %e, "Metadata branch push task panicked"),
-        Err(_) => tracing::warn!("Metadata branch push timed out after 60s"),
+        Ok(()) => tracing::info!(meta_branch, "Pushed metadata branch to origin"),
+        Err(e) => tracing::warn!(error = %e, "Failed to push metadata branch"),
     }
 }
 

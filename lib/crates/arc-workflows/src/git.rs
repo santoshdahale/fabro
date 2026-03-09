@@ -275,6 +275,18 @@ pub fn reset_hard(work_dir: &Path, sha: &str) -> Result<()> {
     Ok(())
 }
 
+/// Run a `git push` command and check for success.
+fn run_git_push(cmd: &mut Command) -> Result<()> {
+    let output = cmd
+        .output()
+        .map_err(|e| git_error(format!("git push failed: {e}")))?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(git_error(format!("git push failed: {stderr}")));
+    }
+    Ok(())
+}
+
 /// Push a local ref to an explicit remote URL.
 ///
 /// Uses a URL (not a named remote) so the host repo's remote config is untouched.
@@ -291,15 +303,7 @@ pub fn push_ref(repo: &Path, url: &str, refname: &str) -> Result<()> {
         refname,
         "Pushing ref to remote"
     );
-    let output = git_cmd(repo)
-        .args(["-c", "credential.helper=", "push", url, refname])
-        .output()
-        .map_err(|e| git_error(format!("git push failed: {e}")))?;
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(git_error(format!("git push failed: {stderr}")));
-    }
-    Ok(())
+    run_git_push(git_cmd(repo).args(["-c", "credential.helper=", "push", url, refname]))
 }
 
 /// Push a local branch to the named remote using the user's configured credentials.
@@ -310,15 +314,48 @@ pub fn push_branch(repo: &Path, remote: &str, branch: &str) -> Result<()> {
         branch,
         "Pushing branch to remote"
     );
-    let output = git_cmd(repo)
-        .args(["push", remote, branch])
-        .output()
-        .map_err(|e| git_error(format!("git push failed: {e}")))?;
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(git_error(format!("git push failed: {stderr}")));
+    run_git_push(git_cmd(repo).args(["push", remote, branch]))
+}
+
+/// Error from [`blocking_push_with_timeout`].
+pub enum BlockingPushError {
+    /// The git push itself failed.
+    Push(crate::error::ArcError),
+    /// The spawned blocking task panicked.
+    Panicked(tokio::task::JoinError),
+    /// The push did not complete within the timeout.
+    TimedOut,
+}
+
+impl std::fmt::Display for BlockingPushError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Push(e) => write!(f, "{e}"),
+            Self::Panicked(e) => write!(f, "task panicked: {e}"),
+            Self::TimedOut => write!(f, "timed out"),
+        }
     }
-    Ok(())
+}
+
+/// Run a blocking git-push function with a timeout, flattening the triple-nested Result.
+pub async fn blocking_push_with_timeout<F>(
+    timeout_secs: u64,
+    f: F,
+) -> std::result::Result<(), BlockingPushError>
+where
+    F: FnOnce() -> Result<()> + Send + 'static,
+{
+    match tokio::time::timeout(
+        std::time::Duration::from_secs(timeout_secs),
+        tokio::task::spawn_blocking(f),
+    )
+    .await
+    {
+        Ok(Ok(Ok(()))) => Ok(()),
+        Ok(Ok(Err(e))) => Err(BlockingPushError::Push(e)),
+        Ok(Err(e)) => Err(BlockingPushError::Panicked(e)),
+        Err(_) => Err(BlockingPushError::TimedOut),
+    }
 }
 
 /// Sanitize a string for use as a git ref component.

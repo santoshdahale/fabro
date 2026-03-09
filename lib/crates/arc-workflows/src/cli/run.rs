@@ -533,39 +533,22 @@ pub async fn run_command(
         if let Some(ref branch) = detected_base_branch {
             let repo_path = original_cwd.clone();
             let branch_owned = branch.clone();
-            let result = tokio::time::timeout(
-                std::time::Duration::from_secs(60),
-                tokio::task::spawn_blocking(move || {
-                    crate::git::push_branch(&repo_path, "origin", &branch_owned)
-                }),
-            )
+            let result = crate::git::blocking_push_with_timeout(60, move || {
+                crate::git::push_branch(&repo_path, "origin", &branch_owned)
+            })
             .await;
             match result {
-                Ok(Ok(Ok(()))) => {
+                Ok(()) => {
                     tracing::info!(%branch, "Pushed current branch to origin");
                     eprintln!(
                         "{} {branch} (synced local commits to remote)",
                         styles.bold.apply_to("Pushed branch:")
                     );
                 }
-                Ok(Ok(Err(e))) => {
+                Err(e) => {
                     tracing::warn!(error = %e, %branch, "Failed to push current branch");
                     eprintln!(
                         "{} Failed to push {branch} to origin: {e}",
-                        styles.yellow.apply_to("Warning:")
-                    );
-                }
-                Ok(Err(e)) => {
-                    tracing::warn!(error = %e, "Branch push task panicked");
-                    eprintln!(
-                        "{} Branch push task panicked",
-                        styles.yellow.apply_to("Warning:")
-                    );
-                }
-                Err(_) => {
-                    tracing::warn!(%branch, "Branch push timed out after 60s");
-                    eprintln!(
-                        "{} Push of {branch} timed out",
                         styles.yellow.apply_to("Warning:")
                     );
                 }
@@ -1064,39 +1047,23 @@ pub async fn run_command(
                             Ok(push_url) => {
                                 let refspec = format!("refs/heads/{run_branch}");
                                 let repo_path = original_cwd.clone();
-                                let result = tokio::time::timeout(
-                                    std::time::Duration::from_secs(60),
-                                    tokio::task::spawn_blocking(move || {
+                                let result =
+                                    crate::git::blocking_push_with_timeout(60, move || {
                                         crate::git::push_ref(&repo_path, &push_url, &refspec)
-                                    }),
-                                )
-                                .await;
+                                    })
+                                    .await;
                                 match result {
-                                    Ok(Ok(Ok(()))) => {
+                                    Ok(()) => {
                                         tracing::info!(run_branch, "Pushed run branch to origin");
                                         eprintln!(
                                             "{} {run_branch}",
                                             styles.bold.apply_to("Pushed branch:")
                                         );
                                     }
-                                    Ok(Ok(Err(e))) => {
+                                    Err(e) => {
                                         tracing::warn!(error = %e, "Failed to push run branch");
                                         eprintln!(
                                             "{} Failed to push run branch: {e}",
-                                            styles.yellow.apply_to("Warning:")
-                                        );
-                                    }
-                                    Ok(Err(e)) => {
-                                        tracing::warn!(error = %e, "Run branch push task panicked");
-                                        eprintln!(
-                                            "{} Run branch push task panicked",
-                                            styles.yellow.apply_to("Warning:")
-                                        );
-                                    }
-                                    Err(_) => {
-                                        tracing::warn!("Run branch push timed out after 60s");
-                                        eprintln!(
-                                            "{} Run branch push timed out",
                                             styles.yellow.apply_to("Warning:")
                                         );
                                     }
