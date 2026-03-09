@@ -441,27 +441,24 @@ pub async fn run_prompt_via_server(args: PromptArgs, server: &ServerConnection) 
         let mut output_usage: Option<crate::types::Usage> = None;
 
         parse_sse_frames(response, |event_type, data| {
-            match event_type {
-                "stream_event" => {
-                    if let Ok(event) = serde_json::from_str::<crate::types::StreamEvent>(data) {
-                        match event {
-                            crate::types::StreamEvent::TextDelta { delta, .. } => {
-                                print!("{delta}");
-                                let _ = io::stdout().flush();
-                            }
-                            crate::types::StreamEvent::Finish { usage, .. } => {
-                                if show_usage {
-                                    output_usage = Some(usage);
-                                }
-                            }
-                            crate::types::StreamEvent::Error { error, .. } => {
-                                bail!("Server error: {error}");
-                            }
-                            _ => {}
+            if event_type == "stream_event" {
+                if let Ok(event) = serde_json::from_str::<crate::types::StreamEvent>(data) {
+                    match event {
+                        crate::types::StreamEvent::TextDelta { delta, .. } => {
+                            print!("{delta}");
+                            let _ = io::stdout().flush();
                         }
+                        crate::types::StreamEvent::Finish { usage, .. } => {
+                            if show_usage {
+                                output_usage = Some(usage);
+                            }
+                        }
+                        crate::types::StreamEvent::Error { error, .. } => {
+                            bail!("Server error: {error}");
+                        }
+                        _ => {}
                     }
                 }
-                _ => {}
             }
             Ok(true)
         })
