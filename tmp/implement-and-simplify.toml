@@ -1,0 +1,11 @@
+version = 1
+graph = "implement-and-simplify.dot"
+
+[sandbox]
+provider = "daytona"
+
+[sandbox.env]
+CARGO_INCREMENTAL = "0"
+
+[sandbox.daytona.snapshot]
+name = "daytona-large"
