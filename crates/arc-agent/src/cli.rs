@@ -266,7 +266,7 @@ fn print_summary(session: &Session, styles: &Styles) {
     eprintln!(
         "{}",
         styles.dim.apply_to(format!(
-            "Done ({turn_count} turns, {tool_call_count} tool calls, {token_str} tokens)"
+            "Done ({turn_count} turns, {tool_call_count} tools, {token_str} toks)"
         )),
     );
 }

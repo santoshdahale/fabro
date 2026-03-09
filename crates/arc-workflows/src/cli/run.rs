@@ -912,7 +912,7 @@ pub async fn run_command(
                 eprintln!(
                     "{}",
                     styles.dim.apply_to(format!(
-                        "Cost: {} ({} tokens)",
+                        "Cost: {} ({} toks)",
                         format_cost(acc.total_cost),
                         format_tokens_human(total_tokens)
                     ))
@@ -922,7 +922,7 @@ pub async fn run_command(
                     "{}",
                     styles
                         .dim
-                        .apply_to(format!("Tokens: {}", format_tokens_human(total_tokens)))
+                        .apply_to(format!("Toks: {}", format_tokens_human(total_tokens)))
                 );
             }
             if acc.total_cache_read_tokens > 0 {
