@@ -4044,6 +4044,18 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/HookDefinition"
+        assets:
+          $ref: "#/components/schemas/AssetsConfiguration"
+
+    AssetsConfiguration:
+      description: Asset collection configuration.
+      type: object
+      properties:
+        include:
+          type: array
+          items:
+            type: string
+          description: Glob patterns for files to collect as run assets.
 
     LogConfiguration:
       description: Logging configuration.
