@@ -106,8 +106,7 @@ fn last_line_truncated(s: &str, max: usize) -> String {
     let line = s
         .trim()
         .lines()
-        .filter(|l| !l.trim().is_empty())
-        .next_back()
+        .rfind(|l| !l.trim().is_empty())
         .unwrap_or("")
         .trim();
     if line.len() > max {
