@@ -362,10 +362,12 @@ pub async fn run_command(
     let is_tty = std::io::stderr().is_terminal();
     let progress_ui = Arc::new(Mutex::new(progress::ProgressUI::new(is_tty, args.verbose)));
 
-    progress_ui
-        .lock()
-        .expect("progress lock poisoned")
-        .show_logs_dir(&logs_dir);
+    let run_id = ulid::Ulid::new().to_string();
+    {
+        let mut ui = progress_ui.lock().expect("progress lock poisoned");
+        ui.show_run_id(&run_id);
+        ui.show_logs_dir(&logs_dir);
+    }
 
     // 3. Build event emitter
     let mut emitter = EventEmitter::new();
@@ -461,23 +463,20 @@ pub async fn run_command(
     };
 
     // Set up git worktree for local execution (must happen before cwd is captured)
-    let (worktree_run_id, worktree_work_dir, worktree_path, worktree_branch, worktree_base_sha) =
-        if git_clean {
-            match setup_worktree(&original_cwd, &logs_dir) {
-                Ok((rid, wd, wt, branch, base)) => {
-                    (Some(rid), Some(wd), Some(wt), Some(branch), Some(base))
-                }
-                Err(e) => {
-                    eprintln!(
-                        "{} Git worktree setup failed ({e}), running without worktree.",
-                        styles.yellow.apply_to("Warning:"),
-                    );
-                    (None, None, None, None, None)
-                }
+    let (worktree_work_dir, worktree_path, worktree_branch, worktree_base_sha) = if git_clean {
+        match setup_worktree(&original_cwd, &logs_dir, &run_id) {
+            Ok((wd, wt, branch, base)) => (Some(wd), Some(wt), Some(branch), Some(base)),
+            Err(e) => {
+                eprintln!(
+                    "{} Git worktree setup failed ({e}), running without worktree.",
+                    styles.yellow.apply_to("Warning:"),
+                );
+                (None, None, None, None)
             }
-        } else {
-            (None, None, None, None, None)
-        };
+        }
+    } else {
+        (None, None, None, None)
+    };
 
     let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
     let daytona_config = resolve_daytona_config(run_cfg.as_ref(), &run_defaults);
@@ -563,20 +562,20 @@ pub async fn run_command(
     });
 
     // Set up git inside Daytona sandbox (if applicable)
-    let (daytona_run_id, daytona_base_sha, daytona_branch, daytona_base_branch) =
+    let (daytona_base_sha, daytona_branch, daytona_base_branch) =
         if sandbox_provider == SandboxProvider::Daytona {
-            match setup_daytona_git(&*sandbox).await {
-                Ok((rid, base, branch, base_br)) => (Some(rid), Some(base), Some(branch), base_br),
+            match setup_daytona_git(&*sandbox, &run_id).await {
+                Ok((base, branch, base_br)) => (Some(base), Some(branch), base_br),
                 Err(e) => {
                     eprintln!(
                         "{} Daytona git setup failed ({e}), running without git checkpoints.",
                         styles.yellow.apply_to("Warning:"),
                     );
-                    (None, None, None, None)
+                    (None, None, None)
                 }
             }
         } else {
-            (None, None, None, None)
+            (None, None, None)
         };
 
     // Create SSH access if requested
@@ -730,13 +729,6 @@ pub async fn run_command(
     }
 
     // 7. Execute
-    let run_id = worktree_run_id
-        .or(daytona_run_id)
-        .unwrap_or_else(|| ulid::Ulid::new().to_string());
-    progress_ui
-        .lock()
-        .expect("progress lock poisoned")
-        .show_run_id(&run_id);
     // Set up metadata branch for git checkpointing (host or remote)
     let meta_branch = if worktree_work_dir.is_some() || daytona_base_sha.is_some() {
         Some(crate::git::MetadataStore::branch_name(&run_id))
@@ -987,13 +979,13 @@ pub async fn run_command(
 
 /// Set up a git worktree for an isolated workflow run.
 /// Caller must have already verified the repo is clean via `git::ensure_clean`.
-/// Returns (run_id, work_dir, worktree_path, branch_name, base_sha) on success.
+/// Returns (work_dir, worktree_path, branch_name, base_sha) on success.
 fn setup_worktree(
     original_cwd: &std::path::Path,
     logs_dir: &std::path::Path,
-) -> anyhow::Result<(String, PathBuf, PathBuf, String, String)> {
+    run_id: &str,
+) -> anyhow::Result<(PathBuf, PathBuf, String, String)> {
     let base_sha = crate::git::head_sha(original_cwd).map_err(|e| anyhow::anyhow!("{e}"))?;
-    let run_id = ulid::Ulid::new().to_string();
     let branch_name = format!("arc/run/{run_id}");
     crate::git::create_branch(original_cwd, &branch_name).map_err(|e| anyhow::anyhow!("{e}"))?;
 
@@ -1003,20 +995,15 @@ fn setup_worktree(
 
     std::env::set_current_dir(&worktree_path)?;
 
-    Ok((
-        run_id,
-        worktree_path.clone(),
-        worktree_path,
-        branch_name,
-        base_sha,
-    ))
+    Ok((worktree_path.clone(), worktree_path, branch_name, base_sha))
 }
 
 /// Set up git inside a Daytona sandbox for checkpoint commits.
-/// Returns (run_id, base_sha, branch_name, base_branch) on success.
+/// Returns (base_sha, branch_name, base_branch) on success.
 async fn setup_daytona_git(
     sandbox: &dyn arc_agent::Sandbox,
-) -> anyhow::Result<(String, String, String, Option<String>)> {
+    run_id: &str,
+) -> anyhow::Result<(String, String, Option<String>)> {
     // Get current branch name before creating the run branch
     let branch_result = sandbox
         .exec_command("git rev-parse --abbrev-ref HEAD", 10_000, None, None, None)
@@ -1047,7 +1034,6 @@ async fn setup_daytona_git(
     }
     let base_sha = sha_result.stdout.trim().to_string();
 
-    let run_id = ulid::Ulid::new().to_string();
     let branch_name = format!("arc/run/{run_id}");
 
     // Create and checkout a run branch
@@ -1064,7 +1050,7 @@ async fn setup_daytona_git(
         );
     }
 
-    Ok((run_id, base_sha, branch_name, base_branch))
+    Ok((base_sha, branch_name, base_branch))
 }
 
 /// Resume a workflow run from a git run branch.
