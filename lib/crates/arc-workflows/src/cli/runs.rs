@@ -183,11 +183,14 @@ fn parse_label_filters(label_args: &[String]) -> Vec<(String, String)> {
         .collect()
 }
 
-pub(crate) fn default_logs_base() -> PathBuf {
+fn default_data_dir() -> PathBuf {
     dirs::home_dir()
         .expect("could not determine home directory")
         .join(".arc")
-        .join("logs")
+}
+
+pub(crate) fn default_logs_base() -> PathBuf {
+    default_data_dir().join("logs")
 }
 
 /// Find a run directory by prefix match against run IDs.
@@ -271,6 +274,209 @@ pub fn list_command(args: &RunsListArgs) -> Result<()> {
         );
     }
     eprintln!("\n{} run(s) listed.", filtered.len());
+    Ok(())
+}
+
+#[derive(Args)]
+pub struct DfArgs {
+    /// Show per-run breakdown
+    #[arg(short, long)]
+    pub verbose: bool,
+}
+
+fn dir_size(path: &Path) -> u64 {
+    walkdir::WalkDir::new(path)
+        .into_iter()
+        .filter_map(|e| e.ok())
+        .filter_map(|e| e.metadata().ok())
+        .filter(|m| m.is_file())
+        .map(|m| m.len())
+        .sum()
+}
+
+fn format_size(bytes: u64) -> String {
+    const KB: u64 = 1024;
+    const MB: u64 = 1024 * KB;
+    const GB: u64 = 1024 * MB;
+
+    if bytes >= GB {
+        format!("{:.1} GB", bytes as f64 / GB as f64)
+    } else if bytes >= MB {
+        format!("{:.1} MB", bytes as f64 / MB as f64)
+    } else if bytes >= KB {
+        format!("{:.1} KB", bytes as f64 / KB as f64)
+    } else {
+        format!("{bytes} B")
+    }
+}
+
+pub fn df_command(args: &DfArgs) -> Result<()> {
+    let data_dir = default_data_dir();
+    let logs_base = data_dir.join("logs");
+    df_from(args, &data_dir, &logs_base)
+}
+
+pub fn df_from(args: &DfArgs, data_dir: &Path, logs_base: &Path) -> Result<()> {
+    // --- Runs ---
+    let runs = scan_runs(logs_base)?;
+    let mut active_count = 0u64;
+    let mut total_run_size = 0u64;
+    let mut reclaimable_run_size = 0u64;
+
+    struct RunSizeInfo {
+        run_id: String,
+        workflow_name: String,
+        status: String,
+        start_time: String,
+        size: u64,
+    }
+
+    let mut run_details: Vec<RunSizeInfo> = Vec::new();
+
+    for run in &runs {
+        let size = dir_size(&run.path);
+        total_run_size += size;
+        let is_active = run.status == "running";
+        if is_active {
+            active_count += 1;
+        } else {
+            reclaimable_run_size += size;
+        }
+        if args.verbose {
+            run_details.push(RunSizeInfo {
+                run_id: run.run_id.clone(),
+                workflow_name: run.workflow_name.clone(),
+                status: run.status.clone(),
+                start_time: run.start_time.clone(),
+                size,
+            });
+        }
+    }
+
+    // --- Logs ---
+    let mut log_count = 0u64;
+    let mut total_log_size = 0u64;
+    if let Ok(entries) = std::fs::read_dir(logs_base) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_file() {
+                if let Some(ext) = path.extension() {
+                    if ext == "log" {
+                        if let Ok(meta) = path.metadata() {
+                            log_count += 1;
+                            total_log_size += meta.len();
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // --- Databases ---
+    let mut db_count = 0u64;
+    let mut total_db_size = 0u64;
+    if let Ok(entries) = std::fs::read_dir(data_dir) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_file() {
+                let name = entry.file_name().to_string_lossy().to_string();
+                if name.ends_with(".db") || name.ends_with(".db-wal") || name.ends_with(".db-shm") {
+                    if let Ok(meta) = path.metadata() {
+                        db_count += 1;
+                        total_db_size += meta.len();
+                    }
+                }
+            }
+        }
+    }
+
+    // --- Summary table ---
+    let run_reclaim_pct = if total_run_size > 0 {
+        (reclaimable_run_size as f64 / total_run_size as f64 * 100.0) as u64
+    } else {
+        0
+    };
+    let log_reclaim_pct = if total_log_size > 0 { 100 } else { 0 };
+
+    println!(
+        "{:<14}{:>5}{:>11}{:>12}{:>16}",
+        "TYPE", "COUNT", "ACTIVE", "SIZE", "RECLAIMABLE"
+    );
+    println!(
+        "{:<14}{:>5}{:>11}{:>12}{:>12} ({run_reclaim_pct}%)",
+        "Runs",
+        runs.len(),
+        active_count,
+        format_size(total_run_size),
+        format_size(reclaimable_run_size),
+    );
+    println!(
+        "{:<14}{:>5}{:>11}{:>12}{:>12} ({log_reclaim_pct}%)",
+        "Logs",
+        log_count,
+        "-",
+        format_size(total_log_size),
+        format_size(total_log_size),
+    );
+    println!(
+        "{:<14}{:>5}{:>11}{:>12}{:>12} (0%)",
+        "Databases",
+        db_count,
+        "-",
+        format_size(total_db_size),
+        format_size(0),
+    );
+
+    println!();
+    println!("Data directory: {}", data_dir.display());
+
+    // --- Verbose per-run breakdown ---
+    if args.verbose {
+        println!();
+        println!(
+            "{:<30} {:<18} {:<10} {:>5} {:>12}",
+            "RUN ID", "WORKFLOW", "STATUS", "AGE", "SIZE"
+        );
+
+        let now = chrono::Utc::now();
+        for detail in &run_details {
+            let run_id_display = if detail.run_id.len() > 28 {
+                format!("{}...", &detail.run_id[..25])
+            } else {
+                detail.run_id.clone()
+            };
+            let workflow_display = if detail.workflow_name.len() > 16 {
+                format!("{}...", &detail.workflow_name[..13])
+            } else {
+                detail.workflow_name.clone()
+            };
+            let age = if let Ok(dt) = chrono::DateTime::parse_from_rfc3339(&detail.start_time) {
+                let dur = now.signed_duration_since(dt);
+                if dur.num_days() > 0 {
+                    format!("{}d", dur.num_days())
+                } else if dur.num_hours() > 0 {
+                    format!("{}h", dur.num_hours())
+                } else {
+                    format!("{}m", dur.num_minutes().max(1))
+                }
+            } else {
+                "-".to_string()
+            };
+            let reclaimable_marker = if detail.status != "running" { " *" } else { "" };
+            println!(
+                "{:<30} {:<18} {:<10} {:>5} {:>10}{}",
+                run_id_display,
+                workflow_display,
+                detail.status,
+                age,
+                format_size(detail.size),
+                reclaimable_marker,
+            );
+        }
+        println!();
+        println!("* = reclaimable");
+    }
+
     Ok(())
 }
 
@@ -687,6 +893,108 @@ mod tests {
         let args: Vec<String> = vec![];
         let result = parse_label_filters(&args);
         assert!(result.is_empty());
+    }
+
+    #[test]
+    fn dir_size_works() {
+        let tmp = tempfile::tempdir().unwrap();
+        let base = tmp.path();
+
+        // Create nested files with known sizes
+        fs::write(base.join("a.txt"), "hello").unwrap(); // 5 bytes
+        let sub = base.join("sub");
+        fs::create_dir(&sub).unwrap();
+        fs::write(sub.join("b.txt"), "world!").unwrap(); // 6 bytes
+
+        assert_eq!(dir_size(base), 11);
+    }
+
+    #[test]
+    fn df_reports_run_sizes() {
+        let tmp = tempfile::tempdir().unwrap();
+        let data_dir = tmp.path();
+        let logs_base = data_dir.join("logs");
+        fs::create_dir(&logs_base).unwrap();
+
+        // Running run
+        make_run_dir(
+            &logs_base,
+            "20260308-RUNNING",
+            Some(serde_json::json!({
+                "run_id": "running-1",
+                "workflow_name": "code-review",
+                "goal": "",
+                "start_time": "2026-03-08T10:00:00Z",
+                "node_count": 1,
+                "edge_count": 0
+            })),
+            None,
+            true,
+        );
+        // Add a file to give it size
+        fs::write(
+            logs_base.join("20260308-RUNNING").join("data.bin"),
+            vec![0u8; 100],
+        )
+        .unwrap();
+
+        // Completed run
+        make_run_dir(
+            &logs_base,
+            "20260307-DONE",
+            Some(serde_json::json!({
+                "run_id": "done-1",
+                "workflow_name": "deploy",
+                "goal": "",
+                "start_time": "2026-03-07T10:00:00Z",
+                "node_count": 1,
+                "edge_count": 0
+            })),
+            Some(serde_json::json!({
+                "timestamp": "2026-03-07T10:01:00Z",
+                "status": "success",
+                "duration_ms": 60000
+            })),
+            false,
+        );
+        fs::write(
+            logs_base.join("20260307-DONE").join("data.bin"),
+            vec![0u8; 200],
+        )
+        .unwrap();
+
+        let args = DfArgs { verbose: false };
+        // Should not panic
+        df_from(&args, data_dir, &logs_base).unwrap();
+    }
+
+    #[test]
+    fn df_reports_log_files() {
+        let tmp = tempfile::tempdir().unwrap();
+        let data_dir = tmp.path();
+        let logs_base = data_dir.join("logs");
+        fs::create_dir(&logs_base).unwrap();
+
+        fs::write(logs_base.join("cli-2026-03-08.log"), vec![0u8; 500]).unwrap();
+        fs::write(logs_base.join("serve-2026-03-08.log"), vec![0u8; 300]).unwrap();
+
+        let args = DfArgs { verbose: false };
+        df_from(&args, data_dir, &logs_base).unwrap();
+    }
+
+    #[test]
+    fn df_reports_database_files() {
+        let tmp = tempfile::tempdir().unwrap();
+        let data_dir = tmp.path();
+        let logs_base = data_dir.join("logs");
+        fs::create_dir(&logs_base).unwrap();
+
+        fs::write(data_dir.join("arc.db"), vec![0u8; 1024]).unwrap();
+        fs::write(data_dir.join("arc.db-wal"), vec![0u8; 512]).unwrap();
+        fs::write(data_dir.join("arc.db-shm"), vec![0u8; 32]).unwrap();
+
+        let args = DfArgs { verbose: false };
+        df_from(&args, data_dir, &logs_base).unwrap();
     }
 
     #[test]

@@ -100,6 +100,8 @@ enum PrCommand {
 enum SystemCommand {
     /// Delete old workflow runs
     Prune(arc_workflows::cli::runs::RunsPruneArgs),
+    /// Show disk usage
+    Df(arc_workflows::cli::runs::DfArgs),
 }
 
 #[derive(Subcommand)]
@@ -353,6 +355,9 @@ async fn main() -> Result<()> {
         Command::System { command } => match command {
             SystemCommand::Prune(args) => {
                 arc_workflows::cli::runs::prune_command(&args)?;
+            }
+            SystemCommand::Df(args) => {
+                arc_workflows::cli::runs::df_command(&args)?;
             }
         },
     }

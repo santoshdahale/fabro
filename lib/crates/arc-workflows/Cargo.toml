@@ -47,6 +47,7 @@ console.workspace = true
 indicatif.workspace = true
 tokio-util.workspace = true
 tracing.workspace = true
+walkdir.workspace = true
 reqwest.workspace = true
 [dev-dependencies]
 mockito = "1"

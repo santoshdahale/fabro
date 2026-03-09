@@ -447,6 +447,7 @@ dependencies = [
  "tracing",
  "ulid",
  "uuid",
+ "walkdir",
 ]
 
 [[package]]
