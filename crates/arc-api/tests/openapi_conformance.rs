@@ -306,6 +306,9 @@ fn fully_populated_server_config() -> ServerConfig {
                 exclude_globs: vec![],
             },
             pull_request: Some(PullRequestConfig { enabled: true }),
+            assets: Some(AssetsConfig {
+                include: vec!["test-results/**".into()],
+            }),
         },
         hook_config: HookConfig {
             // One hook per HookType variant so the key union covers all fields.
