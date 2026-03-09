@@ -327,7 +327,7 @@ impl ProgressUI {
                         format!(
                             "  {}",
                             dim.apply_to(format!(
-                                "({} turns, {} tool calls, {} tokens)",
+                                "({} turns, {} tools, {} tokens)",
                                 turn_count,
                                 tool_call_count,
                                 format_tokens_human(total_tokens),
