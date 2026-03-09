@@ -145,10 +145,11 @@ impl Sandbox for GitCredentialSandbox {
         if let Some(token) = password {
             let auth_url =
                 origin_url.replacen("https://", &format!("https://x-access-token:{token}@"), 1);
-            let cmd = format!(
-                "git -c maintenance.auto=0 remote set-url origin '{}'",
-                auth_url.replace('\'', "'\\''"),
+            let quoted = shlex::try_quote(&auth_url).map_or_else(
+                |_| format!("'{}'", auth_url.replace('\'', "'\\''")),
+                |q| q.to_string(),
             );
+            let cmd = format!("git -c maintenance.auto=0 remote set-url origin {quoted}");
             self.inner
                 .exec_command(&cmd, 10_000, None, None, None)
                 .await

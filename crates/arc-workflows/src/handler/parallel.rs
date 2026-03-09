@@ -112,6 +112,15 @@ impl Sandbox for WorktreeSandbox {
     fn os_version(&self) -> String {
         self.inner.os_version()
     }
+    fn is_remote(&self) -> bool {
+        self.inner.is_remote()
+    }
+    async fn ssh_access_command(&self) -> Result<Option<String>, String> {
+        self.inner.ssh_access_command().await
+    }
+    fn origin_url(&self) -> Option<&str> {
+        self.inner.origin_url()
+    }
 }
 
 /// Fans out execution to multiple branches concurrently.
