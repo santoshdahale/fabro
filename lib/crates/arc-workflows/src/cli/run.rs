@@ -896,6 +896,7 @@ pub async fn run_command(
         .as_ref()
         .map(|c| c.checkpoint.exclude_globs.clone())
         .unwrap_or_default();
+    let pr_cfg = run_cfg.as_ref().and_then(|c| c.pull_request.as_ref());
     let config = RunConfig {
         logs_root: logs_dir.clone(),
         cancel_token: None,
@@ -921,10 +922,8 @@ pub async fn run_command(
         github_app: github_app.clone(),
         git_author,
         base_branch: detected_base_branch.or(remote_base_branch),
-        pull_request_enabled: run_cfg
-            .as_ref()
-            .and_then(|c| c.pull_request.as_ref())
-            .is_some_and(|p| p.enabled),
+        pull_request_enabled: pr_cfg.is_some_and(|p| p.enabled),
+        pull_request_draft: pr_cfg.map_or(true, |p| p.draft),
         asset_globs: run_cfg
             .as_ref()
             .and_then(|c| c.assets.as_ref())
@@ -1077,10 +1076,16 @@ pub async fn run_command(
                         graph.goal(),
                         &diff,
                         &model,
+                        config.pull_request_draft,
                     )
                     .await
                     {
                         Ok(Some(record)) => {
+                            emitter.emit(&crate::event::WorkflowRunEvent::PullRequestCreated {
+                                pr_url: record.html_url.clone(),
+                                pr_number: record.number,
+                                draft: config.pull_request_draft,
+                            });
                             eprintln!(
                                 "{} {}",
                                 styles.bold.apply_to("Pull request:"),
@@ -1092,7 +1097,9 @@ pub async fn run_command(
                         }
                         Ok(None) => {} // empty diff, logged at DEBUG
                         Err(e) => {
-                            tracing::warn!(error = %e, "Pull request creation failed");
+                            emitter.emit(&crate::event::WorkflowRunEvent::PullRequestFailed {
+                                error: e.to_string(),
+                            });
                             eprintln!(
                                 "{} PR creation failed: {e}",
                                 styles.yellow.apply_to("Warning:")
@@ -1500,6 +1507,7 @@ async fn run_from_branch(
         git_author,
         base_branch: None,
         pull_request_enabled: false,
+        pull_request_draft: false,
         asset_globs: Vec::new(),
     };
 

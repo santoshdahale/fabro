@@ -81,6 +81,7 @@ include = ["test-results/**", "playwright-report/**"]
 
 [pull_request]
 enabled = true
+draft = false
 
 [[hooks]]
 event = "stage_start"
@@ -278,11 +279,13 @@ Automatically open a GitHub pull request when the workflow run completes success
 ```toml title="run.toml"
 [pull_request]
 enabled = true
+draft = true
 ```
 
 | Field | Description |
 |---|---|
 | `enabled` | When `true`, Arc creates a PR from the agent's working branch after a successful run. Default: `false`. |
+| `draft` | When `true`, the PR is created as a draft pull request. Default: `false`. |
 
 ### `[[hooks]]`
 

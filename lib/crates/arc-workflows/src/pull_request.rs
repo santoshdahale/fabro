@@ -82,6 +82,7 @@ pub async fn generate_pr_body(diff: &str, goal: &str, model: &str) -> Result<Str
 ///
 /// Returns `Ok(Some(PullRequestRecord))` if a PR was created, `Ok(None)` if
 /// the diff was empty, or `Err` on failure.
+#[allow(clippy::too_many_arguments)]
 pub async fn maybe_open_pull_request(
     creds: &GitHubAppCredentials,
     origin_url: &str,
@@ -90,6 +91,7 @@ pub async fn maybe_open_pull_request(
     goal: &str,
     diff: &str,
     model: &str,
+    draft: bool,
 ) -> Result<Option<PullRequestRecord>, String> {
     if diff.is_empty() {
         debug!("Empty diff, skipping pull request creation");
@@ -112,6 +114,7 @@ pub async fn maybe_open_pull_request(
         head_branch,
         &title,
         &body,
+        draft,
     )
     .await?;
 
@@ -229,6 +232,7 @@ mod tests {
             "Fix bug",
             "",
             "claude-sonnet-4-20250514",
+            false,
         )
         .await;
         assert!(result.is_ok());

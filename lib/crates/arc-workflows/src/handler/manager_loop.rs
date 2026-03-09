@@ -153,6 +153,7 @@ impl Handler for SubWorkflowHandler {
                 .unwrap_or_default(),
             base_branch: None,
             pull_request_enabled: false,
+            pull_request_draft: true,
             asset_globs: Vec::new(),
         };
 

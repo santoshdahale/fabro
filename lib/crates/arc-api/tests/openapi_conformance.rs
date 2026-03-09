@@ -310,7 +310,10 @@ fn fully_populated_server_config() -> ServerConfig {
             checkpoint: CheckpointConfig {
                 exclude_globs: vec![],
             },
-            pull_request: Some(PullRequestConfig { enabled: true }),
+            pull_request: Some(PullRequestConfig {
+                enabled: true,
+                draft: false,
+            }),
             assets: Some(AssetsConfig {
                 include: vec!["test-results/**".into()],
             }),

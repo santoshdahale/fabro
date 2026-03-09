@@ -219,6 +219,14 @@ pub enum WorkflowRunEvent {
         error: String,
         duration_ms: u64,
     },
+    PullRequestCreated {
+        pr_url: String,
+        pr_number: u64,
+        draft: bool,
+    },
+    PullRequestFailed {
+        error: String,
+    },
 }
 
 impl WorkflowRunEvent {
@@ -528,6 +536,17 @@ impl WorkflowRunEvent {
                 duration_ms,
             } => {
                 error!(cli_name, provider, error, duration_ms, "CLI ensure failed");
+            }
+            Self::PullRequestCreated {
+                pr_url,
+                pr_number,
+                draft,
+                ..
+            } => {
+                info!(pr_url = %pr_url, pr_number, draft, "Pull request created");
+            }
+            Self::PullRequestFailed { error, .. } => {
+                error!(error = %error, "Pull request creation failed");
             }
         }
     }
@@ -1782,5 +1801,43 @@ mod tests {
             let json2 = serde_json::to_string(&deserialized).unwrap();
             assert_eq!(json, json2);
         }
+    }
+
+    #[test]
+    fn pull_request_created_event_serialization() {
+        let event = WorkflowRunEvent::PullRequestCreated {
+            pr_url: "https://github.com/owner/repo/pull/42".to_string(),
+            pr_number: 42,
+            draft: true,
+        };
+        let json = serde_json::to_string(&event).unwrap();
+        assert!(json.contains("PullRequestCreated"));
+        assert!(json.contains("\"pr_number\":42"));
+        assert!(json.contains("\"draft\":true"));
+
+        let deserialized: WorkflowRunEvent = serde_json::from_str(&json).unwrap();
+        assert!(matches!(
+            deserialized,
+            WorkflowRunEvent::PullRequestCreated {
+                pr_number: 42,
+                draft: true,
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn pull_request_failed_event_serialization() {
+        let event = WorkflowRunEvent::PullRequestFailed {
+            error: "auth failed".to_string(),
+        };
+        let json = serde_json::to_string(&event).unwrap();
+        assert!(json.contains("PullRequestFailed"));
+        assert!(json.contains("\"error\":\"auth failed\""));
+
+        let deserialized: WorkflowRunEvent = serde_json::from_str(&json).unwrap();
+        assert!(
+            matches!(deserialized, WorkflowRunEvent::PullRequestFailed { error } if error == "auth failed")
+        );
     }
 }

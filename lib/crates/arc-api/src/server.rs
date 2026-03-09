@@ -608,6 +608,7 @@ async fn execute_run(state: Arc<AppState>, run_id: String) {
         git_author: state.git_author.clone(),
         base_branch: None,
         pull_request_enabled: false,
+        pull_request_draft: true,
         asset_globs: Vec::new(),
     };
 

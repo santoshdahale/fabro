@@ -4098,6 +4098,9 @@ components:
         enabled:
           type: boolean
           description: Whether to create a pull request after a successful run.
+        draft:
+          type: boolean
+          description: Whether to create the pull request as a draft.
 
     WebConfiguration:
       description: Web UI configuration.

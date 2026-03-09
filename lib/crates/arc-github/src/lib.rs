@@ -221,6 +221,7 @@ pub async fn create_installation_access_token_for_pr(
 ///
 /// Signs a JWT, obtains a PR-scoped installation token, and POSTs to the
 /// GitHub pulls API. Returns `(html_url, pr_number)` on success.
+#[allow(clippy::too_many_arguments)]
 pub async fn create_pull_request(
     creds: &GitHubAppCredentials,
     owner: &str,
@@ -229,6 +230,7 @@ pub async fn create_pull_request(
     head: &str,
     title: &str,
     body: &str,
+    draft: bool,
 ) -> Result<(String, u64), String> {
     let jwt = sign_app_jwt(&creds.app_id, &creds.private_key_pem)?;
     let client = reqwest::Client::new();
@@ -237,13 +239,14 @@ pub async fn create_pull_request(
         create_installation_access_token_for_pr(&client, &jwt, owner, repo, GITHUB_API_BASE_URL)
             .await?;
 
-    tracing::debug!(title = %title, head = %head, base = %base, "Creating pull request");
+    tracing::debug!(title = %title, head = %head, base = %base, draft, "Creating pull request");
 
     let pr_body = serde_json::json!({
         "title": title,
         "head": head,
         "base": base,
         "body": body,
+        "draft": draft,
     });
 
     let url = format!("{GITHUB_API_BASE_URL}/repos/{owner}/{repo}/pulls");

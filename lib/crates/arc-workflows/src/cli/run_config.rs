@@ -16,10 +16,16 @@ pub struct CheckpointConfig {
     pub exclude_globs: Vec<String>,
 }
 
+fn default_true() -> bool {
+    true
+}
+
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]
 pub struct PullRequestConfig {
     #[serde(default)]
     pub enabled: bool,
+    #[serde(default = "default_true")]
+    pub draft: bool,
 }
 
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]
@@ -1852,7 +1858,10 @@ enabled = true
         )
         .unwrap();
         let defaults = RunDefaults {
-            pull_request: Some(PullRequestConfig { enabled: false }),
+            pull_request: Some(PullRequestConfig {
+                enabled: false,
+                draft: false,
+            }),
             ..RunDefaults::default()
         };
         cfg.apply_defaults(&defaults);
@@ -1870,7 +1879,10 @@ graph = "w.dot"
         )
         .unwrap();
         let defaults = RunDefaults {
-            pull_request: Some(PullRequestConfig { enabled: true }),
+            pull_request: Some(PullRequestConfig {
+                enabled: true,
+                draft: false,
+            }),
             ..RunDefaults::default()
         };
         cfg.apply_defaults(&defaults);
@@ -1958,5 +1970,38 @@ include = ["playwright-report/**"]
         cfg.apply_defaults(&defaults);
         let assets = cfg.assets.unwrap();
         assert_eq!(assets.include, vec!["playwright-report/**"]);
+    }
+
+    #[test]
+    fn parse_toml_with_pull_request_draft() {
+        let toml = r#"
+version = 1
+goal = "test"
+graph = "w.dot"
+
+[pull_request]
+enabled = true
+draft = true
+"#;
+        let config = parse_run_config(toml).unwrap();
+        let pr = config.pull_request.unwrap();
+        assert!(pr.enabled);
+        assert!(pr.draft);
+    }
+
+    #[test]
+    fn parse_toml_pull_request_draft_defaults_true() {
+        let toml = r#"
+version = 1
+goal = "test"
+graph = "w.dot"
+
+[pull_request]
+enabled = true
+"#;
+        let config = parse_run_config(toml).unwrap();
+        let pr = config.pull_request.unwrap();
+        assert!(pr.enabled);
+        assert!(pr.draft);
     }
 }

@@ -97,6 +97,7 @@ async fn pr_create_from(
         &manifest.goal,
         &diff,
         &model,
+        true,
     )
     .await
     .map_err(|e| anyhow::anyhow!("{e}"))?;
