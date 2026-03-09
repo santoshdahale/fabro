@@ -342,12 +342,13 @@ pub async fn run_command(
     }
 
     // 3. Create logs directory
+    let run_id = ulid::Ulid::new().to_string();
     let logs_dir = args.logs_dir.unwrap_or_else(|| {
         let base = dirs::home_dir()
             .expect("could not determine home directory")
             .join(".arc")
             .join("logs");
-        base.join(format!("arc-run-{}", Local::now().format("%Y%m%d-%H%M%S")))
+        base.join(format!("{}-{}", Local::now().format("%Y%m%d"), run_id))
     });
     tokio::fs::create_dir_all(&logs_dir).await?;
     tokio::fs::write(logs_dir.join("graph.dot"), &source).await?;
@@ -361,8 +362,6 @@ pub async fn run_command(
     // Create progress UI (used for both normal and verbose modes)
     let is_tty = std::io::stderr().is_terminal();
     let progress_ui = Arc::new(Mutex::new(progress::ProgressUI::new(is_tty, args.verbose)));
-
-    let run_id = ulid::Ulid::new().to_string();
     {
         let mut ui = progress_ui.lock().expect("progress lock poisoned");
         ui.show_run_id(&run_id);
@@ -1118,8 +1117,9 @@ async fn run_from_branch(
             .join(".arc")
             .join("logs");
         base.join(format!(
-            "arc-resume-{}",
-            chrono::Local::now().format("%Y%m%d-%H%M%S")
+            "{}-{}",
+            chrono::Local::now().format("%Y%m%d"),
+            run_id
         ))
     });
     tokio::fs::create_dir_all(&logs_dir).await?;

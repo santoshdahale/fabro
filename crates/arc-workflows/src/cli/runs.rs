@@ -327,7 +327,7 @@ mod tests {
 
         make_run_dir(
             base,
-            "arc-run-20260101-120000",
+            "20260101-ABC123",
             Some(serde_json::json!({
                 "run_id": "abc123",
                 "workflow_name": "my-pipeline",
@@ -366,7 +366,7 @@ mod tests {
 
         make_run_dir(
             base,
-            "arc-run-running",
+            "20260115-RUNNING1",
             Some(serde_json::json!({
                 "run_id": "running-1",
                 "workflow_name": "pipeline-a",
@@ -516,7 +516,7 @@ mod tests {
 
         let dir = make_run_dir(
             base,
-            "arc-run-20250101-120000",
+            "20250101-TOPRUNE",
             Some(serde_json::json!({
                 "run_id": "to-prune",
                 "workflow_name": "old-pipeline",
@@ -552,7 +552,7 @@ mod tests {
 
         let dir = make_run_dir(
             base,
-            "arc-run-20250101-120000",
+            "20250101-TOPRUNE",
             Some(serde_json::json!({
                 "run_id": "to-prune",
                 "workflow_name": "old-pipeline",
@@ -570,7 +570,7 @@ mod tests {
         // Also add a run that should NOT be pruned (too new)
         let keep_dir = make_run_dir(
             base,
-            "arc-run-20260301-120000",
+            "20260301-KEEPTHIS",
             Some(serde_json::json!({
                 "run_id": "keep-this",
                 "workflow_name": "new-pipeline",

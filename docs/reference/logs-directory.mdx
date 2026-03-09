@@ -20,10 +20,10 @@ The log level defaults to `info`. Set `ARC_LOG=debug` or pass `--debug` for verb
 Each `arc run` invocation creates a timestamped directory:
 
 ```
-~/.arc/logs/arc-run-20260307-143022/
+~/.arc/logs/20260307-01JQXYZ123ABC456DEF789/
 ```
 
-The naming format is `arc-run-YYYYMMDD-HHMMSS`. You can override the location with `--logs-dir`.
+The naming format is `YYYYMMDD-{run_id}`, where `run_id` is the ULID assigned to the run. You can override the location with `--logs-dir`.
 
 ### Root-level files
 
@@ -94,7 +94,7 @@ arc ps --filter workflow=my-workflow
 ```
 ~/.arc/logs/
 ├── 2026-03-07.log                    # Daily CLI log
-├── arc-run-20260307-143022/          # One directory per run
+├── 20260307-01JQXYZ123ABC456DEF789/  # One directory per run
 │   ├── manifest.json
 │   ├── graph.dot
 │   ├── run.pid
