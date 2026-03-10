@@ -6,6 +6,7 @@ use std::process::{Command, Stdio};
 
 use anyhow::{bail, Context, Result};
 use arc_llm::provider::Provider;
+use arc_util::terminal::Styles;
 use axum::extract::Query;
 use axum::response::Html;
 use axum::routing::get;
@@ -348,7 +349,7 @@ struct CallbackParams {
 
 /// Run the GitHub App manifest registration flow via a temporary local server.
 /// Returns env var pairs (key, value) for secrets to merge into `.env`.
-async fn setup_github_app(arc_dir: &Path) -> Result<Vec<(String, String)>> {
+async fn setup_github_app(arc_dir: &Path, s: &Styles) -> Result<Vec<(String, String)>> {
     // Random suffix so app names don't collide
     let mut rng = rand::thread_rng();
     let suffix: String = (0..6)
@@ -457,13 +458,16 @@ async fn setup_github_app(arc_dir: &Path) -> Result<Vec<(String, String)>> {
 
     // Open browser
     let url = format!("http://127.0.0.1:{port}/");
-    eprintln!("  Opening browser to {url}");
+    eprintln!("  {}", s.dim.apply_to("Opening browser..."));
     if let Err(e) = open::that(&url) {
         eprintln!("  Could not open browser automatically: {e}");
         eprintln!("  Please open this URL manually: {url}");
     }
 
-    eprintln!("  Waiting for GitHub... (press Ctrl+C to cancel)");
+    eprintln!(
+        "  {}",
+        s.dim.apply_to("Waiting for GitHub... (Ctrl+C to cancel)")
+    );
 
     // Wait for the code
     let code = code_rx
@@ -471,7 +475,7 @@ async fn setup_github_app(arc_dir: &Path) -> Result<Vec<(String, String)>> {
         .context("did not receive callback from GitHub (was the browser flow completed?)")?;
 
     // Exchange code for app credentials
-    eprintln!("  Exchanging code with GitHub...");
+    eprintln!("  {}", s.dim.apply_to("Exchanging code with GitHub..."));
     let client = reqwest::Client::new();
     let resp = client
         .post(format!(
@@ -532,8 +536,15 @@ async fn setup_github_app(arc_dir: &Path) -> Result<Vec<(String, String)>> {
     git_table.insert("slug".into(), toml::Value::String(slug.clone()));
     git_table.insert("client_id".into(), toml::Value::String(client_id));
     std::fs::write(&cli_toml_path, toml::to_string_pretty(&doc)?)?;
-    eprintln!("  Wrote GitHub App config to {}", cli_toml_path.display());
-    eprintln!("  App: https://github.com/apps/{slug}");
+    eprintln!(
+        "  {}",
+        s.dim.apply_to(format!("Wrote {}", cli_toml_path.display()))
+    );
+    eprintln!(
+        "  {}",
+        s.dim
+            .apply_to(format!("App: https://github.com/apps/{slug}"))
+    );
 
     // Return secrets as env pairs
     let pem_b64 =
@@ -550,9 +561,40 @@ async fn setup_github_app(arc_dir: &Path) -> Result<Vec<(String, String)>> {
     Ok(env_pairs)
 }
 
+fn write_env_file(arc_dir: &Path, env_pairs: &[(String, String)], s: &Styles) -> Result<()> {
+    let env_path = arc_dir.join(".env");
+    let existing = std::fs::read_to_string(&env_path).unwrap_or_default();
+    let refs: Vec<(&str, &str)> = env_pairs
+        .iter()
+        .map(|(k, v)| (k.as_str(), v.as_str()))
+        .collect();
+    let merged = merge_env(&existing, &refs);
+    std::fs::write(&env_path, &merged)?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&env_path, std::fs::Permissions::from_mode(0o600))?;
+    }
+    eprintln!(
+        "  {}",
+        s.dim.apply_to(format!("Wrote {}", env_path.display()))
+    );
+    Ok(())
+}
+
 pub async fn run_install() -> Result<()> {
-    eprintln!("Arc Install");
-    eprintln!("===========");
+    let s = Styles::detect_stderr();
+    let emoji = console::Emoji("⚡ ", "");
+
+    eprintln!();
+    eprintln!("  {}{}", emoji, s.bold.apply_to("Arc Install"));
+    eprintln!();
+    eprintln!(
+        "  {}",
+        s.dim
+            .apply_to("Let's get Arc set up. This will configure your")
+    );
+    eprintln!("  {}", s.dim.apply_to("LLM providers and GitHub App."));
     eprintln!();
 
     let arc_dir = dirs::home_dir()
@@ -563,7 +605,10 @@ pub async fn run_install() -> Result<()> {
     // Pre-flight checks (server mode only — standalone doesn't need openssl/node/dot)
     #[cfg(feature = "server")]
     {
-        eprintln!("[Pre-flight] System dependency checks");
+        eprintln!(
+            "  {}",
+            s.dim.apply_to("[Pre-flight] System dependency checks")
+        );
         let dep_outcomes = doctor::probe_system_deps();
         let dep_check = doctor::check_system_deps(doctor::DEP_SPECS, &dep_outcomes);
 
@@ -602,8 +647,11 @@ pub async fn run_install() -> Result<()> {
         eprintln!();
     }
 
-    // Step 1: LLM providers
-    eprintln!("[Step 1/4] LLM providers");
+    // Step 1: LLM Providers
+    eprintln!("  {}", s.bold.apply_to("Step 1 · LLM Providers"));
+    eprintln!("  {}", s.dim.apply_to("──────────────────────"));
+    eprintln!();
+
     let mut env_pairs: Vec<(String, String)> = Vec::new();
     let mut configured_providers: Vec<Provider> = Vec::new();
 
@@ -621,7 +669,10 @@ pub async fn run_install() -> Result<()> {
         .await??;
 
         if use_oauth {
-            eprintln!("  Opening browser for OpenAI login...");
+            eprintln!(
+                "  {}",
+                s.dim.apply_to("Opening browser for OpenAI login...")
+            );
             match arc_openai_oauth::run_browser_flow(
                 arc_openai_oauth::DEFAULT_ISSUER,
                 arc_openai_oauth::DEFAULT_CLIENT_ID,
@@ -636,13 +687,19 @@ pub async fn run_install() -> Result<()> {
                     ));
                     configured_providers.push(Provider::OpenAi);
                     openai_via_oauth = true;
-                    eprintln!("  [ok] OpenAI configured via browser login");
+                    eprintln!(
+                        "  {} OpenAI configured via browser login",
+                        s.green.apply_to("✔")
+                    );
                 }
                 Err(e) => {
                     tracing::warn!(error = %e, "OpenAI OAuth browser flow failed");
                     eprintln!("  Browser login failed: {e}");
-                    eprintln!("  Falling back to manual API key entry.");
-                    let (env_var, key) = prompt_and_validate_key(Provider::OpenAi).await?;
+                    eprintln!(
+                        "  {}",
+                        s.dim.apply_to("Falling back to manual API key entry.")
+                    );
+                    let (env_var, key) = prompt_and_validate_key(Provider::OpenAi, &s).await?;
                     env_pairs.push((env_var, key));
                     configured_providers.push(Provider::OpenAi);
                     openai_via_oauth = true;
@@ -667,7 +724,7 @@ pub async fn run_install() -> Result<()> {
 
         let first_provider = primary_providers[primary_idx];
         {
-            let (env_var, key) = prompt_and_validate_key(first_provider).await?;
+            let (env_var, key) = prompt_and_validate_key(first_provider, &s).await?;
             env_pairs.push((env_var, key));
             configured_providers.push(first_provider);
         }
@@ -701,15 +758,22 @@ pub async fn run_install() -> Result<()> {
 
         for idx in selected_indices {
             let provider = remaining_providers[idx];
-            let (env_var, key) = prompt_and_validate_key(provider).await?;
+            let (env_var, key) = prompt_and_validate_key(provider, &s).await?;
             env_pairs.push((env_var, key));
         }
     }
+
+    // Write LLM provider env vars immediately
+    if !env_pairs.is_empty() {
+        write_env_file(&arc_dir, &env_pairs, &s)?;
+    }
     eprintln!();
 
-    // Step 2: GitHub App setup
-    eprintln!("[Step 2/4] GitHub App");
-    let mut github_env_pairs: Vec<(String, String)> = Vec::new();
+    // Step 2: GitHub App
+    eprintln!("  {}", s.bold.apply_to("Step 2 · GitHub App"));
+    eprintln!("  {}", s.dim.apply_to("───────────────────"));
+    eprintln!();
+
     {
         let setup_github = tokio::task::spawn_blocking(|| {
             prompt_confirm("Set up a GitHub App? (Recommended)", true)
@@ -717,8 +781,27 @@ pub async fn run_install() -> Result<()> {
         .await??;
 
         if setup_github {
-            github_env_pairs = setup_github_app(&arc_dir).await?;
-            eprintln!("  [ok] GitHub App registered");
+            let github_env_pairs = setup_github_app(&arc_dir, &s).await?;
+            let slug = {
+                let cli_toml_path = arc_dir.join("cli.toml");
+                let toml_content = std::fs::read_to_string(&cli_toml_path).unwrap_or_default();
+                let doc: toml::Value =
+                    toml::from_str(&toml_content).unwrap_or(toml::Value::Table(Default::default()));
+                doc.get("git")
+                    .and_then(|g| g.get("slug"))
+                    .and_then(|s| s.as_str())
+                    .unwrap_or("unknown")
+                    .to_string()
+            };
+            eprintln!(
+                "  {} GitHub App registered ({})",
+                s.green.apply_to("✔"),
+                slug
+            );
+            // Merge GitHub env vars into .env
+            if !github_env_pairs.is_empty() {
+                write_env_file(&arc_dir, &github_env_pairs, &s)?;
+            }
         } else {
             eprintln!("  Skipped");
         }
@@ -728,7 +811,10 @@ pub async fn run_install() -> Result<()> {
     // Server configuration (server mode only)
     #[cfg(feature = "server")]
     {
-        eprintln!("[Server] Configuration");
+        eprintln!("  {}", s.bold.apply_to("Server · Configuration"));
+        eprintln!("  {}", s.dim.apply_to("─────────────────────"));
+        eprintln!();
+
         let config_path = arc_dir.join("server.toml");
         let write_config = if config_path.exists() {
             tokio::task::spawn_blocking(|| {
@@ -746,40 +832,37 @@ pub async fn run_install() -> Result<()> {
 
             let toml_content = format_config_toml(&username);
             std::fs::write(&config_path, &toml_content)?;
-            eprintln!("  Wrote {}", config_path.display());
+            eprintln!(
+                "  {}",
+                s.dim.apply_to(format!("Wrote {}", config_path.display()))
+            );
         } else {
-            eprintln!("  Keeping existing server.toml");
+            eprintln!("  {}", s.dim.apply_to("Keeping existing server.toml"));
         }
         eprintln!();
     }
 
     // Secrets and certificates (server mode only)
     #[cfg(feature = "server")]
-    let (session_secret, jwt_private_pem, jwt_public_pem);
-    #[cfg(feature = "server")]
     {
-        eprintln!("[Server] Generating secrets and certificates");
+        eprintln!(
+            "  {}",
+            s.dim.apply_to("Generating secrets and certificates...")
+        );
 
-        session_secret = generate_session_secret();
-        eprintln!("  [ok] Session secret generated");
+        let session_secret = generate_session_secret();
+        eprintln!("  {} Session secret generated", s.green.apply_to("✔"));
 
-        let (priv_pem, pub_pem) = generate_jwt_keypair()?;
-        jwt_private_pem = priv_pem;
-        jwt_public_pem = pub_pem;
-        eprintln!("  [ok] Ed25519 JWT keypair generated");
+        let (jwt_private_pem, jwt_public_pem) = generate_jwt_keypair()?;
+        eprintln!("  {} Ed25519 JWT keypair generated", s.green.apply_to("✔"));
 
         let certs_dir = arc_dir.join("certs");
         generate_mtls_certs(&certs_dir)?;
-        eprintln!("  [ok] mTLS CA + server certificates generated");
-        eprintln!();
-    }
+        eprintln!(
+            "  {} mTLS CA + server certificates generated",
+            s.green.apply_to("✔")
+        );
 
-    // Step 3: Writing ~/.arc/.env
-    eprintln!("[Step 3/4] Writing ~/.arc/.env");
-    let env_path = arc_dir.join(".env");
-
-    #[cfg(feature = "server")]
-    {
         let jwt_private_b64 = base64::Engine::encode(
             &base64::engine::general_purpose::STANDARD,
             jwt_private_pem.as_bytes(),
@@ -789,37 +872,14 @@ pub async fn run_install() -> Result<()> {
             jwt_public_pem.as_bytes(),
         );
 
-        env_pairs.push(("ARC_JWT_PRIVATE_KEY".to_string(), jwt_private_b64));
-        env_pairs.push(("ARC_JWT_PUBLIC_KEY".to_string(), jwt_public_b64));
-        env_pairs.push(("SESSION_SECRET".to_string(), session_secret));
-    }
-    env_pairs.extend(github_env_pairs);
+        let server_env_pairs = vec![
+            ("ARC_JWT_PRIVATE_KEY".to_string(), jwt_private_b64),
+            ("ARC_JWT_PUBLIC_KEY".to_string(), jwt_public_b64),
+            ("SESSION_SECRET".to_string(), session_secret),
+        ];
+        write_env_file(&arc_dir, &server_env_pairs, &s)?;
+        eprintln!();
 
-    let existing_env = std::fs::read_to_string(&env_path).unwrap_or_default();
-    let env_refs: Vec<(&str, &str)> = env_pairs
-        .iter()
-        .map(|(k, v)| (k.as_str(), v.as_str()))
-        .collect();
-    let merged = merge_env(&existing_env, &env_refs);
-    std::fs::write(&env_path, &merged)?;
-
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(&env_path, std::fs::Permissions::from_mode(0o600))?;
-    }
-
-    eprintln!(
-        "  Wrote {} ({} variables)",
-        env_path.display(),
-        env_pairs.len()
-    );
-    eprintln!();
-
-    // Start servers (server mode only)
-    #[cfg(feature = "server")]
-    {
-        eprintln!("[Server] Start servers");
         eprintln!("  To start Arc, run these commands:");
         eprintln!();
         eprintln!("    arc serve");
@@ -827,8 +887,8 @@ pub async fn run_install() -> Result<()> {
         eprintln!();
     }
 
-    // Step 4: Verify setup
-    eprintln!("[Step 4/4] Verify setup");
+    // Verify setup
+    let env_path = arc_dir.join(".env");
     let run_doctor =
         tokio::task::spawn_blocking(|| prompt_confirm("Run arc doctor to verify?", true)).await??;
 
@@ -840,7 +900,10 @@ pub async fn run_install() -> Result<()> {
     }
 
     eprintln!();
-    eprintln!("Setup complete!");
+    eprintln!(
+        "  Setup complete! Go to your project and run {} to get started.",
+        s.bold_cyan.apply_to("arc init")
+    );
     Ok(())
 }
 
@@ -888,19 +951,22 @@ async fn validate_api_key(provider: Provider, api_key: &str) -> Result<(), Strin
     .map_err(|e| e.to_string())
 }
 
-async fn prompt_and_validate_key(provider: Provider) -> Result<(String, String)> {
+async fn prompt_and_validate_key(provider: Provider, s: &Styles) -> Result<(String, String)> {
     let env_var = provider.api_key_env_vars()[0];
     let url = provider_key_url(provider);
-    eprintln!("  Get your API key at: {url}");
+    eprintln!(
+        "  {}",
+        s.dim.apply_to(format!("Get your API key at: {url}"))
+    );
 
     loop {
         let prompt = env_var.to_string();
         let key: String = tokio::task::spawn_blocking(move || prompt_password(&prompt)).await??;
 
-        eprintln!("  Validating API key...");
+        eprintln!("  {}", s.dim.apply_to("Validating API key..."));
         match validate_api_key(provider, &key).await {
             Ok(()) => {
-                eprintln!("  [ok] API key is valid");
+                eprintln!("  {} API key is valid", s.green.apply_to("✔"));
                 return Ok((env_var.to_string(), key));
             }
             Err(e) => {
