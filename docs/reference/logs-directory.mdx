@@ -42,6 +42,7 @@ The naming format is `YYYYMMDD-{run_id}`, where `run_id` is the ULID assigned to
 | `conclusion.json` | JSON | Run end | Final result — `status`, `duration_ms`, `failure_reason`, `final_git_commit_sha`. Only present when the run completes (not for crashed or interrupted runs). |
 | `final.patch` | Diff | Run end | Git diff from `base_sha` to final HEAD. Only present in git checkpoint mode. |
 | `retro.json` | JSON | Run end | Post-run retrospective analysis — `smoothness_rating`, `learnings`, `friction_points`, `stages`. Omitted if `--no-retro` is passed. See [Retros](/execution/retros). |
+| `cli.log` | Text | Continuous | Per-run tracing log. Contains the same tracing output as the daily log file, scoped to this run. |
 
 ### `nodes/` subdirectory
 
@@ -110,6 +111,7 @@ arc ps --filter workflow=my-workflow
 │   ├── conclusion.json
 │   ├── final.patch
 │   ├── retro.json
+│   ├── cli.log
 │   ├── nodes/
 │   │   ├── plan/
 │   │   │   ├── prompt.md

@@ -311,24 +311,95 @@ arc parse workflow.dot
 
 ---
 
+## `arc init`
+
+Initialize a new Arc project in the current git repository. Creates an `arc.toml` project config and a sample `hello` workflow.
+
+```bash
+arc init
+```
+
+The command must be run inside a git repository. It creates:
+- `arc.toml` — project configuration with comments and a link to docs
+- `arc/workflows/hello/workflow.dot` — a simple greeting workflow
+- `arc/workflows/hello/workflow.toml` — run config for the hello workflow
+
+## `arc diff`
+
+Show the diff from a workflow run. Displays the `final.patch` for completed runs, or connects to the sandbox for a live diff from in-progress runs.
+
+```bash
+arc diff <run-id>
+arc diff <run-id> --node work
+arc diff <run-id> --stat
+```
+
+| Argument / Flag | Description |
+|---|---|
+| `<RUN>` | Run ID or prefix (required) |
+| `--node <NODE>` | Show diff for a specific node instead of the full run |
+| `--stat` | Show diffstat instead of full patch (live diffs only) |
+
+Output is colorized when writing to a terminal.
+
+## `arc ssh`
+
+SSH into a Daytona sandbox from a completed or in-progress run. Creates temporary SSH credentials and connects directly, or prints the command with `--print`.
+
+```bash
+arc ssh <run-id>
+arc ssh <run-id> --print
+arc ssh <run-id> --ttl 120
+```
+
+| Argument / Flag | Description |
+|---|---|
+| `<RUN>` | Run ID or prefix (required) |
+| `--ttl <MINUTES>` | SSH credential expiry in minutes (default: 60) |
+| `--print` | Print the SSH command instead of connecting |
+
+See [SSH Access](/human-tools/ssh-access) for more details on SSH workflows.
+
+## `arc preview`
+
+Generate a preview URL for a port exposed by a Daytona sandbox. Useful for accessing web servers, dev tools, or APIs running inside the sandbox.
+
+```bash
+arc preview <run-id> <port>
+arc preview <run-id> 3000 --signed
+arc preview <run-id> 3000 --open
+```
+
+| Argument / Flag | Description |
+|---|---|
+| `<RUN>` | Run ID or prefix (required) |
+| `<PORT>` | Port number to preview (required) |
+| `--signed` | Generate a signed URL (self-contained, no headers needed) |
+| `--ttl <SECONDS>` | Signed URL expiry in seconds (default: 3600, requires `--signed`) |
+| `--open` | Open the URL in a browser (implies `--signed`) |
+
+Without `--signed`, the command prints the URL, token, and a `curl` example. See [Preview](/human-tools/preview) for more details.
+
+---
+
 ## `arc doctor`
 
-Check environment and integration health. Verifies system dependencies, API keys, and optional services.
+Check environment and integration health. Verifies system dependencies, API keys, and optional services. Probes live services (LLM providers, sandbox, GitHub App) by default.
 
 ```bash
 arc doctor
 arc doctor -v
-arc doctor --live
+arc doctor --dry-run
 ```
 
 | Flag | Description |
 |---|---|
 | `-v, --verbose` | Show detailed information for each check |
-| `-l, --live` | Probe live services (LLM providers, sandbox, API server, web frontend, Brave Search) |
+| `--dry-run` | Skip live service probes (LLM, sandbox, API, web, Brave Search) |
 
 ## `arc install`
 
-Interactive setup wizard that walks you through configuring API keys and validating your environment. Run this after a fresh install.
+Interactive setup wizard that walks you through configuring API keys and validating your environment. Runs `arc doctor` with live probes after setup to validate the configuration.
 
 ```bash
 arc install

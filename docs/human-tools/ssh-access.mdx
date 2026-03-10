@@ -9,9 +9,24 @@ When a workflow runs in a [Daytona sandbox](/execution/environments#daytona), yo
 SSH access is only available with the Daytona sandbox provider. Local, Docker, and exe.dev sandboxes do not support SSH access.
 </Note>
 
-## Enabling SSH access
+## Connecting to a run's sandbox
 
-Pass the `--ssh` flag to `arc run`:
+Use `arc ssh` to connect to the Daytona sandbox from any completed or in-progress run:
+
+```bash
+arc ssh <run-id>
+```
+
+Arc creates temporary SSH credentials and connects directly. Use `--print` to print the SSH command instead of connecting, or `--ttl` to set the credential expiry:
+
+```bash
+arc ssh <run-id> --print
+arc ssh <run-id> --ttl 120
+```
+
+## Enabling SSH access during `arc run`
+
+Pass the `--ssh` flag to `arc run` to create SSH credentials at the start of the run:
 
 ```bash
 arc run workflow.dot --sandbox daytona --ssh
@@ -58,10 +73,9 @@ Once connected, you have a full shell inside the sandbox VM:
 
 ## Credential lifetime
 
-SSH credentials are temporary and expire after **60 minutes**. If your session expires, you'll need to start a new run with `--ssh` to get fresh credentials.
+SSH credentials are temporary and expire after **60 minutes** by default. With `arc ssh`, you can set a custom TTL with `--ttl <MINUTES>`. If your session expires, run `arc ssh` again or start a new run with `--ssh` to get fresh credentials.
 
 ## Limitations
 
 - SSH access is **Daytona-only**. Passing `--ssh` with other sandbox providers prints a warning and is ignored.
 - SSH access is currently available only from the **CLI**. The API server and web UI do not yet expose an SSH endpoint.
-- Credentials cannot be refreshed — once the 60-minute window expires, a new run is needed.

@@ -1,0 +1,52 @@
+---
+title: "MCP servers in workflows, arc init, and arc diff"
+date: "2026-03-10"
+---
+
+## MCP servers in workflows
+
+Agents running inside sandboxes can now access MCP tools during workflow runs. A new `sandbox` transport type starts an MCP server inside the Daytona sandbox, waits for it to listen, and connects automatically — no host-side setup required. This means agents can use tools like Playwright for browser automation, or any other MCP server, directly from within their sandbox environment.
+
+```toml title="workflow.toml"
+[mcp_servers.playwright]
+type = "sandbox"
+command = ["npx", "@playwright/mcp@latest", "--port", "3100", "--headless"]
+port = 3100
+```
+
+## `arc init` — initialize a new project
+
+Getting started with Arc previously meant creating `arc.toml` and workflow files by hand. Now, `arc init` scaffolds a project with a generated `arc.toml` that includes comments and a link to the docs.
+
+```bash
+arc init
+```
+
+## `arc diff` — view workflow run diffs
+
+You can now inspect the code changes from any workflow run without digging through log files. `arc diff` surfaces the final patch and per-node diffs from completed runs. For in-progress runs, it reconnects to the sandbox to show a live diff.
+
+```bash
+arc diff <run-id>
+```
+
+## More
+
+<Accordion title="CLI">
+- `arc setup` renamed to `arc install` for clarity
+- Added `arc ssh` command for direct SSH access to Daytona sandboxes
+- Added `arc preview` command to get preview URLs for ports exposed by Daytona sandboxes
+- `arc doctor` now runs live service probes by default; use `--dry-run` to skip
+- `arc doctor` now validates GitHub App configuration and private key
+- Added `[pull_request]` support to project config (`arc.toml`) for project-level PR defaults
+- Per-run data moved from `~/.arc/logs/` to `~/.arc/runs/`; daily CLI logs stay in `~/.arc/logs/`
+- Per-run tracing logs now written to `cli.log` inside each run directory
+- Asset paths now display full `~/...` paths after workflow run output
+- Hidden `arc ps`, `llm`, `exec`, and `parse` from CLI help output
+- PR body now includes Arc Details section even when retro is skipped
+</Accordion>
+
+<Accordion title="Fixes">
+- Fixed LLM provider resolution to check the model catalog before falling back to the default provider
+- Fixed verbose mode breaking terminal rendering after many tool calls
+</Accordion>

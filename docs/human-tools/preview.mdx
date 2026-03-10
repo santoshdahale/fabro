@@ -18,6 +18,18 @@ When you request a preview, Arc generates a time-limited, token-authenticated UR
 3. Arc returns a signed URL that you open in your browser
 4. The URL expires after the configured TTL (up to 24 hours), after which a new one must be generated
 
+## Using preview from the CLI
+
+Use `arc preview` to generate a preview URL for any run with an active Daytona sandbox:
+
+```bash
+arc preview <run-id> 3000              # URL + token + curl example
+arc preview <run-id> 3000 --signed     # self-contained signed URL
+arc preview <run-id> 3000 --open       # open in browser (implies --signed)
+```
+
+See [`arc preview`](/reference/cli#arc-preview) for the full flag reference.
+
 ## Using preview from the web UI
 
 When viewing a run with an active sandbox, the run detail page shows a **Preview** button in the toolbar. Clicking it generates a preview URL for port 3000 with a 1-hour TTL and opens it in a new browser tab.
