@@ -134,9 +134,13 @@ impl Client {
 
     /// Resolve the provider for a request.
     fn resolve_provider(&self, request: &Request) -> Result<Arc<dyn ProviderAdapter>, SdkError> {
+        let catalog_provider =
+            crate::catalog::get_model_info(&request.model).map(|info| info.provider);
+
         let provider_name = request
             .provider
             .as_deref()
+            .or(catalog_provider.as_deref())
             .or(self.default_provider.as_deref())
             .ok_or_else(|| SdkError::Configuration {
                 message: "No provider specified and no default provider set".into(),
