@@ -150,6 +150,7 @@
             "group": "Deployment",
             "icon": "server",
             "pages": [
+              "administration/deploy-server",
               "administration/deploy-railway",
               "administration/deploy-render",
               "administration/deploy-fly-io",

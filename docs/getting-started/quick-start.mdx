@@ -10,7 +10,6 @@ description: "Get up and running with Arc"
 ## Prerequisites
 
 - [Rust](https://rustup.rs/) (latest stable)
-- [Bun](https://bun.sh/) (for the web frontend)
 - At least one LLM API key (e.g. `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, or `GEMINI_API_KEY`)
 
 ## Clone and build
@@ -32,9 +31,9 @@ cp .env.example .env
 Edit `.env` and add at least one LLM provider key:
 
 ```bash
-export ANTHROPIC_API_KEY=sk-ant-...
-export OPENAI_API_KEY=sk-...
-export GEMINI_API_KEY=AI...
+ANTHROPIC_API_KEY=sk-ant-...
+OPENAI_API_KEY=sk-...
+GEMINI_API_KEY=AI...
 ```
 
 <Note>
@@ -71,27 +70,12 @@ Or a multi-step plan-approve-implement workflow with a human approval gate:
 ./target/release/arc run docs-internal/demo/10-plan-implement.dot
 ```
 
-## Start the API server
+## Standalone vs. Server mode
 
-The API server exposes a REST API for launching and managing workflow runs:
+Arc has two modes:
 
-```bash
-./target/release/arc serve
-```
-
-This starts the server on `http://localhost:3000`. Demo mode is per-request — the web UI sends the `X-Arc-Demo: 1` header automatically when configured with `ARC_DEMO=1`.
-
-## Start the web frontend
-
-In a separate terminal, install dependencies and start the React dev server:
-
-```bash
-cd apps/arc-web
-bun install
-bun run dev
-```
-
-The web UI is available at `http://localhost:5173` and connects to the API server on port 3000.
+- **Standalone mode** — Run workflows directly from the CLI. This is what the quick start covers above.
+- **Server mode** — A REST API server with a web frontend for launching and managing workflow runs. See [Server Deployment](/administration/deploy-server) for details.
 
 ## Next steps
 
