@@ -432,6 +432,7 @@ dependencies = [
  "arc-git-storage",
  "arc-github",
  "arc-llm",
+ "arc-mcp",
  "arc-util",
  "assert_cmd",
  "async-trait",

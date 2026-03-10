@@ -785,6 +785,26 @@ impl Sandbox for DaytonaSandbox {
         self.origin_url.get().map(String::as_str)
     }
 
+    async fn get_preview_url(
+        &self,
+        port: u16,
+    ) -> Result<Option<(String, HashMap<String, String>)>, String> {
+        let sandbox = self.sandbox()?;
+        let preview = sandbox
+            .get_preview_link(port)
+            .await
+            .map_err(|e| format!("Failed to get preview link for port {port}: {e}"))?;
+        let mut headers = HashMap::new();
+        if !preview.token.is_empty() {
+            headers.insert("x-daytona-preview-token".to_string(), preview.token);
+        }
+        headers.insert(
+            "X-Daytona-Skip-Preview-Warning".to_string(),
+            "true".to_string(),
+        );
+        Ok(Some((preview.url, headers)))
+    }
+
     async fn refresh_push_credentials(&self) -> Result<(), String> {
         let origin_url = match self.origin_url.get() {
             Some(url) => url,

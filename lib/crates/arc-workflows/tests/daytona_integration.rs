@@ -2012,3 +2012,246 @@ async fn daytona_computer_use_browser_screenshot() {
     cu.stop().await.ok();
     env.cleanup().await.unwrap();
 }
+
+#[tokio::test]
+#[ignore]
+async fn daytona_playwright_mcp_sandbox_transport() {
+    use arc_agent::Sandbox;
+
+    // Create sandbox from daytona-medium (has Node.js + Chromium)
+    let tmp = tempfile::tempdir().unwrap();
+    std::env::set_current_dir(tmp.path()).unwrap();
+    dotenvy::dotenv().ok();
+    if let Some(home) = dirs::home_dir() {
+        dotenvy::from_path(home.join(".arc/.env")).ok();
+    }
+    let client = daytona_sdk::Client::new()
+        .await
+        .expect("DAYTONA_API_KEY must be set");
+    let config = DaytonaConfig {
+        snapshot: Some(DaytonaSnapshotConfig {
+            name: "daytona-medium".into(),
+            cpu: None,
+            memory: None,
+            disk: None,
+            dockerfile: None,
+        }),
+        ..DaytonaConfig::default()
+    };
+    let sandbox = DaytonaSandbox::new(client, config, None, None);
+    sandbox.initialize().await.unwrap();
+
+    // 1. Install Playwright MCP server and its browser
+    eprintln!("Installing @playwright/mcp and Chromium browser...");
+    let install = sandbox
+        .exec_command(
+            "npm install -g @playwright/mcp@latest 2>&1 && npx playwright install --with-deps chromium 2>&1",
+            300_000,
+            None,
+            None,
+            None,
+        )
+        .await
+        .unwrap();
+    eprintln!(
+        "Install exit_code={}, last_lines:\n{}",
+        install.exit_code,
+        install
+            .stdout
+            .lines()
+            .rev()
+            .take(5)
+            .collect::<Vec<_>>()
+            .into_iter()
+            .rev()
+            .collect::<Vec<_>>()
+            .join("\n")
+    );
+    assert_eq!(install.exit_code, 0, "Playwright install failed");
+
+    // 2. Start the Playwright MCP server via the sandbox transport resolution path
+    let mcp_port = 3100u16;
+    let mcp_config = arc_mcp::config::McpServerConfig {
+        name: "playwright".into(),
+        transport: arc_mcp::config::McpTransport::Sandbox {
+            command: vec![
+                "npx".into(),
+                "@playwright/mcp@latest".into(),
+                "--port".into(),
+                mcp_port.to_string(),
+                "--headless".into(),
+                "--browser".into(),
+                "chromium".into(),
+            ],
+            port: mcp_port,
+            env: std::collections::HashMap::new(),
+        },
+        startup_timeout_secs: 30,
+        tool_timeout_secs: 120,
+    };
+
+    // Resolve the sandbox transport: start the server, get preview URL, rewrite to HTTP
+    let resolved = match &mcp_config.transport {
+        arc_mcp::config::McpTransport::Sandbox { command, port, .. } => {
+            let (url, headers) = {
+                let cmd_str = command.join(" ");
+                let launch_script = format!(
+                    "setsid sh -c '{cmd_str} > /tmp/mcp_server_stdout.log 2>/tmp/mcp_server_stderr.log' \
+                     </dev/null >/dev/null 2>&1 &\necho $!"
+                );
+                let launch_result = sandbox
+                    .exec_command(&launch_script, 30_000, None, None, None)
+                    .await
+                    .unwrap();
+                eprintln!("MCP server PID: {}", launch_result.stdout.trim());
+
+                // Wait for server to listen
+                let poll_cmd = format!(
+                    "for i in $(seq 1 30); do ss -tln | grep -q ':{port} ' && echo ready && exit 0; sleep 1; done; echo timeout"
+                );
+                let poll_result = sandbox
+                    .exec_command(&poll_cmd, 60_000, None, None, None)
+                    .await
+                    .unwrap();
+                eprintln!("Server readiness: {}", poll_result.stdout.trim());
+
+                if poll_result.stdout.trim() != "ready" {
+                    let stderr = sandbox
+                        .exec_command(
+                            "cat /tmp/mcp_server_stderr.log 2>/dev/null | tail -20",
+                            10_000,
+                            None,
+                            None,
+                            None,
+                        )
+                        .await
+                        .map(|r| r.stdout)
+                        .unwrap_or_default();
+                    panic!("MCP server did not start on port {port}. stderr:\n{stderr}");
+                }
+
+                sandbox
+                    .get_preview_url(*port)
+                    .await
+                    .unwrap()
+                    .expect("sandbox should support preview URLs")
+            };
+            eprintln!("Preview URL: {url}");
+
+            arc_mcp::config::McpServerConfig {
+                name: mcp_config.name.clone(),
+                transport: arc_mcp::config::McpTransport::Http { url, headers },
+                startup_timeout_secs: mcp_config.startup_timeout_secs,
+                tool_timeout_secs: mcp_config.tool_timeout_secs,
+            }
+        }
+        _ => unreachable!(),
+    };
+
+    // 3. Connect the MCP client to the resolved HTTP endpoint
+    let mut manager = arc_mcp::connection_manager::McpConnectionManager::new();
+    let results = manager.start_servers(&[resolved]).await;
+    for (name, result) in &results {
+        match result {
+            Ok(count) => eprintln!("MCP server '{name}' ready with {count} tools"),
+            Err(e) => panic!("MCP server '{name}' failed: {e}"),
+        }
+    }
+
+    // 4. List the tools to verify we got Playwright tools
+    let tools = manager.all_tools();
+    eprintln!("Discovered {} MCP tools:", tools.len());
+    for (name, info) in tools {
+        eprintln!(
+            "  - {name}: {}",
+            info.description.chars().take(80).collect::<String>()
+        );
+    }
+    assert!(!tools.is_empty(), "Should have discovered Playwright tools");
+
+    // 5. Install the browser via MCP tool (ensures correct version is available)
+    let install_tool = tools
+        .keys()
+        .find(|k| k.ends_with("browser_install"))
+        .expect("no browser_install tool found");
+    eprintln!("Calling tool: {install_tool}");
+    let install_result = manager
+        .call_tool(
+            install_tool,
+            serde_json::json!({}),
+            std::time::Duration::from_secs(120),
+        )
+        .await;
+    match &install_result {
+        Ok(result) => eprintln!(
+            "Install result: {}",
+            result
+                .content
+                .first()
+                .map(|c| format!("{c:?}"))
+                .unwrap_or_default()
+        ),
+        Err(e) => eprintln!("Install error (non-fatal): {e}"),
+    }
+
+    // 6. Call the browser_navigate tool to load a page
+    let nav_tool = tools
+        .keys()
+        .find(|k| k.ends_with("browser_navigate"))
+        .expect("no browser_navigate tool found");
+    eprintln!("Calling tool: {nav_tool}");
+    let nav_result = manager
+        .call_tool(
+            nav_tool,
+            serde_json::json!({"url": "https://example.com"}),
+            std::time::Duration::from_secs(30),
+        )
+        .await;
+    match &nav_result {
+        Ok(result) => eprintln!(
+            "Navigate result: {}",
+            &result
+                .content
+                .first()
+                .map(|c| format!("{c:?}"))
+                .unwrap_or_default()
+        ),
+        Err(e) => eprintln!("Navigate error: {e}"),
+    }
+    assert!(nav_result.is_ok(), "Navigate should succeed");
+
+    // 7. Take a snapshot to verify the page loaded
+    let snap_tool = tools
+        .keys()
+        .find(|k| k.contains("snapshot"))
+        .expect("no snapshot tool found");
+    eprintln!("Calling tool: {snap_tool}");
+    let snap_result = manager
+        .call_tool(
+            snap_tool,
+            serde_json::json!({}),
+            std::time::Duration::from_secs(30),
+        )
+        .await;
+    match &snap_result {
+        Ok(result) => {
+            let text = result
+                .content
+                .first()
+                .map(|c| format!("{c:?}"))
+                .unwrap_or_default();
+            eprintln!(
+                "Snapshot result (first 500 chars): {}",
+                &text[..text.len().min(500)]
+            );
+            assert!(
+                text.contains("Example Domain"),
+                "Snapshot should contain 'Example Domain'"
+            );
+        }
+        Err(e) => panic!("Snapshot failed: {e}"),
+    }
+
+    // 8. Cleanup
+    sandbox.cleanup().await.unwrap();
+}

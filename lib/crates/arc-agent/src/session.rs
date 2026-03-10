@@ -16,12 +16,13 @@ use arc_llm::client::Client;
 use arc_llm::error::{ProviderErrorKind, SdkError};
 use arc_llm::generate::StreamAccumulator;
 use arc_llm::types::{Message, Request, StreamEvent, ToolChoice};
+use arc_mcp::config::McpServerConfig;
 use futures::StreamExt;
 use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
 use std::time::SystemTime;
 use tokio_util::sync::CancellationToken;
-use tracing::debug;
+use tracing::{debug, info, warn};
 
 pub struct Session {
     id: String,
@@ -118,8 +119,12 @@ impl Session {
 
         // Start MCP servers and register their tools
         if !self.config.mcp_servers.is_empty() {
+            // Resolve Sandbox transports: start the server inside the sandbox,
+            // then rewrite the config to Http using the sandbox's preview URL.
+            let mcp_servers = self.resolve_sandbox_mcp_servers().await;
+
             let mut manager = arc_mcp::connection_manager::McpConnectionManager::new();
-            let results = manager.start_servers(&self.config.mcp_servers).await;
+            let results = manager.start_servers(&mcp_servers).await;
 
             for (server_name, result) in &results {
                 match result {
@@ -169,6 +174,108 @@ impl Session {
             self.config.user_instructions.as_deref(),
             &self.skills,
         );
+    }
+
+    /// Resolve `McpTransport::Sandbox` configs by starting the MCP server inside the
+    /// sandbox and rewriting the transport to `Http` with the sandbox's preview URL.
+    async fn resolve_sandbox_mcp_servers(&self) -> Vec<McpServerConfig> {
+        let mut resolved = Vec::with_capacity(self.config.mcp_servers.len());
+
+        for config in &self.config.mcp_servers {
+            match &config.transport {
+                arc_mcp::config::McpTransport::Sandbox { command, port, env } => {
+                    let port = *port;
+                    match self.start_sandbox_mcp_server(command, port, env).await {
+                        Ok((url, headers)) => {
+                            info!(
+                                server = %config.name,
+                                url = %url,
+                                "Sandbox MCP server started, connecting via HTTP"
+                            );
+                            resolved.push(McpServerConfig {
+                                name: config.name.clone(),
+                                transport: arc_mcp::config::McpTransport::Http { url, headers },
+                                startup_timeout_secs: config.startup_timeout_secs,
+                                tool_timeout_secs: config.tool_timeout_secs,
+                            });
+                        }
+                        Err(e) => {
+                            warn!(
+                                server = %config.name,
+                                error = %e,
+                                "Failed to start sandbox MCP server"
+                            );
+                            self.event_emitter.emit(
+                                self.id.clone(),
+                                AgentEvent::McpServerFailed {
+                                    server_name: config.name.clone(),
+                                    error: e,
+                                },
+                            );
+                        }
+                    }
+                }
+                _ => resolved.push(config.clone()),
+            }
+        }
+
+        resolved
+    }
+
+    /// Start an MCP server inside the sandbox and return (url, headers) for HTTP connection.
+    async fn start_sandbox_mcp_server(
+        &self,
+        command: &[String],
+        port: u16,
+        env: &std::collections::HashMap<String, String>,
+    ) -> Result<(String, std::collections::HashMap<String, String>), String> {
+        let sandbox = self.sandbox.as_ref();
+
+        let cmd_str = command.join(" ");
+
+        // Launch the server detached with setsid so Daytona's exec doesn't block
+        let launch_script = format!(
+            "setsid sh -c '{cmd_str} > /tmp/mcp_server_stdout.log 2>/tmp/mcp_server_stderr.log' \
+             </dev/null >/dev/null 2>&1 &\necho $!"
+        );
+        let env_ref = if env.is_empty() { None } else { Some(env) };
+        let launch_result = sandbox
+            .exec_command(&launch_script, 30_000, None, env_ref, None)
+            .await
+            .map_err(|e| format!("Failed to launch MCP server: {e}"))?;
+
+        let pid = launch_result.stdout.trim();
+        info!(pid, port, "MCP server process launched in sandbox");
+
+        // Wait for the server to start listening on the port
+        let poll_cmd = format!("for i in $(seq 1 30); do ss -tln | grep -q ':{port} ' && echo ready && exit 0; sleep 1; done; echo timeout");
+        let poll_result = sandbox
+            .exec_command(&poll_cmd, 60_000, None, None, None)
+            .await
+            .map_err(|e| format!("Failed to poll MCP server readiness: {e}"))?;
+
+        if poll_result.stdout.trim() != "ready" {
+            // Grab stderr for debugging
+            let stderr = sandbox
+                .exec_command(
+                    "cat /tmp/mcp_server_stderr.log 2>/dev/null | tail -20",
+                    10_000,
+                    None,
+                    None,
+                    None,
+                )
+                .await
+                .map(|r| r.stdout)
+                .unwrap_or_default();
+            return Err(format!(
+                "MCP server did not start listening on port {port} within 30s. stderr:\n{stderr}"
+            ));
+        }
+
+        // Get the preview URL for the port
+        sandbox.get_preview_url(port).await?.ok_or_else(|| {
+            "Sandbox does not support preview URLs (not a remote sandbox?)".to_string()
+        })
     }
 
     async fn build_env_context(&self) -> EnvContext {

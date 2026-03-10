@@ -1,5 +1,6 @@
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::fmt::Write;
 use std::path::Path;
 use std::sync::Arc;
@@ -119,6 +120,10 @@ macro_rules! delegate_sandbox {
 
             fn origin_url(&self) -> Option<&str> {
                 self.$field.origin_url()
+            }
+
+            async fn get_preview_url(&self, port: u16) -> Result<Option<(String, std::collections::HashMap<String, String>)>, String> {
+                self.$field.get_preview_url(port).await
             }
 
             async fn read_file(
@@ -408,6 +413,16 @@ pub trait Sandbox: Send + Sync {
     /// The display URL of the cloned origin remote, if known.
     fn origin_url(&self) -> Option<&str> {
         None
+    }
+
+    /// Get an authenticated preview URL for a port exposed by this sandbox.
+    /// Returns `Ok(None)` when the sandbox does not support port previews.
+    /// Used to connect to services (e.g. MCP servers) running inside the sandbox.
+    async fn get_preview_url(
+        &self,
+        _port: u16,
+    ) -> Result<Option<(String, HashMap<String, String>)>, String> {
+        Ok(None)
     }
 
     /// Record that the agent has explicitly read (seen) the given file path.

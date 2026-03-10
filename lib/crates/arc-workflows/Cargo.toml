@@ -55,6 +55,7 @@ tracing.workspace = true
 walkdir.workspace = true
 reqwest.workspace = true
 [dev-dependencies]
+arc-mcp = { path = "../arc-mcp" }
 mockito = "1"
 tokio = { workspace = true, features = ["test-util", "macros"] }
 tempfile = "3"

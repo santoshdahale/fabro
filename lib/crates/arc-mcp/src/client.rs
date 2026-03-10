@@ -82,6 +82,12 @@ impl McpClient {
 
                 PendingTransport::Http(transport)
             }
+            McpTransport::Sandbox { .. } => {
+                return Err(anyhow!(
+                    "MCP server '{}': Sandbox transport must be resolved to Http before connecting",
+                    config.name
+                ));
+            }
         };
 
         let transport_type = match &transport {

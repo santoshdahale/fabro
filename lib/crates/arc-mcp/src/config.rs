@@ -46,6 +46,15 @@ pub enum McpTransport {
         #[serde(default)]
         headers: HashMap<String, String>,
     },
+    /// MCP server that runs inside a sandbox and is accessed via HTTP preview URL.
+    /// During session init, the server is started inside the sandbox and this
+    /// variant is resolved into an `Http` transport using the sandbox's preview URL.
+    Sandbox {
+        command: Vec<String>,
+        port: u16,
+        #[serde(default)]
+        env: HashMap<String, String>,
+    },
 }
 
 #[cfg(test)]
