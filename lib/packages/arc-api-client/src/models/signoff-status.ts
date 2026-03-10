@@ -15,16 +15,16 @@
 
 
 /**
- * Pull request creation configuration.
+ * Status of a signoff.
  */
-export interface PullRequestConfiguration {
-    /**
-     * Whether to create a pull request after a successful run.
-     */
-    'enabled'?: boolean;
-    /**
-     * Whether to create the pull request as a draft.
-     */
-    'draft'?: boolean;
-}
+
+export const SignoffStatus = {
+    PASS: 'pass',
+    FAIL: 'fail',
+    PENDING: 'pending'
+} as const;
+
+export type SignoffStatus = typeof SignoffStatus[keyof typeof SignoffStatus];
+
+
 

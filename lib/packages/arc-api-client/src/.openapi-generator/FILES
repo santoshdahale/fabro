@@ -40,9 +40,11 @@ models/completion-usage.ts
 models/control-detail.ts
 models/control-info.ts
 models/control-performance.ts
+models/control-reference.ts
 models/create-completion-request.ts
 models/create-session-request.ts
 models/create-session-response.ts
+models/create-signoff-request.ts
 models/criterion-reference.ts
 models/daytona-configuration-network-one-of.ts
 models/daytona-configuration-network.ts
@@ -70,6 +72,7 @@ models/index.ts
 models/learning-category.ts
 models/learning.ts
 models/llm-configuration.ts
+models/local-sandbox-configuration.ts
 models/log-configuration.ts
 models/model-costs.ts
 models/model-features.ts
@@ -89,6 +92,7 @@ models/paginated-run-stage-list.ts
 models/paginated-run-verification-list.ts
 models/paginated-saved-query-list.ts
 models/paginated-session-list.ts
+models/paginated-signoff-list.ts
 models/paginated-stage-turn-list.ts
 models/paginated-verification-control-list.ts
 models/paginated-verification-criterion-list.ts
@@ -132,6 +136,8 @@ models/session-list-item.ts
 models/session-turn.ts
 models/setup-configuration.ts
 models/sibling-control.ts
+models/signoff-status.ts
+models/signoff.ts
 models/smoothness-rating.ts
 models/stage-retro.ts
 models/stage-status.ts

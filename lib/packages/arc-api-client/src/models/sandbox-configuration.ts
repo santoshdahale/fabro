@@ -19,6 +19,9 @@ import type { DaytonaConfiguration } from './daytona-configuration';
 // May contain unused imports in some cases
 // @ts-ignore
 import type { ExeConfiguration } from './exe-configuration';
+// May contain unused imports in some cases
+// @ts-ignore
+import type { LocalSandboxConfiguration } from './local-sandbox-configuration';
 
 /**
  * Sandbox execution environment settings.
@@ -34,6 +37,7 @@ export interface SandboxConfiguration {
     'preserve'?: boolean;
     'daytona'?: DaytonaConfiguration;
     'exe'?: ExeConfiguration;
+    'local'?: LocalSandboxConfiguration;
     /**
      * Environment variables injected into the sandbox.
      */

@@ -13,18 +13,18 @@
  */
 
 
+// May contain unused imports in some cases
+// @ts-ignore
+import type { PaginationMeta } from './pagination-meta';
+// May contain unused imports in some cases
+// @ts-ignore
+import type { Signoff } from './signoff';
 
 /**
- * Pull request creation configuration.
+ * Paginated list of signoffs.
  */
-export interface PullRequestConfiguration {
-    /**
-     * Whether to create a pull request after a successful run.
-     */
-    'enabled'?: boolean;
-    /**
-     * Whether to create the pull request as a draft.
-     */
-    'draft'?: boolean;
+export interface PaginatedSignoffList {
+    'data': Array<Signoff>;
+    'meta': PaginationMeta;
 }
 

@@ -15,16 +15,12 @@
 
 
 /**
- * Pull request creation configuration.
+ * Reference to a verification control by slug.
  */
-export interface PullRequestConfiguration {
+export interface ControlReference {
     /**
-     * Whether to create a pull request after a successful run.
+     * Control slug.
      */
-    'enabled'?: boolean;
-    /**
-     * Whether to create the pull request as a draft.
-     */
-    'draft'?: boolean;
+    'slug': string;
 }
 

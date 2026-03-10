@@ -22,11 +22,17 @@ import { DUMMY_BASE_URL, assertParamExists, setApiKeyToObject, setBasicAuthToObj
 // @ts-ignore
 import { BASE_PATH, COLLECTION_FORMATS, type RequestArgs, BaseAPI, RequiredError, operationServerMap } from '../base';
 // @ts-ignore
+import type { CreateSignoffRequest } from '../models';
+// @ts-ignore
 import type { ErrorResponse } from '../models';
+// @ts-ignore
+import type { PaginatedSignoffList } from '../models';
 // @ts-ignore
 import type { PaginatedVerificationControlList } from '../models';
 // @ts-ignore
 import type { PaginatedVerificationCriterionList } from '../models';
+// @ts-ignore
+import type { Signoff } from '../models';
 // @ts-ignore
 import type { VerificationCriterionDetail } from '../models';
 // @ts-ignore
@@ -36,6 +42,110 @@ import type { VerificationDetailResponse } from '../models';
  */
 export const VerificationApiAxiosParamCreator = function (configuration?: Configuration) {
     return {
+        /**
+         * Creates a new signoff for a (control, repository, commit SHA) tuple. Multiple signoffs are allowed per tuple; the latest one wins for display purposes.
+         * @summary Create Signoff
+         * @param {CreateSignoffRequest} createSignoffRequest 
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        createSignoff: async (createSignoffRequest: CreateSignoffRequest, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'createSignoffRequest' is not null or undefined
+            assertParamExists('createSignoff', 'createSignoffRequest', createSignoffRequest)
+            const localVarPath = `/verification/signoffs`;
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            // authentication mTLS required
+            await setApiKeyToObject(localVarHeaderParameter, "X-mTLS-Client-CN", configuration)
+
+            // authentication BearerAuth required
+            // http bearer authentication required
+            await setBearerAuthToObject(localVarHeaderParameter, configuration)
+
+            localVarHeaderParameter['Content-Type'] = 'application/json';
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+            localVarRequestOptions.data = serializeDataIfNeeded(createSignoffRequest, localVarRequestOptions, configuration)
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         * Returns a paginated list of signoffs, optionally filtered by control, repository, and/or commit SHA.
+         * @summary List Signoffs
+         * @param {string} [control] Filter signoffs by control slug.
+         * @param {string} [repository] Filter signoffs by repository name.
+         * @param {string} [commitSha] Filter signoffs by commit SHA.
+         * @param {number} [pageLimit] Maximum number of items to return per page.
+         * @param {number} [pageOffset] Number of items to skip before returning results.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        listSignoffs: async (control?: string, repository?: string, commitSha?: string, pageLimit?: number, pageOffset?: number, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            const localVarPath = `/verification/signoffs`;
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            // authentication mTLS required
+            await setApiKeyToObject(localVarHeaderParameter, "X-mTLS-Client-CN", configuration)
+
+            // authentication BearerAuth required
+            // http bearer authentication required
+            await setBearerAuthToObject(localVarHeaderParameter, configuration)
+
+            if (control !== undefined) {
+                localVarQueryParameter['control'] = control;
+            }
+
+            if (repository !== undefined) {
+                localVarQueryParameter['repository'] = repository;
+            }
+
+            if (commitSha !== undefined) {
+                localVarQueryParameter['commit_sha'] = commitSha;
+            }
+
+            if (pageLimit !== undefined) {
+                localVarQueryParameter['page[limit]'] = pageLimit;
+            }
+
+            if (pageOffset !== undefined) {
+                localVarQueryParameter['page[offset]'] = pageOffset;
+            }
+
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
         /**
          * Returns a flat paginated list of all verification controls across all criteria.
          * @summary List Verification Controls
@@ -118,6 +228,47 @@ export const VerificationApiAxiosParamCreator = function (configuration?: Config
             if (pageOffset !== undefined) {
                 localVarQueryParameter['page[offset]'] = pageOffset;
             }
+
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         * Returns a specific signoff by ID.
+         * @summary Retrieve Signoff
+         * @param {string} id Unique identifier of a signoff (ULID).
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        retrieveSignoff: async (id: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'id' is not null or undefined
+            assertParamExists('retrieveSignoff', 'id', id)
+            const localVarPath = `/verification/signoffs/{id}`
+                .replace(`{${"id"}}`, encodeURIComponent(String(id)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            // authentication mTLS required
+            await setApiKeyToObject(localVarHeaderParameter, "X-mTLS-Client-CN", configuration)
+
+            // authentication BearerAuth required
+            // http bearer authentication required
+            await setBearerAuthToObject(localVarHeaderParameter, configuration)
 
             localVarHeaderParameter['Accept'] = 'application/json';
 
@@ -222,6 +373,36 @@ export const VerificationApiFp = function(configuration?: Configuration) {
     const localVarAxiosParamCreator = VerificationApiAxiosParamCreator(configuration)
     return {
         /**
+         * Creates a new signoff for a (control, repository, commit SHA) tuple. Multiple signoffs are allowed per tuple; the latest one wins for display purposes.
+         * @summary Create Signoff
+         * @param {CreateSignoffRequest} createSignoffRequest 
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async createSignoff(createSignoffRequest: CreateSignoffRequest, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<Signoff>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.createSignoff(createSignoffRequest, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['VerificationApi.createSignoff']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         * Returns a paginated list of signoffs, optionally filtered by control, repository, and/or commit SHA.
+         * @summary List Signoffs
+         * @param {string} [control] Filter signoffs by control slug.
+         * @param {string} [repository] Filter signoffs by repository name.
+         * @param {string} [commitSha] Filter signoffs by commit SHA.
+         * @param {number} [pageLimit] Maximum number of items to return per page.
+         * @param {number} [pageOffset] Number of items to skip before returning results.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async listSignoffs(control?: string, repository?: string, commitSha?: string, pageLimit?: number, pageOffset?: number, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<PaginatedSignoffList>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.listSignoffs(control, repository, commitSha, pageLimit, pageOffset, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['VerificationApi.listSignoffs']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
          * Returns a flat paginated list of all verification controls across all criteria.
          * @summary List Verification Controls
          * @param {number} [pageLimit] Maximum number of items to return per page.
@@ -247,6 +428,19 @@ export const VerificationApiFp = function(configuration?: Configuration) {
             const localVarAxiosArgs = await localVarAxiosParamCreator.listVerificationCriteria(pageLimit, pageOffset, options);
             const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
             const localVarOperationServerBasePath = operationServerMap['VerificationApi.listVerificationCriteria']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         * Returns a specific signoff by ID.
+         * @summary Retrieve Signoff
+         * @param {string} id Unique identifier of a signoff (ULID).
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async retrieveSignoff(id: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<Signoff>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.retrieveSignoff(id, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['VerificationApi.retrieveSignoff']?.[localVarOperationServerIndex]?.url;
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
@@ -285,6 +479,30 @@ export const VerificationApiFactory = function (configuration?: Configuration, b
     const localVarFp = VerificationApiFp(configuration)
     return {
         /**
+         * Creates a new signoff for a (control, repository, commit SHA) tuple. Multiple signoffs are allowed per tuple; the latest one wins for display purposes.
+         * @summary Create Signoff
+         * @param {CreateSignoffRequest} createSignoffRequest 
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        createSignoff(createSignoffRequest: CreateSignoffRequest, options?: RawAxiosRequestConfig): AxiosPromise<Signoff> {
+            return localVarFp.createSignoff(createSignoffRequest, options).then((request) => request(axios, basePath));
+        },
+        /**
+         * Returns a paginated list of signoffs, optionally filtered by control, repository, and/or commit SHA.
+         * @summary List Signoffs
+         * @param {string} [control] Filter signoffs by control slug.
+         * @param {string} [repository] Filter signoffs by repository name.
+         * @param {string} [commitSha] Filter signoffs by commit SHA.
+         * @param {number} [pageLimit] Maximum number of items to return per page.
+         * @param {number} [pageOffset] Number of items to skip before returning results.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        listSignoffs(control?: string, repository?: string, commitSha?: string, pageLimit?: number, pageOffset?: number, options?: RawAxiosRequestConfig): AxiosPromise<PaginatedSignoffList> {
+            return localVarFp.listSignoffs(control, repository, commitSha, pageLimit, pageOffset, options).then((request) => request(axios, basePath));
+        },
+        /**
          * Returns a flat paginated list of all verification controls across all criteria.
          * @summary List Verification Controls
          * @param {number} [pageLimit] Maximum number of items to return per page.
@@ -305,6 +523,16 @@ export const VerificationApiFactory = function (configuration?: Configuration, b
          */
         listVerificationCriteria(pageLimit?: number, pageOffset?: number, options?: RawAxiosRequestConfig): AxiosPromise<PaginatedVerificationCriterionList> {
             return localVarFp.listVerificationCriteria(pageLimit, pageOffset, options).then((request) => request(axios, basePath));
+        },
+        /**
+         * Returns a specific signoff by ID.
+         * @summary Retrieve Signoff
+         * @param {string} id Unique identifier of a signoff (ULID).
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        retrieveSignoff(id: string, options?: RawAxiosRequestConfig): AxiosPromise<Signoff> {
+            return localVarFp.retrieveSignoff(id, options).then((request) => request(axios, basePath));
         },
         /**
          * Returns detailed information about a specific verification control, including performance data, recent results, and sibling controls in the same criterion.
@@ -334,6 +562,32 @@ export const VerificationApiFactory = function (configuration?: Configuration, b
  */
 export class VerificationApi extends BaseAPI {
     /**
+     * Creates a new signoff for a (control, repository, commit SHA) tuple. Multiple signoffs are allowed per tuple; the latest one wins for display purposes.
+     * @summary Create Signoff
+     * @param {CreateSignoffRequest} createSignoffRequest 
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public createSignoff(createSignoffRequest: CreateSignoffRequest, options?: RawAxiosRequestConfig) {
+        return VerificationApiFp(this.configuration).createSignoff(createSignoffRequest, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     * Returns a paginated list of signoffs, optionally filtered by control, repository, and/or commit SHA.
+     * @summary List Signoffs
+     * @param {string} [control] Filter signoffs by control slug.
+     * @param {string} [repository] Filter signoffs by repository name.
+     * @param {string} [commitSha] Filter signoffs by commit SHA.
+     * @param {number} [pageLimit] Maximum number of items to return per page.
+     * @param {number} [pageOffset] Number of items to skip before returning results.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public listSignoffs(control?: string, repository?: string, commitSha?: string, pageLimit?: number, pageOffset?: number, options?: RawAxiosRequestConfig) {
+        return VerificationApiFp(this.configuration).listSignoffs(control, repository, commitSha, pageLimit, pageOffset, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
      * Returns a flat paginated list of all verification controls across all criteria.
      * @summary List Verification Controls
      * @param {number} [pageLimit] Maximum number of items to return per page.
@@ -355,6 +609,17 @@ export class VerificationApi extends BaseAPI {
      */
     public listVerificationCriteria(pageLimit?: number, pageOffset?: number, options?: RawAxiosRequestConfig) {
         return VerificationApiFp(this.configuration).listVerificationCriteria(pageLimit, pageOffset, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     * Returns a specific signoff by ID.
+     * @summary Retrieve Signoff
+     * @param {string} id Unique identifier of a signoff (ULID).
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public retrieveSignoff(id: string, options?: RawAxiosRequestConfig) {
+        return VerificationApiFp(this.configuration).retrieveSignoff(id, options).then((request) => request(this.axios, this.basePath));
     }
 
     /**

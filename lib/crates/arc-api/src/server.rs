@@ -211,6 +211,11 @@ fn demo_routes() -> Router<Arc<AppState>> {
             "/verification/controls/{id}",
             get(crate::demo::get_verification_control),
         )
+        .route(
+            "/verification/signoffs",
+            get(crate::demo::list_signoffs).post(crate::demo::create_signoff_stub),
+        )
+        .route("/verification/signoffs/{id}", get(crate::demo::get_signoff))
         .route("/retros", get(crate::demo::list_retros))
         .route(
             "/sessions",
@@ -273,6 +278,11 @@ fn real_routes() -> Router<Arc<AppState>> {
         .route("/verification/criteria/{id}", get(not_implemented))
         .route("/verification/controls", get(not_implemented))
         .route("/verification/controls/{id}", get(not_implemented))
+        .route(
+            "/verification/signoffs",
+            get(not_implemented).post(not_implemented),
+        )
+        .route("/verification/signoffs/{id}", get(not_implemented))
         .route("/retros", get(not_implemented))
         .route(
             "/sessions",

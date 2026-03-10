@@ -344,6 +344,56 @@ pub async fn get_verification_control(
     }
 }
 
+// ── Signoffs ──────────────────────────────────────────────────────────
+
+#[derive(serde::Deserialize)]
+pub struct SignoffListParams {
+    #[serde(rename = "page[limit]", default = "crate::server::default_page_limit")]
+    limit: u32,
+    #[serde(rename = "page[offset]", default)]
+    offset: u32,
+    control: Option<String>,
+    repository: Option<String>,
+    commit_sha: Option<String>,
+}
+
+pub async fn list_signoffs(
+    _auth: AuthenticatedService,
+    State(_state): State<Arc<AppState>>,
+    Query(params): Query<SignoffListParams>,
+) -> Response {
+    let items = signoffs::list_items(
+        params.control.as_deref(),
+        params.repository.as_deref(),
+        params.commit_sha.as_deref(),
+    );
+    paginated_response(
+        items,
+        &PaginationParams {
+            limit: params.limit,
+            offset: params.offset,
+        },
+    )
+}
+
+pub async fn get_signoff(
+    _auth: AuthenticatedService,
+    State(_state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+) -> Response {
+    match signoffs::detail(&id) {
+        Some(signoff) => (StatusCode::OK, Json(signoff)).into_response(),
+        None => ApiError::not_found("Signoff not found.").into_response(),
+    }
+}
+
+pub async fn create_signoff_stub(
+    _auth: AuthenticatedService,
+    State(_state): State<Arc<AppState>>,
+) -> Response {
+    (StatusCode::CREATED, Json(signoffs::stub_created())).into_response()
+}
+
 // ── Retros ─────────────────────────────────────────────────────────────
 
 pub async fn list_retros(
@@ -2539,6 +2589,121 @@ mod verifications {
                     .collect(),
             })
             .collect()
+    }
+}
+
+mod signoffs {
+    use super::ts;
+    use arc_types::*;
+
+    struct SignoffDef {
+        id: &'static str,
+        control_slug: &'static str,
+        repo: &'static str,
+        commit_sha: &'static str,
+        status: SignoffStatus,
+        url: Option<&'static str>,
+        description: Option<&'static str>,
+        source: Option<&'static str>,
+        created_at: &'static str,
+    }
+
+    const ALL_SIGNOFFS: &[SignoffDef] = &[
+        SignoffDef {
+            id: "01JQVKX0001SIGNOFF00001",
+            control_slug: "motivation",
+            repo: "api-server",
+            commit_sha: "a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2",
+            status: SignoffStatus::Pass,
+            url: Some("https://github.com/acme/api-server/actions/runs/12345"),
+            description: Some("PR links to JIRA-1234 with clear motivation"),
+            source: Some("github-actions"),
+            created_at: "2025-09-15T12:00:00Z",
+        },
+        SignoffDef {
+            id: "01JQVKX0001SIGNOFF00002",
+            control_slug: "test-coverage",
+            repo: "api-server",
+            commit_sha: "a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2",
+            status: SignoffStatus::Pass,
+            url: Some("https://github.com/acme/api-server/actions/runs/12346"),
+            description: Some("Coverage increased from 78% to 82%"),
+            source: Some("github-actions"),
+            created_at: "2025-09-15T12:01:00Z",
+        },
+        SignoffDef {
+            id: "01JQVKX0001SIGNOFF00003",
+            control_slug: "motivation",
+            repo: "web-dashboard",
+            commit_sha: "b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3",
+            status: SignoffStatus::Fail,
+            url: None,
+            description: Some("PR description is empty"),
+            source: Some("arc"),
+            created_at: "2025-09-14T16:30:00Z",
+        },
+        SignoffDef {
+            id: "01JQVKX0001SIGNOFF00004",
+            control_slug: "security-controls",
+            repo: "api-server",
+            commit_sha: "c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4",
+            status: SignoffStatus::Pending,
+            url: Some("https://acme.atlassian.net/browse/SEC-42"),
+            description: Some("Awaiting security team review"),
+            source: Some("jira"),
+            created_at: "2025-09-15T09:00:00Z",
+        },
+        SignoffDef {
+            id: "01JQVKX0001SIGNOFF00005",
+            control_slug: "test-coverage",
+            repo: "web-dashboard",
+            commit_sha: "b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3",
+            status: SignoffStatus::Pass,
+            url: Some("https://github.com/acme/web-dashboard/actions/runs/67890"),
+            description: Some("All tests passing, 91% coverage"),
+            source: Some("github-actions"),
+            created_at: "2025-09-14T17:00:00Z",
+        },
+    ];
+
+    fn to_signoff(def: &SignoffDef) -> Signoff {
+        Signoff {
+            id: def.id.into(),
+            control: ControlReference {
+                slug: def.control_slug.into(),
+            },
+            repository: RepositoryReference {
+                name: def.repo.into(),
+            },
+            commit_sha: def.commit_sha.into(),
+            status: def.status.clone(),
+            url: def.url.map(Into::into),
+            description: def.description.map(Into::into),
+            source: def.source.map(Into::into),
+            created_at: ts(def.created_at),
+        }
+    }
+
+    pub fn list_items(
+        control: Option<&str>,
+        repository: Option<&str>,
+        commit_sha: Option<&str>,
+    ) -> Vec<Signoff> {
+        ALL_SIGNOFFS
+            .iter()
+            .filter(|s| control.is_none_or(|c| s.control_slug == c))
+            .filter(|s| repository.is_none_or(|r| s.repo == r))
+            .filter(|s| commit_sha.is_none_or(|sha| s.commit_sha == sha))
+            .map(to_signoff)
+            .collect()
+    }
+
+    pub fn detail(id: &str) -> Option<Signoff> {
+        ALL_SIGNOFFS.iter().find(|s| s.id == id).map(to_signoff)
+    }
+
+    pub fn stub_created() -> Signoff {
+        to_signoff(&ALL_SIGNOFFS[0])
     }
 }
 

@@ -794,6 +794,72 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
 
+  /verification/signoffs:
+    get:
+      operationId: listSignoffs
+      tags: [Verification]
+      summary: List Signoffs
+      description: Returns a paginated list of signoffs, optionally filtered by control, repository, and/or commit SHA.
+      parameters:
+        - $ref: "#/components/parameters/SignoffControlFilter"
+        - $ref: "#/components/parameters/SignoffRepositoryFilter"
+        - $ref: "#/components/parameters/SignoffCommitShaFilter"
+        - $ref: "#/components/parameters/PageLimit"
+        - $ref: "#/components/parameters/PageOffset"
+      responses:
+        "200":
+          description: Paginated list of signoffs
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PaginatedSignoffList"
+    post:
+      operationId: createSignoff
+      tags: [Verification]
+      summary: Create Signoff
+      description: Creates a new signoff for a (control, repository, commit SHA) tuple. Multiple signoffs are allowed per tuple; the latest one wins for display purposes.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateSignoffRequest"
+      responses:
+        "201":
+          description: Signoff created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Signoff"
+        "400":
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /verification/signoffs/{id}:
+    get:
+      operationId: retrieveSignoff
+      tags: [Verification]
+      summary: Retrieve Signoff
+      description: Returns a specific signoff by ID.
+      parameters:
+        - $ref: "#/components/parameters/SignoffId"
+      responses:
+        "200":
+          description: Signoff detail
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Signoff"
+        "404":
+          description: Signoff not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
   # ── Retros ────────────────────────────────────────────────────────────
 
   /retros:
@@ -1287,6 +1353,42 @@ components:
       schema:
         type: string
       example: motivation
+
+    SignoffId:
+      name: id
+      in: path
+      required: true
+      description: Unique identifier of a signoff (ULID).
+      schema:
+        type: string
+      example: 01JQVKX0001SIGNOFF00001
+
+    SignoffControlFilter:
+      name: control
+      in: query
+      required: false
+      description: Filter signoffs by control slug.
+      schema:
+        type: string
+      example: motivation
+
+    SignoffRepositoryFilter:
+      name: repository
+      in: query
+      required: false
+      description: Filter signoffs by repository name.
+      schema:
+        type: string
+      example: api-server
+
+    SignoffCommitShaFilter:
+      name: commit_sha
+      in: query
+      required: false
+      description: Filter signoffs by commit SHA.
+      schema:
+        type: string
+      example: a1b2c3d4e5f6
 
     InsightQueryId:
       name: id
@@ -2981,6 +3083,121 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/VerificationControlListItem"
+        meta:
+          $ref: "#/components/schemas/PaginationMeta"
+
+    SignoffStatus:
+      description: Status of a signoff.
+      type: string
+      enum:
+        - pass
+        - fail
+        - pending
+
+    ControlReference:
+      description: Reference to a verification control by slug.
+      type: object
+      required:
+        - slug
+      properties:
+        slug:
+          type: string
+          description: Control slug.
+          example: motivation
+
+    Signoff:
+      description: A stamp of approval for a (control, repository, commit SHA) tuple.
+      type: object
+      required:
+        - id
+        - control
+        - repository
+        - commit_sha
+        - status
+        - created_at
+      properties:
+        id:
+          type: string
+          description: Unique identifier (ULID).
+          example: 01JQVKX0001SIGNOFF00001
+        control:
+          $ref: "#/components/schemas/ControlReference"
+        repository:
+          $ref: "#/components/schemas/RepositoryReference"
+        commit_sha:
+          type: string
+          description: Git commit SHA this signoff applies to.
+          example: a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2
+        status:
+          $ref: "#/components/schemas/SignoffStatus"
+        url:
+          type: string
+          nullable: true
+          description: Optional URL with more details about the signoff.
+          example: https://github.com/acme/api-server/actions/runs/12345
+        description:
+          type: string
+          nullable: true
+          description: Optional human-readable description.
+          example: All tests passed on CI
+        source:
+          type: string
+          nullable: true
+          description: Freeform string identifying the logical origin of the signoff.
+          example: github-actions
+        created_at:
+          type: string
+          format: date-time
+          description: When the signoff was created.
+          example: "2025-09-15T12:00:00Z"
+
+    CreateSignoffRequest:
+      description: Request body to create a new signoff.
+      type: object
+      required:
+        - control
+        - repository
+        - commit_sha
+        - status
+      properties:
+        control:
+          type: string
+          description: Control slug or ID.
+          example: motivation
+        repository:
+          type: string
+          description: Repository name.
+          example: api-server
+        commit_sha:
+          type: string
+          description: Git commit SHA.
+          example: a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2
+        status:
+          $ref: "#/components/schemas/SignoffStatus"
+        url:
+          type: string
+          description: Optional URL with more details.
+          example: https://github.com/acme/api-server/actions/runs/12345
+        description:
+          type: string
+          description: Optional human-readable description.
+          example: All tests passed on CI
+        source:
+          type: string
+          description: Freeform string identifying the logical origin.
+          example: github-actions
+
+    PaginatedSignoffList:
+      description: Paginated list of signoffs.
+      type: object
+      required:
+        - data
+        - meta
+      properties:
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/Signoff"
         meta:
           $ref: "#/components/schemas/PaginationMeta"
 
