@@ -17,6 +17,7 @@ exedev = ["arc-config/exedev", "arc-workflows/exedev"]
 [dependencies]
 arc-config = { path = "../arc-config" }
 arc-llm = { path = "../arc-llm" }
+arc-openai-oauth = { path = "../arc-openai-oauth" }
 arc-github = { path = "../arc-github" }
 arc-agent = { path = "../arc-agent" }
 arc-mcp = { path = "../arc-mcp" }

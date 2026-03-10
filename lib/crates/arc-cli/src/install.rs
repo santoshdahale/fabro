@@ -2,7 +2,6 @@
 use std::io::Write as _;
 use std::net::SocketAddr;
 use std::path::Path;
-#[cfg(feature = "server")]
 use std::process::{Command, Stdio};
 
 use anyhow::{bail, Context, Result};
@@ -262,6 +261,32 @@ fn provider_display_name(provider: Provider) -> &'static str {
         Provider::Minimax => "Minimax",
         Provider::Inception => "Inception",
     }
+}
+
+// ---------------------------------------------------------------------------
+// OpenAI OAuth helpers
+// ---------------------------------------------------------------------------
+
+/// Check if a binary exists on PATH using the doctor.rs pattern.
+fn detect_binary_on_path(binary: &str) -> bool {
+    Command::new(binary)
+        .arg("--version")
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false)
+}
+
+/// Convert OAuth tokens to env var pairs for ~/.arc/.env.
+fn openai_oauth_env_pairs(access_token: &str, refresh_token: &str) -> Vec<(String, String)> {
+    vec![
+        ("OPENAI_API_KEY".to_string(), access_token.to_string()),
+        (
+            "OPENAI_REFRESH_TOKEN".to_string(),
+            refresh_token.to_string(),
+        ),
+    ]
 }
 
 // ---------------------------------------------------------------------------
@@ -582,24 +607,70 @@ pub async fn run_install() -> Result<()> {
     let mut env_pairs: Vec<(String, String)> = Vec::new();
     let mut configured_providers: Vec<Provider> = Vec::new();
 
-    // First provider — single choice from the top 3
-    let primary_providers = [Provider::Anthropic, Provider::OpenAi, Provider::Gemini];
-    let primary_labels: Vec<String> = primary_providers
-        .iter()
-        .map(|p| provider_display_name(*p).to_string())
-        .collect();
+    let codex_detected = detect_binary_on_path("codex");
+    let mut openai_via_oauth = false;
 
-    let primary_idx: usize = tokio::task::spawn_blocking({
-        let labels = primary_labels.clone();
-        move || prompt_select("Choose your first LLM provider", &labels)
-    })
-    .await??;
+    if codex_detected {
+        tracing::debug!("Codex binary detected on PATH");
+        let use_oauth = tokio::task::spawn_blocking(|| {
+            prompt_confirm(
+                "OpenAI (Codex) detected. Set up OpenAI via browser login?",
+                true,
+            )
+        })
+        .await??;
 
-    let first_provider = primary_providers[primary_idx];
-    {
-        let (env_var, key) = prompt_and_validate_key(first_provider).await?;
-        env_pairs.push((env_var, key));
-        configured_providers.push(first_provider);
+        if use_oauth {
+            eprintln!("  Opening browser for OpenAI login...");
+            match arc_openai_oauth::run_browser_flow(
+                arc_openai_oauth::DEFAULT_ISSUER,
+                arc_openai_oauth::DEFAULT_CLIENT_ID,
+            )
+            .await
+            {
+                Ok(tokens) => {
+                    tracing::info!("OpenAI OAuth browser flow completed");
+                    env_pairs.extend(openai_oauth_env_pairs(
+                        &tokens.access_token,
+                        &tokens.refresh_token,
+                    ));
+                    configured_providers.push(Provider::OpenAi);
+                    openai_via_oauth = true;
+                    eprintln!("  [ok] OpenAI configured via browser login");
+                }
+                Err(e) => {
+                    tracing::warn!(error = %e, "OpenAI OAuth browser flow failed");
+                    eprintln!("  Browser login failed: {e}");
+                    eprintln!("  Falling back to manual API key entry.");
+                    let (env_var, key) = prompt_and_validate_key(Provider::OpenAi).await?;
+                    env_pairs.push((env_var, key));
+                    configured_providers.push(Provider::OpenAi);
+                    openai_via_oauth = true;
+                }
+            }
+        }
+    }
+
+    if !openai_via_oauth {
+        // First provider — single choice from the top 3
+        let primary_providers = [Provider::Anthropic, Provider::OpenAi, Provider::Gemini];
+        let primary_labels: Vec<String> = primary_providers
+            .iter()
+            .map(|p| provider_display_name(*p).to_string())
+            .collect();
+
+        let primary_idx: usize = tokio::task::spawn_blocking({
+            let labels = primary_labels.clone();
+            move || prompt_select("Choose your first LLM provider", &labels)
+        })
+        .await??;
+
+        let first_provider = primary_providers[primary_idx];
+        {
+            let (env_var, key) = prompt_and_validate_key(first_provider).await?;
+            env_pairs.push((env_var, key));
+            configured_providers.push(first_provider);
+        }
     }
 
     // Additional providers
@@ -849,6 +920,38 @@ async fn prompt_and_validate_key(provider: Provider) -> Result<(String, String)>
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // -- Binary detection --
+
+    #[test]
+    fn detect_binary_finds_existing_command() {
+        assert!(detect_binary_on_path("sh"));
+    }
+
+    #[test]
+    fn detect_binary_returns_false_for_nonexistent() {
+        assert!(!detect_binary_on_path("arc_nonexistent_xyz"));
+    }
+
+    // -- OpenAI OAuth env pairs --
+
+    #[test]
+    fn openai_oauth_env_pairs_sets_api_key() {
+        let pairs = openai_oauth_env_pairs("tok", "ref");
+        assert!(pairs.contains(&("OPENAI_API_KEY".to_string(), "tok".to_string())));
+    }
+
+    #[test]
+    fn openai_oauth_env_pairs_sets_refresh_token() {
+        let pairs = openai_oauth_env_pairs("tok", "ref");
+        assert!(pairs.contains(&("OPENAI_REFRESH_TOKEN".to_string(), "ref".to_string())));
+    }
+
+    #[test]
+    fn openai_oauth_env_pairs_count() {
+        let pairs = openai_oauth_env_pairs("tok", "ref");
+        assert_eq!(pairs.len(), 2);
+    }
 
     // -- Session secret (server only) --
 

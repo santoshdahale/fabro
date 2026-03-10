@@ -190,6 +190,7 @@ dependencies = [
  "arc-github",
  "arc-llm",
  "arc-mcp",
+ "arc-openai-oauth",
  "arc-util",
  "arc-workflows",
  "assert_cmd",
