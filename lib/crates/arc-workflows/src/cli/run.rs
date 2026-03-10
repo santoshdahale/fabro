@@ -276,7 +276,6 @@ pub async fn run_command(
         .workflow
         .as_ref()
         .ok_or_else(|| anyhow::anyhow!("--workflow is required unless --run-branch is provided"))?;
-    let workflow_path = &super::project_config::resolve_workflow_arg(workflow_path)?;
 
     // Apply project-level config overrides (arc.toml) on top of CLI defaults.
     // Workflow-level config (workflow.toml) still wins via apply_defaults below.
@@ -292,14 +291,16 @@ pub async fn run_command(
         }
     }
 
-    // 0. Load run config if TOML, resolve DOT path, apply defaults
-    let (dot_path, run_cfg) = if workflow_path.extension().is_some_and(|ext| ext == "toml") {
-        let mut cfg = run_config::load_run_config(workflow_path)?;
-        cfg.apply_defaults(&run_defaults);
-        let dot = run_config::resolve_graph_path(workflow_path, &cfg.graph);
-        (dot, Some(cfg))
-    } else {
-        (workflow_path.clone(), None)
+    // 0. Resolve workflow arg, load run config if TOML, resolve DOT path, apply defaults
+    let (dot_path, run_cfg) = {
+        let (dot, cfg) = super::project_config::resolve_workflow(workflow_path)?;
+        match cfg {
+            Some(mut cfg) => {
+                cfg.apply_defaults(&run_defaults);
+                (dot, Some(cfg))
+            }
+            None => (dot, None),
+        }
     };
 
     let directory = run_cfg

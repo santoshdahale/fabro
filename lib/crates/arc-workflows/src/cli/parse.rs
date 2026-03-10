@@ -13,7 +13,8 @@ pub fn parse_command(args: &ParseArgs) -> anyhow::Result<()> {
 }
 
 fn parse_command_to(args: &ParseArgs, mut out: impl Write) -> anyhow::Result<()> {
-    let source = read_dot_file(&args.workflow)?;
+    let (dot_path, _cfg) = super::project_config::resolve_workflow(&args.workflow)?;
+    let source = read_dot_file(&dot_path)?;
     let ast = crate::parser::parse_ast(&source)?;
     serde_json::to_writer_pretty(&mut out, &ast)?;
     writeln!(out)?;
@@ -29,7 +30,7 @@ mod tests {
 
     #[test]
     fn parse_command_outputs_json_ast() {
-        let mut tmp = tempfile::NamedTempFile::new().unwrap();
+        let mut tmp = tempfile::Builder::new().suffix(".dot").tempfile().unwrap();
         write!(
             tmp,
             r#"digraph Hello {{
@@ -53,7 +54,7 @@ mod tests {
 
     #[test]
     fn parse_command_rejects_invalid_dot() {
-        let mut tmp = tempfile::NamedTempFile::new().unwrap();
+        let mut tmp = tempfile::Builder::new().suffix(".dot").tempfile().unwrap();
         write!(tmp, "not a valid dot file").unwrap();
 
         let args = ParseArgs {
@@ -61,6 +62,36 @@ mod tests {
         };
         let result = parse_command_to(&args, Vec::new());
         assert!(result.is_err(), "expected Err for invalid syntax");
+    }
+
+    #[test]
+    fn parse_toml_path() {
+        let tmp = tempfile::tempdir().unwrap();
+        let wf_dir = tmp.path().join("workflows").join("hello");
+        std::fs::create_dir_all(&wf_dir).unwrap();
+        std::fs::write(
+            wf_dir.join("workflow.toml"),
+            "version = 1\ngraph = \"workflow.dot\"\n",
+        )
+        .unwrap();
+        std::fs::write(
+            wf_dir.join("workflow.dot"),
+            r#"digraph Hello {
+    start [shape=Mdiamond]
+    exit [shape=Msquare]
+    start -> exit
+}"#,
+        )
+        .unwrap();
+
+        let args = ParseArgs {
+            workflow: wf_dir.join("workflow.toml"),
+        };
+        let mut buf = Vec::new();
+        parse_command_to(&args, &mut buf).unwrap();
+
+        let deserialized: DotGraph = serde_json::from_slice(&buf).unwrap();
+        assert_eq!(deserialized.name, "Hello");
     }
 
     #[test]

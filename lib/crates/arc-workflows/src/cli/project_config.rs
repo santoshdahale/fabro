@@ -166,6 +166,31 @@ fn find_closest_match(input: &str, candidates: &[String]) -> Option<String> {
         .map(|(name, _)| name.clone())
 }
 
+/// Resolve a workflow argument to a DOT path and optional run config.
+///
+/// Calls `resolve_workflow_arg` first, then if the result is a `.toml` file,
+/// loads the run config and resolves the graph path within it.
+pub fn resolve_workflow(
+    arg: &Path,
+) -> anyhow::Result<(PathBuf, Option<super::run_config::WorkflowRunConfig>)> {
+    let start = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+    resolve_workflow_from(arg, &start)
+}
+
+fn resolve_workflow_from(
+    arg: &Path,
+    start_dir: &Path,
+) -> anyhow::Result<(PathBuf, Option<super::run_config::WorkflowRunConfig>)> {
+    let path = resolve_workflow_arg_from(arg, start_dir)?;
+    if path.extension().is_some_and(|ext| ext == "toml") {
+        let cfg = super::run_config::load_run_config(&path)?;
+        let dot = super::run_config::resolve_graph_path(&path, &cfg.graph);
+        Ok((dot, Some(cfg)))
+    } else {
+        Ok((path, None))
+    }
+}
+
 /// Check whether retros are enabled in the project config.
 /// Returns `true` (the default) if no config is found or on error.
 pub fn is_retro_enabled() -> bool {
@@ -411,5 +436,54 @@ mod tests {
 
         let result = resolve_workflow_arg_from(Path::new("factory"), tmp.path()).unwrap();
         assert_eq!(result, wf_dir.join("workflow.toml"));
+    }
+
+    /// Helper: create a temp dir with arc.toml + workflows/{name}/{workflow.toml, workflow.dot}
+    /// and chdir into it so `resolve_workflow` (which uses cwd) can find the config.
+    fn setup_workflow_project(name: &str) -> (TempDir, PathBuf) {
+        let tmp = TempDir::new().unwrap();
+        fs::write(tmp.path().join("arc.toml"), "version = 1\n").unwrap();
+        let wf_dir = tmp.path().join("workflows").join(name);
+        fs::create_dir_all(&wf_dir).unwrap();
+        fs::write(
+            wf_dir.join("workflow.toml"),
+            "version = 1\ngraph = \"workflow.dot\"\n",
+        )
+        .unwrap();
+        fs::write(
+            wf_dir.join("workflow.dot"),
+            "digraph G { start [shape=Mdiamond]; exit [shape=Msquare]; start -> exit }",
+        )
+        .unwrap();
+        let dot_path = wf_dir.join("workflow.dot");
+        (tmp, dot_path)
+    }
+
+    #[test]
+    fn resolve_workflow_bare_name() {
+        let (tmp, expected_dot) = setup_workflow_project("hello");
+        let (dot_path, cfg) = resolve_workflow_from(Path::new("hello"), tmp.path()).unwrap();
+        assert_eq!(
+            dot_path.canonicalize().unwrap(),
+            expected_dot.canonicalize().unwrap()
+        );
+        assert!(cfg.is_some(), "expected Some(RunConfig) for bare name");
+    }
+
+    #[test]
+    fn resolve_workflow_toml_path() {
+        let (tmp, expected_dot) = setup_workflow_project("hello");
+        let toml_path = tmp.path().join("workflows/hello/workflow.toml");
+        let (dot_path, cfg) = resolve_workflow_from(&toml_path, tmp.path()).unwrap();
+        assert_eq!(dot_path, expected_dot);
+        assert!(cfg.is_some(), "expected Some(RunConfig) for .toml path");
+    }
+
+    #[test]
+    fn resolve_workflow_dot_path() {
+        let (tmp, expected_dot) = setup_workflow_project("hello");
+        let (dot_path, cfg) = resolve_workflow_from(&expected_dot, tmp.path()).unwrap();
+        assert_eq!(dot_path, expected_dot);
+        assert!(cfg.is_none(), "expected None for .dot path");
     }
 }

@@ -1,7 +1,6 @@
 use anyhow::bail;
 use arc_util::terminal::Styles;
 
-use crate::cli::run_config;
 use crate::validation::Severity;
 use crate::workflow::prepare_from_file;
 
@@ -13,12 +12,7 @@ use super::{print_diagnostics, ValidateArgs};
 ///
 /// Returns an error if the file cannot be read, parsed, or has validation errors.
 pub fn validate_command(args: &ValidateArgs, styles: &Styles) -> anyhow::Result<()> {
-    let dot_path = if args.workflow.extension().is_some_and(|ext| ext == "toml") {
-        let cfg = run_config::load_run_config(&args.workflow)?;
-        run_config::resolve_graph_path(&args.workflow, &cfg.graph)
-    } else {
-        args.workflow.clone()
-    };
+    let (dot_path, _cfg) = super::project_config::resolve_workflow(&args.workflow)?;
 
     let (graph, diagnostics) = prepare_from_file(&dot_path)?;
 
@@ -47,7 +41,7 @@ mod tests {
 
     #[test]
     fn validate_valid_workflow() {
-        let mut tmp = tempfile::NamedTempFile::new().unwrap();
+        let mut tmp = tempfile::Builder::new().suffix(".dot").tempfile().unwrap();
         write!(
             tmp,
             r#"digraph Simple {{
@@ -75,7 +69,7 @@ mod tests {
 
     #[test]
     fn validate_invalid_syntax() {
-        let mut tmp = tempfile::NamedTempFile::new().unwrap();
+        let mut tmp = tempfile::Builder::new().suffix(".dot").tempfile().unwrap();
         write!(tmp, "not a valid dot file").unwrap();
 
         let args = ValidateArgs {
@@ -117,6 +111,36 @@ mod tests {
         .unwrap();
 
         let args = ValidateArgs { workflow: dot_path };
+        let styles = Styles::new(false);
+        let result = validate_command(&args, &styles);
+        assert!(result.is_ok(), "expected Ok but got: {result:?}");
+    }
+
+    #[test]
+    fn validate_toml_path() {
+        let tmp = tempfile::tempdir().unwrap();
+        let wf_dir = tmp.path().join("workflows").join("hello");
+        std::fs::create_dir_all(&wf_dir).unwrap();
+        std::fs::write(
+            wf_dir.join("workflow.toml"),
+            "version = 1\ngraph = \"workflow.dot\"\n",
+        )
+        .unwrap();
+        std::fs::write(
+            wf_dir.join("workflow.dot"),
+            r#"digraph Hello {
+    graph [goal="Test"]
+    start [shape=Mdiamond]
+    exit [shape=Msquare]
+    run [label="Run", prompt="Do it"]
+    start -> run -> exit
+}"#,
+        )
+        .unwrap();
+
+        let args = ValidateArgs {
+            workflow: wf_dir.join("workflow.toml"),
+        };
         let styles = Styles::new(false);
         let result = validate_command(&args, &styles);
         assert!(result.is_ok(), "expected Ok but got: {result:?}");
