@@ -17,6 +17,11 @@ on:
       - "package.json"
       - "bun.lock"
       - ".github/workflows/typescript.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 permissions:
   contents: read
