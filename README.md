@@ -96,6 +96,13 @@ cargo build --release
 arc install
 ```
 
+### Initialize your project
+
+```bash
+cd my-repo/
+arc init
+```
+
 ### Run your first workflow
 
 ```bash
