@@ -140,7 +140,7 @@ pub fn check_system_deps(specs: &[DepSpec], outcomes: &[ProbeOutcome]) -> CheckR
         };
 
         worst_status = worst_status.max(status);
-        details.push(CheckDetail { text });
+        details.push(CheckDetail::new(text));
     }
 
     let summary = match worst_status {
@@ -174,15 +174,11 @@ fn apply_live_result(
 ) -> (CheckStatus, Option<String>) {
     match live_result {
         Some(Ok(())) => {
-            details.push(CheckDetail {
-                text: "Connectivity: OK".to_string(),
-            });
+            details.push(CheckDetail::new("Connectivity: OK".to_string()));
             (CheckStatus::Pass, None)
         }
         Some(Err(e)) => {
-            details.push(CheckDetail {
-                text: format!("Connectivity: {e}"),
-            });
+            details.push(CheckDetail::new(format!("Connectivity: {e}")));
             (CheckStatus::Warning, Some(remediation_msg.to_string()))
         }
         None => (CheckStatus::Pass, None),
@@ -195,18 +191,16 @@ pub fn check_config(path: Option<PathBuf>) -> CheckResult {
             name: "Configuration".to_string(),
             status: CheckStatus::Pass,
             summary: p.display().to_string(),
-            details: vec![CheckDetail {
-                text: format!("Loaded from {}", p.display()),
-            }],
+            details: vec![CheckDetail::new(format!("Loaded from {}", p.display()))],
             remediation: None,
         },
         None => CheckResult {
             name: "Configuration".to_string(),
             status: CheckStatus::Warning,
             summary: "no config file found".to_string(),
-            details: vec![CheckDetail {
-                text: "Create ~/.arc/cli.toml to configure Arc".to_string(),
-            }],
+            details: vec![CheckDetail::new(
+                "Create ~/.arc/cli.toml to configure Arc".to_string(),
+            )],
             remediation: Some("Create ~/.arc/cli.toml".to_string()),
         },
     }
@@ -223,9 +217,7 @@ pub fn check_llm_providers(
         .filter(|(_, set)| *set)
         .map(|(provider, _)| {
             let env_vars = provider.api_key_env_vars().join(" or ");
-            CheckDetail {
-                text: format!("{provider} ({env_vars}): set"),
-            }
+            CheckDetail::new(format!("{provider} ({env_vars}): set"))
         })
         .collect();
 
@@ -233,14 +225,10 @@ pub fn check_llm_providers(
     if let Some(results) = live_results {
         for (provider, result) in results {
             match result {
-                Ok(()) => details.push(CheckDetail {
-                    text: format!("{provider} connectivity: OK"),
-                }),
+                Ok(()) => details.push(CheckDetail::new(format!("{provider} connectivity: OK",))),
                 Err(e) => {
                     failed_providers.push(provider);
-                    details.push(CheckDetail {
-                        text: format!("{provider} connectivity: {e}"),
-                    });
+                    details.push(CheckDetail::new(format!("{provider} connectivity: {e}",)));
                 }
             }
         }
@@ -278,12 +266,10 @@ pub fn check_brave_search(
     api_key_set: bool,
     live_result: Option<&Result<(), String>>,
 ) -> CheckResult {
-    let mut details = vec![CheckDetail {
-        text: format!(
-            "BRAVE_SEARCH_API_KEY is {}",
-            if api_key_set { "set" } else { "not set" }
-        ),
-    }];
+    let mut details = vec![CheckDetail::new(format!(
+        "BRAVE_SEARCH_API_KEY is {}",
+        if api_key_set { "set" } else { "not set" }
+    ))];
 
     let (mut status, mut remediation) = if api_key_set {
         (CheckStatus::Pass, None)
@@ -341,45 +327,39 @@ pub fn check_sandbox(status: &SandboxStatus) -> CheckResult {
     match &status.daytona_probe {
         Some(Ok(())) => {
             available.push("Daytona");
-            details.push(CheckDetail {
-                text: "Daytona (DAYTONA_API_KEY): available".to_string(),
-            });
+            details.push(CheckDetail::new(
+                "Daytona (DAYTONA_API_KEY): available".to_string(),
+            ));
         }
         Some(Err(e)) => {
             errors.push(format!("Daytona: {e}"));
-            details.push(CheckDetail {
-                text: format!("Daytona (DAYTONA_API_KEY): error — {e}"),
-            });
+            details.push(CheckDetail::new(format!(
+                "Daytona (DAYTONA_API_KEY): error — {e}",
+            )));
         }
         None if status.daytona_configured => {
-            details.push(CheckDetail {
-                text: "Daytona (DAYTONA_API_KEY): configured".to_string(),
-            });
+            details.push(CheckDetail::new(
+                "Daytona (DAYTONA_API_KEY): configured".to_string(),
+            ));
         }
         None => {
-            details.push(CheckDetail {
-                text: "Daytona (DAYTONA_API_KEY): not configured".to_string(),
-            });
+            details.push(CheckDetail::new(
+                "Daytona (DAYTONA_API_KEY): not configured".to_string(),
+            ));
         }
     }
 
     match &status.docker_probe {
         Some(Ok(())) => {
             available.push("Docker");
-            details.push(CheckDetail {
-                text: "Docker: available".to_string(),
-            });
+            details.push(CheckDetail::new("Docker: available".to_string()));
         }
         Some(Err(e)) => {
             errors.push(format!("Docker: {e}"));
-            details.push(CheckDetail {
-                text: format!("Docker: error — {e}"),
-            });
+            details.push(CheckDetail::new(format!("Docker: error — {e}")));
         }
         None => {
-            details.push(CheckDetail {
-                text: "Docker: not probed".to_string(),
-            });
+            details.push(CheckDetail::new("Docker: not probed".to_string()));
         }
     }
 
@@ -459,27 +439,19 @@ pub fn check_github_app(status: &GithubAppStatus) -> CheckResult {
     let mut details: Vec<CheckDetail> = Vec::new();
 
     match (&status.app_id, &status.slug) {
-        (Some(id), Some(slug)) => details.push(CheckDetail {
-            text: format!("App: {slug} (ID {id})"),
-        }),
-        (Some(id), None) => details.push(CheckDetail {
-            text: format!("App ID: {id}"),
-        }),
-        _ => details.push(CheckDetail {
-            text: "git.app_id: not set".to_string(),
-        }),
+        (Some(id), Some(slug)) => details.push(CheckDetail::new(format!("App: {slug} (ID {id})"))),
+        (Some(id), None) => details.push(CheckDetail::new(format!("App ID: {id}"))),
+        _ => details.push(CheckDetail::new("git.app_id: not set".to_string())),
     }
 
-    details.push(CheckDetail {
-        text: format!(
-            "GITHUB_APP_PRIVATE_KEY: {}",
-            if status.private_key_set {
-                "set"
-            } else {
-                "not set"
-            }
-        ),
-    });
+    details.push(CheckDetail::new(format!(
+        "GITHUB_APP_PRIVATE_KEY: {}",
+        if status.private_key_set {
+            "set"
+        } else {
+            "not set"
+        }
+    )));
 
     #[allow(unused_mut)]
     let mut fields: Vec<(&str, bool)> = vec![
@@ -495,9 +467,10 @@ pub fn check_github_app(status: &GithubAppStatus) -> CheckResult {
             ("GITHUB_APP_WEBHOOK_SECRET", status.webhook_secret),
         ];
         for (name, set) in &server_fields {
-            details.push(CheckDetail {
-                text: format!("{name}: {}", if *set { "set" } else { "not set" }),
-            });
+            details.push(CheckDetail::new(format!(
+                "{name}: {}",
+                if *set { "set" } else { "not set" }
+            )));
         }
         fields.extend(server_fields);
     }
@@ -505,12 +478,10 @@ pub fn check_github_app(status: &GithubAppStatus) -> CheckResult {
     // Add key validation detail
     if let Some(ref result) = status.sign_result {
         match result {
-            Ok(()) => details.push(CheckDetail {
-                text: "Private key: valid (JWT signing OK)".to_string(),
-            }),
-            Err(e) => details.push(CheckDetail {
-                text: format!("Private key: invalid ({e})"),
-            }),
+            Ok(()) => details.push(CheckDetail::new(
+                "Private key: valid (JWT signing OK)".to_string(),
+            )),
+            Err(e) => details.push(CheckDetail::new(format!("Private key: invalid ({e})"))),
         }
     }
 
@@ -606,15 +577,11 @@ fn format_auth_strategies(strategies: &[ApiAuthStrategy]) -> String {
 #[cfg(feature = "server")]
 pub fn check_api(status: &ApiStatus, live_result: Option<&Result<(), String>>) -> CheckResult {
     let mut details = vec![
-        CheckDetail {
-            text: format!("Base URL: {}", status.base_url),
-        },
-        CheckDetail {
-            text: format!(
-                "Authentication: {}",
-                format_auth_strategies(&status.authentication_strategies)
-            ),
-        },
+        CheckDetail::new(format!("Base URL: {}", status.base_url)),
+        CheckDetail::new(format!(
+            "Authentication: {}",
+            format_auth_strategies(&status.authentication_strategies)
+        )),
     ];
 
     let (check_status, remediation) = apply_live_result(
@@ -650,18 +617,15 @@ fn format_auth_provider(provider: &AuthProvider) -> &'static str {
 #[cfg(feature = "server")]
 pub fn check_web(status: &WebStatus, live_result: Option<&Result<(), String>>) -> CheckResult {
     let mut details = vec![
-        CheckDetail {
-            text: format!("URL: {}", status.url),
-        },
-        CheckDetail {
-            text: format!(
-                "Auth provider: {}",
-                format_auth_provider(&status.auth_provider)
-            ),
-        },
-        CheckDetail {
-            text: format!("Allowed usernames: {}", status.allowed_usernames_count),
-        },
+        CheckDetail::new(format!("URL: {}", status.url)),
+        CheckDetail::new(format!(
+            "Auth provider: {}",
+            format_auth_provider(&status.auth_provider)
+        )),
+        CheckDetail::new(format!(
+            "Allowed usernames: {}",
+            status.allowed_usernames_count
+        )),
     ];
 
     let (check_status, remediation) = apply_live_result(
@@ -790,14 +754,14 @@ impl CryptoCheckState {
     /// Err(msg) becomes an error detail and is accumulated for remediation.
     fn record(&mut self, label: &str, result: Result<String, String>) {
         match result {
-            Ok(suffix) => self.details.push(CheckDetail {
-                text: format!("{label}: {suffix}"),
-            }),
+            Ok(suffix) => self
+                .details
+                .push(CheckDetail::new(format!("{label}: {suffix}"))),
             Err(e) => {
                 self.worst = CheckStatus::Error;
                 let text = format!("{label}: {e}");
                 self.errors.push(text.clone());
-                self.details.push(CheckDetail { text });
+                self.details.push(CheckDetail::new(text));
             }
         }
     }
@@ -809,7 +773,7 @@ impl CryptoCheckState {
     fn push_error(&mut self, text: String) {
         self.worst = CheckStatus::Error;
         self.errors.push(text.clone());
-        self.details.push(CheckDetail { text });
+        self.details.push(CheckDetail::new(text));
     }
 }
 
@@ -873,9 +837,9 @@ pub fn check_crypto(input: &CryptoInput) -> CheckResult {
             name: "Cryptographic keys".to_string(),
             status: CheckStatus::Warning,
             summary: "no authentication configured".to_string(),
-            details: vec![CheckDetail {
-                text: "No authentication strategies or keys configured".to_string(),
-            }],
+            details: vec![CheckDetail::new(
+                "No authentication strategies or keys configured".to_string(),
+            )],
             remediation: Some(
                 "Configure authentication_strategies in [api] section of server.toml".to_string(),
             ),
@@ -1201,7 +1165,11 @@ pub async fn run_doctor(verbose: bool, live: bool) -> i32 {
         checks,
     };
 
-    print!("{}", report.render(&styles, verbose, None));
+    let term_width = console::Term::stderr().size().1;
+    print!(
+        "{}",
+        report.render(&styles, verbose, None, Some(term_width))
+    );
 
     if report.has_errors() {
         1

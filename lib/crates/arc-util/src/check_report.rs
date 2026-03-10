@@ -16,6 +16,13 @@ pub enum CheckStatus {
 #[derive(Debug, Clone)]
 pub struct CheckDetail {
     pub text: String,
+    pub warn: bool,
+}
+
+impl CheckDetail {
+    pub fn new(text: String) -> Self {
+        Self { text, warn: false }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -44,8 +51,17 @@ impl CheckReport {
             .count()
     }
 
-    pub fn render(&self, s: &Styles, verbose: bool, footer: Option<&str>) -> String {
+    pub fn render(
+        &self,
+        s: &Styles,
+        verbose: bool,
+        footer: Option<&str>,
+        max_width: Option<u16>,
+    ) -> String {
         let mut out = String::new();
+        let width = max_width.unwrap_or(80) as usize;
+        // "      • " is 8 chars of prefix before detail text
+        const DETAIL_PREFIX_LEN: usize = 8;
 
         writeln!(out, "{}", s.bold.apply_to(&self.title)).unwrap();
         writeln!(out).unwrap();
@@ -68,7 +84,19 @@ impl CheckReport {
 
             if verbose {
                 for detail in &check.details {
-                    writeln!(out, "      • {}", detail.text).unwrap();
+                    let text = if width > DETAIL_PREFIX_LEN
+                        && detail.text.len() + DETAIL_PREFIX_LEN > width
+                    {
+                        let max_text = width - DETAIL_PREFIX_LEN - 1;
+                        format!("{}…", &detail.text[..max_text])
+                    } else {
+                        detail.text.clone()
+                    };
+                    if detail.warn {
+                        writeln!(out, "      • {}", s.red.apply_to(&text)).unwrap();
+                    } else {
+                        writeln!(out, "      • {text}").unwrap();
+                    }
                 }
             }
         }
@@ -147,9 +175,7 @@ mod tests {
             name: name.to_string(),
             status: CheckStatus::Pass,
             summary: "all good".to_string(),
-            details: vec![CheckDetail {
-                text: "everything is fine".to_string(),
-            }],
+            details: vec![CheckDetail::new("everything is fine".to_string())],
             remediation: None,
         }
     }
@@ -159,9 +185,7 @@ mod tests {
             name: name.to_string(),
             status: CheckStatus::Warning,
             summary: "not configured".to_string(),
-            details: vec![CheckDetail {
-                text: "missing something".to_string(),
-            }],
+            details: vec![CheckDetail::new("missing something".to_string())],
             remediation: Some("fix it".to_string()),
         }
     }
@@ -171,9 +195,7 @@ mod tests {
             name: name.to_string(),
             status: CheckStatus::Error,
             summary: "broken".to_string(),
-            details: vec![CheckDetail {
-                text: "something is wrong".to_string(),
-            }],
+            details: vec![CheckDetail::new("something is wrong".to_string())],
             remediation: Some("repair it".to_string()),
         }
     }
@@ -190,7 +212,7 @@ mod tests {
     #[test]
     fn render_all_pass_no_color() {
         let r = report(vec![pass_check("Test")]);
-        let out = r.render(&Styles::new(false), false, None);
+        let out = r.render(&Styles::new(false), false, None, None);
         assert!(out.contains("[✓]"));
         assert!(out.contains("All checks passed."));
         assert!(out.contains("Test Report"));
@@ -201,7 +223,7 @@ mod tests {
     #[test]
     fn render_warning_footer() {
         let r = report(vec![warning_check("Optional")]);
-        let out = r.render(&Styles::new(false), false, None);
+        let out = r.render(&Styles::new(false), false, None, None);
         assert!(out.contains("[!]"));
         assert!(out.contains("Found issues in 1 category."));
         assert!(out.contains("Warnings:"));
@@ -213,7 +235,7 @@ mod tests {
     #[test]
     fn render_error_footer() {
         let r = report(vec![error_check("Broken")]);
-        let out = r.render(&Styles::new(false), false, None);
+        let out = r.render(&Styles::new(false), false, None, None);
         assert!(out.contains("[✗]"));
         assert!(out.contains("Errors:"));
         assert!(out.contains("repair it"));
@@ -224,7 +246,7 @@ mod tests {
     #[test]
     fn render_verbose_shows_details() {
         let r = report(vec![pass_check("Verbose")]);
-        let out = r.render(&Styles::new(false), true, None);
+        let out = r.render(&Styles::new(false), true, None, None);
         assert!(out.contains("•"));
         assert!(out.contains("everything is fine"));
     }
@@ -232,7 +254,7 @@ mod tests {
     #[test]
     fn render_default_hides_details() {
         let r = report(vec![pass_check("Verbose")]);
-        let out = r.render(&Styles::new(false), false, None);
+        let out = r.render(&Styles::new(false), false, None, None);
         assert!(!out.contains("everything is fine"));
     }
 
@@ -241,21 +263,21 @@ mod tests {
     #[test]
     fn render_color_pass_green() {
         let r = report(vec![pass_check("Color")]);
-        let out = r.render(&Styles::new(true), false, None);
+        let out = r.render(&Styles::new(true), false, None, None);
         assert!(out.contains("\x1b[32m")); // green
     }
 
     #[test]
     fn render_color_warning_yellow() {
         let r = report(vec![warning_check("Color")]);
-        let out = r.render(&Styles::new(true), false, None);
+        let out = r.render(&Styles::new(true), false, None, None);
         assert!(out.contains("\x1b[33m")); // yellow
     }
 
     #[test]
     fn render_color_error_red() {
         let r = report(vec![error_check("Color")]);
-        let out = r.render(&Styles::new(true), false, None);
+        let out = r.render(&Styles::new(true), false, None, None);
         assert!(out.contains("\x1b[31m")); // red
     }
 
@@ -288,7 +310,7 @@ mod tests {
     #[test]
     fn render_multiple_issues_pluralizes() {
         let r = report(vec![warning_check("A"), error_check("B")]);
-        let out = r.render(&Styles::new(false), false, None);
+        let out = r.render(&Styles::new(false), false, None, None);
         assert!(out.contains("2 categories"));
     }
 
@@ -301,6 +323,7 @@ mod tests {
             &Styles::new(false),
             false,
             Some("Run with --live to probe."),
+            None,
         );
         assert!(out.contains("Run with --live to probe."));
     }
@@ -308,7 +331,7 @@ mod tests {
     #[test]
     fn render_no_footer_when_none() {
         let r = report(vec![pass_check("Test")]);
-        let out = r.render(&Styles::new(false), false, None);
+        let out = r.render(&Styles::new(false), false, None, None);
         assert!(!out.contains("--live"));
     }
 
@@ -320,7 +343,59 @@ mod tests {
             title: "My Custom Title".into(),
             checks: vec![pass_check("Test")],
         };
-        let out = r.render(&Styles::new(false), false, None);
+        let out = r.render(&Styles::new(false), false, None, None);
         assert!(out.contains("My Custom Title"));
+    }
+
+    // -- render: truncation --
+
+    #[test]
+    fn render_truncates_long_detail_lines() {
+        let r = report(vec![CheckResult {
+            name: "Test".into(),
+            status: CheckStatus::Pass,
+            summary: "ok".into(),
+            details: vec![CheckDetail::new(
+                "This is a very long detail line for test".into(),
+            )],
+            remediation: None,
+        }]);
+        // max_width=40, prefix "      • " = 8 chars, so 31 chars for text + "…"
+        let out = r.render(&Styles::new(false), true, None, Some(40));
+        assert!(out.contains('…'));
+        assert!(!out.contains("for test"));
+    }
+
+    #[test]
+    fn render_no_truncation_when_fits() {
+        let r = report(vec![CheckResult {
+            name: "Test".into(),
+            status: CheckStatus::Pass,
+            summary: "ok".into(),
+            details: vec![CheckDetail::new("short".into())],
+            remediation: None,
+        }]);
+        let out = r.render(&Styles::new(false), true, None, Some(80));
+        assert!(out.contains("short"));
+        assert!(!out.contains('…'));
+    }
+
+    // -- render: warn detail --
+
+    #[test]
+    fn render_warn_detail_uses_red() {
+        let r = report(vec![CheckResult {
+            name: "Repo".into(),
+            status: CheckStatus::Pass,
+            summary: "ok".into(),
+            details: vec![CheckDetail {
+                text: "Git clean: false".into(),
+                warn: true,
+            }],
+            remediation: None,
+        }]);
+        let out = r.render(&Styles::new(true), true, None, None);
+        assert!(out.contains("\x1b[31m"));
+        assert!(out.contains("Git clean: false"));
     }
 }

@@ -401,6 +401,7 @@ pub async fn run_command(
             sandbox_provider,
             styles,
             github_app,
+            origin_url.as_deref(),
         )
         .await;
     }
@@ -1755,17 +1756,42 @@ async fn run_preflight(
     sandbox_provider: SandboxProvider,
     styles: &'static Styles,
     github_app: Option<arc_github::GitHubAppCredentials>,
+    origin_url: Option<&str>,
 ) -> anyhow::Result<()> {
     use arc_util::check_report::{CheckDetail, CheckReport, CheckResult, CheckStatus};
 
     let mut checks: Vec<CheckResult> = Vec::new();
 
-    // 1. Workflow metadata (always Pass)
+    // 1. Repository metadata
     let setup_command_count = run_cfg
         .as_ref()
         .and_then(|c| c.setup.as_ref())
         .map_or(0, |s| s.commands.len());
 
+    let repo_summary = origin_url
+        .map(|url| {
+            let https = arc_github::ssh_url_to_https(url);
+            arc_github::parse_github_owner_repo(&https)
+                .map(|(owner, repo)| format!("{owner}/{repo}"))
+                .unwrap_or_else(|_| url.to_string())
+        })
+        .unwrap_or_else(|| "unknown".into());
+
+    checks.push(CheckResult {
+        name: "Repository".into(),
+        status: CheckStatus::Pass,
+        summary: repo_summary,
+        details: vec![
+            CheckDetail::new(format!("Setup commands: {setup_command_count}")),
+            CheckDetail {
+                text: format!("Git clean: {git_clean}"),
+                warn: !git_clean,
+            },
+        ],
+        remediation: None,
+    });
+
+    // 2. Workflow metadata
     let (model, provider) = resolve_model_provider(
         args.model.as_deref(),
         args.provider.as_deref(),
@@ -1779,27 +1805,14 @@ async fn run_preflight(
         status: CheckStatus::Pass,
         summary: graph.name.clone(),
         details: vec![
-            CheckDetail {
-                text: format!("Nodes: {}", graph.nodes.len()),
-            },
-            CheckDetail {
-                text: format!("Edges: {}", graph.edges.len()),
-            },
-            CheckDetail {
-                text: format!("Goal: {}", graph.goal()),
-            },
-            CheckDetail {
-                text: format!("Model: {model}"),
-            },
-            CheckDetail {
-                text: format!("Provider: {}", provider.as_deref().unwrap_or("anthropic")),
-            },
-            CheckDetail {
-                text: format!("Setup commands: {setup_command_count}"),
-            },
-            CheckDetail {
-                text: format!("Git clean: {git_clean}"),
-            },
+            CheckDetail::new(format!("Nodes: {}", graph.nodes.len())),
+            CheckDetail::new(format!("Edges: {}", graph.edges.len())),
+            CheckDetail::new(format!("Goal: {}", graph.goal())),
+            CheckDetail::new(format!("Model: {model}")),
+            CheckDetail::new(format!(
+                "Provider: {}",
+                provider.as_deref().unwrap_or("anthropic")
+            )),
         ],
         remediation: None,
     });
@@ -1861,9 +1874,7 @@ async fn run_preflight(
                     name: "Sandbox".into(),
                     status: CheckStatus::Error,
                     summary: "failed".into(),
-                    details: vec![CheckDetail {
-                        text: format!("Provider: {sandbox_provider}"),
-                    }],
+                    details: vec![CheckDetail::new(format!("Provider: {sandbox_provider}"))],
                     remediation: Some(format!("Sandbox init failed: {e}")),
                 });
                 false
@@ -1874,9 +1885,7 @@ async fn run_preflight(
                 name: "Sandbox".into(),
                 status: CheckStatus::Error,
                 summary: "failed".into(),
-                details: vec![CheckDetail {
-                    text: format!("Provider: {sandbox_provider}"),
-                }],
+                details: vec![CheckDetail::new(format!("Provider: {sandbox_provider}"))],
                 remediation: Some(e),
             });
             false
@@ -1888,20 +1897,19 @@ async fn run_preflight(
             name: "Sandbox".into(),
             status: CheckStatus::Pass,
             summary: sandbox_provider.to_string(),
-            details: vec![CheckDetail {
-                text: format!("Provider: {sandbox_provider}"),
-            }],
+            details: vec![CheckDetail::new(format!("Provider: {sandbox_provider}"))],
             remediation: None,
         });
     }
 
-    // 3. LLM client check
+    // 4. LLM check (merged providers + provider parse)
+    let resolved_provider = provider.as_deref().unwrap_or("anthropic");
     let llm_ok = match arc_llm::client::Client::from_env().await {
         Ok(c) => {
             let names: Vec<String> = c.provider_names().iter().map(|s| s.to_string()).collect();
             if names.is_empty() {
                 checks.push(CheckResult {
-                    name: "LLM providers".into(),
+                    name: "LLM".into(),
                     status: CheckStatus::Error,
                     summary: "no API keys".into(),
                     details: vec![],
@@ -1909,19 +1917,51 @@ async fn run_preflight(
                 });
                 false
             } else {
-                checks.push(CheckResult {
-                    name: "LLM providers".into(),
-                    status: CheckStatus::Pass,
-                    summary: names.join(", "),
-                    details: vec![],
-                    remediation: None,
-                });
-                true
+                match resolved_provider.parse::<Provider>() {
+                    Ok(_) => {
+                        let mut status = CheckStatus::Pass;
+                        if !names.iter().any(|n| n == resolved_provider) {
+                            status = CheckStatus::Warning;
+                        }
+                        checks.push(CheckResult {
+                            name: "LLM".into(),
+                            status,
+                            summary: resolved_provider.to_string(),
+                            details: vec![CheckDetail::new(format!(
+                                "Configured: {}",
+                                names.join(", ")
+                            ))],
+                            remediation: if status == CheckStatus::Warning {
+                                Some(format!(
+                                    "Provider \"{resolved_provider}\" not in configured providers"
+                                ))
+                            } else {
+                                None
+                            },
+                        });
+                        status == CheckStatus::Pass
+                    }
+                    Err(e) => {
+                        checks.push(CheckResult {
+                            name: "LLM".into(),
+                            status: CheckStatus::Error,
+                            summary: resolved_provider.to_string(),
+                            details: vec![CheckDetail::new(format!(
+                                "Configured: {}",
+                                names.join(", ")
+                            ))],
+                            remediation: Some(format!(
+                                "Invalid provider \"{resolved_provider}\": {e}"
+                            )),
+                        });
+                        false
+                    }
+                }
             }
         }
         Err(e) => {
             checks.push(CheckResult {
-                name: "LLM providers".into(),
+                name: "LLM".into(),
                 status: CheckStatus::Error,
                 summary: "initialization failed".into(),
                 details: vec![],
@@ -1931,50 +1971,16 @@ async fn run_preflight(
         }
     };
 
-    // 4. Provider parse check
-    let provider_ok = if let Some(ref p) = provider {
-        match p.parse::<Provider>() {
-            Ok(_) => {
-                checks.push(CheckResult {
-                    name: "Provider".into(),
-                    status: CheckStatus::Pass,
-                    summary: p.clone(),
-                    details: vec![],
-                    remediation: None,
-                });
-                true
-            }
-            Err(e) => {
-                checks.push(CheckResult {
-                    name: "Provider".into(),
-                    status: CheckStatus::Error,
-                    summary: p.clone(),
-                    details: vec![],
-                    remediation: Some(format!("Invalid provider \"{p}\": {e}")),
-                });
-                false
-            }
-        }
-    } else {
-        checks.push(CheckResult {
-            name: "Provider".into(),
-            status: CheckStatus::Pass,
-            summary: "anthropic".into(),
-            details: vec![],
-            remediation: None,
-        });
-        true
-    };
-
     // 5. Render report
     let report = CheckReport {
         title: "Run Preflight".into(),
         checks,
     };
 
-    print!("{}", report.render(styles, true, None));
+    let term_width = console::Term::stderr().size().1;
+    print!("{}", report.render(styles, true, None, Some(term_width)));
 
-    if sandbox_ok && llm_ok && provider_ok {
+    if sandbox_ok && llm_ok {
         Ok(())
     } else {
         std::process::exit(1);
