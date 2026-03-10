@@ -45,11 +45,8 @@ jobs:
       - run: cargo fmt --check --all
 
   clippy:
-    name: Clippy (${{ matrix.os }})
-    runs-on: ${{ matrix.os }}
-    strategy:
-      matrix:
-        os: [self-hosted, macos-15]
+    name: Clippy
+    runs-on: self-hosted
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
