@@ -34,6 +34,7 @@ arc-util = { path = "../arc-util" }
 
 [dev-dependencies]
 http = "1"
+insta = { workspace = true }
 tokio = { workspace = true, features = ["test-util", "macros"] }
 dotenvy.workspace = true
 httpmock = "0.8"

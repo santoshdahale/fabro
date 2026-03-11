@@ -52,14 +52,22 @@ mod tests {
             message_id: "msg-1".to_string(),
         };
 
-        let value = serde_json::to_value(&track).unwrap();
-        assert_eq!(value["anonymousId"], "abc-123");
-        assert_eq!(value["event"], "Command Invoked");
-        assert_eq!(value["properties"]["command"], "run");
-        assert_eq!(value["context"]["os"]["name"], "macos");
-        assert_eq!(value["timestamp"], "2025-01-01T00:00:00Z");
-        assert_eq!(value["messageId"], "msg-1");
-        assert!(value.get("userId").is_none());
+        insta::assert_snapshot!(serde_json::to_string_pretty(&track).unwrap(), @r#"
+        {
+          "anonymousId": "abc-123",
+          "event": "Command Invoked",
+          "properties": {
+            "command": "run"
+          },
+          "context": {
+            "os": {
+              "name": "macos"
+            }
+          },
+          "timestamp": "2025-01-01T00:00:00Z",
+          "messageId": "msg-1"
+        }
+        "#);
     }
 
     #[test]
@@ -75,11 +83,14 @@ mod tests {
             message_id: "msg-2".to_string(),
         };
 
-        let value = serde_json::to_value(&track).unwrap();
-        assert_eq!(value["userId"], "user-456");
-        assert!(value.get("anonymousId").is_none());
-        assert!(value.get("context").is_none());
-        assert!(value.get("timestamp").is_none());
+        insta::assert_snapshot!(serde_json::to_string_pretty(&track).unwrap(), @r#"
+        {
+          "userId": "user-456",
+          "event": "test",
+          "properties": {},
+          "messageId": "msg-2"
+        }
+        "#);
     }
 
     #[test]
@@ -96,9 +107,15 @@ mod tests {
             message_id: "msg-3".to_string(),
         };
 
-        let value = serde_json::to_value(&track).unwrap();
-        assert_eq!(value["userId"], "user-456");
-        assert_eq!(value["anonymousId"], "abc-123");
+        insta::assert_snapshot!(serde_json::to_string_pretty(&track).unwrap(), @r#"
+        {
+          "userId": "user-456",
+          "anonymousId": "abc-123",
+          "event": "test",
+          "properties": {},
+          "messageId": "msg-3"
+        }
+        "#);
     }
 
     #[test]

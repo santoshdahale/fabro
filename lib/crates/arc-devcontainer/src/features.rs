@@ -920,11 +920,18 @@ mod tests {
             None,
         );
 
-        assert!(snippet.contains("# Feature: ghcr.io/devcontainers/features/node:1"));
-        assert!(snippet.contains("COPY node/ /tmp/devcontainer-features/node/"));
-        assert!(snippet.contains("export VERSION=\"20\""));
-        assert!(snippet.contains("chmod +x install.sh"));
-        assert!(snippet.contains("./install.sh"));
+        insta::assert_snapshot!(snippet, @r#"
+        # Feature: ghcr.io/devcontainers/features/node:1
+        COPY node/ /tmp/devcontainer-features/node/
+        RUN cd /tmp/devcontainer-features/node && \
+            export _REMOTE_USER="root" && \
+            export _CONTAINER_USER="root" && \
+            export _REMOTE_USER_HOME="/root" && \
+            export _CONTAINER_USER_HOME="/root" && \
+            export VERSION="20" && \
+            chmod +x install.sh && \
+            ./install.sh
+        "#);
     }
 
     #[test]
@@ -960,8 +967,18 @@ mod tests {
             None,
         );
 
-        // Default value "lts" should be used
-        assert!(snippet.contains("export VERSION=\"lts\""));
+        insta::assert_snapshot!(snippet, @r#"
+        # Feature: ghcr.io/devcontainers/features/node:1
+        COPY node/ /tmp/devcontainer-features/node/
+        RUN cd /tmp/devcontainer-features/node && \
+            export _REMOTE_USER="root" && \
+            export _CONTAINER_USER="root" && \
+            export _REMOTE_USER_HOME="/root" && \
+            export _CONTAINER_USER_HOME="/root" && \
+            export VERSION="lts" && \
+            chmod +x install.sh && \
+            ./install.sh
+        "#);
     }
 
     #[test]
@@ -988,12 +1005,17 @@ mod tests {
             None,
         );
 
-        assert!(snippet.contains("# Feature: ghcr.io/devcontainers/features/common-utils:1"));
-        assert!(snippet.contains("COPY common-utils/ /tmp/devcontainer-features/common-utils/"));
-        assert!(snippet.contains("chmod +x install.sh"));
-        // Should have built-in user env vars but no feature-specific options
-        assert!(snippet.contains("_REMOTE_USER"));
-        assert!(!snippet.contains("export VERSION"));
+        insta::assert_snapshot!(snippet, @r#"
+        # Feature: ghcr.io/devcontainers/features/common-utils:1
+        COPY common-utils/ /tmp/devcontainer-features/common-utils/
+        RUN cd /tmp/devcontainer-features/common-utils && \
+            export _REMOTE_USER="root" && \
+            export _CONTAINER_USER="root" && \
+            export _REMOTE_USER_HOME="/root" && \
+            export _CONTAINER_USER_HOME="/root" && \
+            chmod +x install.sh && \
+            ./install.sh
+        "#);
     }
 
     #[test]

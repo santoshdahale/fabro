@@ -924,11 +924,13 @@ mod tests {
             cache_write_tokens: None,
             raw: None,
         };
-        let json = serde_json::to_string(&usage).unwrap();
-        assert!(!json.contains("reasoning_tokens"));
-        assert!(!json.contains("cache_read_tokens"));
-        assert!(!json.contains("cache_write_tokens"));
-        assert!(!json.contains("raw"));
+        insta::assert_snapshot!(serde_json::to_string_pretty(&usage).unwrap(), @r#"
+        {
+          "input_tokens": 100,
+          "output_tokens": 50,
+          "total_tokens": 150
+        }
+        "#);
     }
 
     #[test]
@@ -942,11 +944,16 @@ mod tests {
             cache_write_tokens: Some(10),
             raw: None,
         };
-        let json = serde_json::to_string(&usage).unwrap();
-        assert!(json.contains("\"reasoning_tokens\":20"));
-        assert!(json.contains("\"cache_read_tokens\":80"));
-        assert!(json.contains("\"cache_write_tokens\":10"));
-        assert!(!json.contains("\"raw\""));
+        insta::assert_snapshot!(serde_json::to_string_pretty(&usage).unwrap(), @r#"
+        {
+          "input_tokens": 100,
+          "output_tokens": 50,
+          "total_tokens": 150,
+          "reasoning_tokens": 20,
+          "cache_read_tokens": 80,
+          "cache_write_tokens": 10
+        }
+        "#);
     }
 
     #[test]

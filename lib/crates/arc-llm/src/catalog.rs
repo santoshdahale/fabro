@@ -208,13 +208,47 @@ mod tests {
     #[test]
     fn get_model_info_by_id() {
         let info = get_model_info("claude-opus-4-6").unwrap();
-        assert_eq!(info.display_name, "Claude Opus 4.6");
-        assert_eq!(info.provider, "anthropic");
-        assert!(info.features.tools);
-        assert!(info.features.vision);
-        assert!(info.features.reasoning);
-        assert_eq!(info.limits.context_window, 1_000_000);
-        assert_eq!(info.limits.max_output, Some(128_000));
+        insta::assert_debug_snapshot!(info, @r#"
+        ModelInfo {
+            id: "claude-opus-4-6",
+            provider: "anthropic",
+            family: "claude-4",
+            display_name: "Claude Opus 4.6",
+            limits: ModelLimits {
+                context_window: 1000000,
+                max_output: Some(
+                    128000,
+                ),
+            },
+            training: Some(
+                "2025-08-01",
+            ),
+            features: ModelFeatures {
+                tools: true,
+                vision: true,
+                reasoning: true,
+            },
+            costs: ModelCosts {
+                input_cost_per_mtok: Some(
+                    15.0,
+                ),
+                output_cost_per_mtok: Some(
+                    75.0,
+                ),
+                cache_input_cost_per_mtok: Some(
+                    1.5,
+                ),
+            },
+            estimated_output_tps: Some(
+                25.0,
+            ),
+            aliases: [
+                "opus",
+                "claude-opus",
+            ],
+            default: true,
+        }
+        "#);
     }
 
     #[test]
@@ -253,15 +287,46 @@ mod tests {
     #[test]
     fn gemini_3_1_flash_lite_in_catalog() {
         let m = get_model_info("gemini-3.1-flash-lite-preview").unwrap();
-        assert_eq!(m.provider, "gemini");
-        assert_eq!(m.display_name, "Gemini 3.1 Flash Lite (Preview)");
-        assert_eq!(m.limits.context_window, 1048576);
-        assert_eq!(m.limits.max_output, Some(65536));
-        assert!(m.features.tools);
-        assert!(m.features.vision);
-        assert!(m.features.reasoning);
-        assert_eq!(m.costs.input_cost_per_mtok, Some(0.25));
-        assert_eq!(m.costs.output_cost_per_mtok, Some(1.5));
+        insta::assert_debug_snapshot!(m, @r#"
+        ModelInfo {
+            id: "gemini-3.1-flash-lite-preview",
+            provider: "gemini",
+            family: "gemini-3",
+            display_name: "Gemini 3.1 Flash Lite (Preview)",
+            limits: ModelLimits {
+                context_window: 1048576,
+                max_output: Some(
+                    65536,
+                ),
+            },
+            training: Some(
+                "2025-01-01",
+            ),
+            features: ModelFeatures {
+                tools: true,
+                vision: true,
+                reasoning: true,
+            },
+            costs: ModelCosts {
+                input_cost_per_mtok: Some(
+                    0.25,
+                ),
+                output_cost_per_mtok: Some(
+                    1.5,
+                ),
+                cache_input_cost_per_mtok: Some(
+                    0.0625,
+                ),
+            },
+            estimated_output_tps: Some(
+                200.0,
+            ),
+            aliases: [
+                "gemini-flash-lite",
+            ],
+            default: false,
+        }
+        "#);
     }
 
     #[test]
@@ -275,9 +340,44 @@ mod tests {
     #[test]
     fn kimi_k2_5_in_catalog() {
         let m = get_model_info("kimi-k2.5").unwrap();
-        assert_eq!(m.provider, "kimi");
-        assert_eq!(m.limits.max_output, Some(16000));
-        assert_eq!(m.limits.context_window, 262144);
+        insta::assert_debug_snapshot!(m, @r#"
+        ModelInfo {
+            id: "kimi-k2.5",
+            provider: "kimi",
+            family: "kimi-k2",
+            display_name: "Kimi K2.5",
+            limits: ModelLimits {
+                context_window: 262144,
+                max_output: Some(
+                    16000,
+                ),
+            },
+            training: Some(
+                "2025-10-01",
+            ),
+            features: ModelFeatures {
+                tools: true,
+                vision: true,
+                reasoning: false,
+            },
+            costs: ModelCosts {
+                input_cost_per_mtok: Some(
+                    0.6,
+                ),
+                output_cost_per_mtok: Some(
+                    3.0,
+                ),
+                cache_input_cost_per_mtok: None,
+            },
+            estimated_output_tps: Some(
+                50.0,
+            ),
+            aliases: [
+                "kimi",
+            ],
+            default: true,
+        }
+        "#);
     }
 
     #[test]
@@ -300,12 +400,42 @@ mod tests {
     #[test]
     fn mercury_2_in_catalog() {
         let m = get_model_info("mercury-2").unwrap();
-        assert_eq!(m.provider, "inception");
-        assert_eq!(m.limits.context_window, 131072);
-        assert_eq!(m.limits.max_output, Some(50000));
-        assert!(m.features.tools);
-        assert!(!m.features.vision);
-        assert!(m.features.reasoning);
+        insta::assert_debug_snapshot!(m, @r#"
+        ModelInfo {
+            id: "mercury-2",
+            provider: "inception",
+            family: "mercury",
+            display_name: "Mercury 2",
+            limits: ModelLimits {
+                context_window: 131072,
+                max_output: Some(
+                    50000,
+                ),
+            },
+            training: None,
+            features: ModelFeatures {
+                tools: true,
+                vision: false,
+                reasoning: true,
+            },
+            costs: ModelCosts {
+                input_cost_per_mtok: Some(
+                    0.25,
+                ),
+                output_cost_per_mtok: Some(
+                    0.75,
+                ),
+                cache_input_cost_per_mtok: None,
+            },
+            estimated_output_tps: Some(
+                1000.0,
+            ),
+            aliases: [
+                "mercury",
+            ],
+            default: true,
+        }
+        "#);
     }
 
     #[test]
@@ -316,31 +446,91 @@ mod tests {
     #[test]
     fn gpt_5_4_in_catalog() {
         let m = get_model_info("gpt-5.4").unwrap();
-        assert_eq!(m.provider, "openai");
-        assert_eq!(m.display_name, "GPT-5.4");
-        assert_eq!(m.limits.context_window, 1047576);
-        assert_eq!(m.limits.max_output, Some(128000));
-        assert!(m.features.tools);
-        assert!(m.features.vision);
-        assert!(m.features.reasoning);
-        assert_eq!(m.costs.input_cost_per_mtok, Some(2.5));
-        assert_eq!(m.costs.output_cost_per_mtok, Some(15.0));
-        assert!(m.default);
+        insta::assert_debug_snapshot!(m, @r#"
+        ModelInfo {
+            id: "gpt-5.4",
+            provider: "openai",
+            family: "gpt-5",
+            display_name: "GPT-5.4",
+            limits: ModelLimits {
+                context_window: 1047576,
+                max_output: Some(
+                    128000,
+                ),
+            },
+            training: Some(
+                "2025-08-31",
+            ),
+            features: ModelFeatures {
+                tools: true,
+                vision: true,
+                reasoning: true,
+            },
+            costs: ModelCosts {
+                input_cost_per_mtok: Some(
+                    2.5,
+                ),
+                output_cost_per_mtok: Some(
+                    15.0,
+                ),
+                cache_input_cost_per_mtok: Some(
+                    0.25,
+                ),
+            },
+            estimated_output_tps: Some(
+                70.0,
+            ),
+            aliases: [
+                "gpt54",
+            ],
+            default: true,
+        }
+        "#);
     }
 
     #[test]
     fn gpt_5_4_pro_in_catalog() {
         let m = get_model_info("gpt-5.4-pro").unwrap();
-        assert_eq!(m.provider, "openai");
-        assert_eq!(m.display_name, "GPT-5.4 Pro");
-        assert_eq!(m.limits.context_window, 1047576);
-        assert_eq!(m.limits.max_output, Some(128000));
-        assert!(m.features.tools);
-        assert!(m.features.vision);
-        assert!(m.features.reasoning);
-        assert_eq!(m.costs.input_cost_per_mtok, Some(30.0));
-        assert_eq!(m.costs.output_cost_per_mtok, Some(180.0));
-        assert!(!m.default);
+        insta::assert_debug_snapshot!(m, @r#"
+        ModelInfo {
+            id: "gpt-5.4-pro",
+            provider: "openai",
+            family: "gpt-5",
+            display_name: "GPT-5.4 Pro",
+            limits: ModelLimits {
+                context_window: 1047576,
+                max_output: Some(
+                    128000,
+                ),
+            },
+            training: Some(
+                "2025-08-31",
+            ),
+            features: ModelFeatures {
+                tools: true,
+                vision: true,
+                reasoning: true,
+            },
+            costs: ModelCosts {
+                input_cost_per_mtok: Some(
+                    30.0,
+                ),
+                output_cost_per_mtok: Some(
+                    180.0,
+                ),
+                cache_input_cost_per_mtok: Some(
+                    3.0,
+                ),
+            },
+            estimated_output_tps: Some(
+                20.0,
+            ),
+            aliases: [
+                "gpt54-pro",
+            ],
+            default: false,
+        }
+        "#);
     }
 
     #[test]
@@ -351,16 +541,40 @@ mod tests {
     #[test]
     fn gpt_5_3_codex_spark_in_catalog() {
         let m = get_model_info("gpt-5.3-codex-spark").unwrap();
-        assert_eq!(m.provider, "openai");
-        assert_eq!(m.display_name, "GPT-5.3 Codex Spark");
-        assert_eq!(m.limits.context_window, 131072);
-        assert_eq!(m.limits.max_output, Some(128000));
-        assert!(m.features.tools);
-        assert!(!m.features.vision);
-        assert!(m.features.reasoning);
-        assert_eq!(m.costs.input_cost_per_mtok, None);
-        assert_eq!(m.costs.output_cost_per_mtok, None);
-        assert_eq!(m.estimated_output_tps, Some(1000.0));
+        insta::assert_debug_snapshot!(m, @r#"
+        ModelInfo {
+            id: "gpt-5.3-codex-spark",
+            provider: "openai",
+            family: "gpt-5",
+            display_name: "GPT-5.3 Codex Spark",
+            limits: ModelLimits {
+                context_window: 131072,
+                max_output: Some(
+                    128000,
+                ),
+            },
+            training: Some(
+                "2025-08-31",
+            ),
+            features: ModelFeatures {
+                tools: true,
+                vision: false,
+                reasoning: true,
+            },
+            costs: ModelCosts {
+                input_cost_per_mtok: None,
+                output_cost_per_mtok: None,
+                cache_input_cost_per_mtok: None,
+            },
+            estimated_output_tps: Some(
+                1000.0,
+            ),
+            aliases: [
+                "codex-spark",
+            ],
+            default: false,
+        }
+        "#);
     }
 
     #[test]
