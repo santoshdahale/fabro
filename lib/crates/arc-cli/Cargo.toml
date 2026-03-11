@@ -59,3 +59,4 @@ predicates = "3"
 tempfile = "3"
 serde_json.workspace = true
 httpmock = "0.8"
+trycmd = "0.15"
