@@ -81,9 +81,75 @@ pub enum DevcontainerError {
 
     #[error("variable substitution error: {0}")]
     Variable(String),
+
+    #[error("base Dockerfile contains COPY or ADD instructions that reference build context files, which is not supported by Daytona snapshots: {0}")]
+    UnsupportedCopyAdd(String),
 }
 
 pub type Result<T> = std::result::Result<T, DevcontainerError>;
+
+/// Check that a Dockerfile does not contain COPY or ADD instructions that reference
+/// build context files. Multi-stage `COPY --from=` and `ADD http(s)://` are allowed.
+fn check_no_build_context_copies(dockerfile: &str) -> Result<()> {
+    let mut offending = Vec::new();
+    let mut continuation = String::new();
+
+    for raw_line in dockerfile.lines() {
+        let trimmed = raw_line.trim();
+
+        // Handle line continuations
+        if !continuation.is_empty() {
+            continuation.push(' ');
+            continuation.push_str(trimmed);
+            if trimmed.ends_with('\\') {
+                continuation.truncate(continuation.len() - 1);
+                continue;
+            }
+            let full_line = std::mem::take(&mut continuation);
+            check_single_line(&full_line, &mut offending);
+            continue;
+        }
+
+        if trimmed.is_empty() || trimmed.starts_with('#') {
+            continue;
+        }
+
+        if trimmed.ends_with('\\') {
+            continuation = trimmed.trim_end_matches('\\').to_string();
+            continue;
+        }
+
+        check_single_line(trimmed, &mut offending);
+    }
+
+    // Handle unterminated continuation
+    if !continuation.is_empty() {
+        check_single_line(&continuation, &mut offending);
+    }
+
+    if offending.is_empty() {
+        Ok(())
+    } else {
+        Err(DevcontainerError::UnsupportedCopyAdd(offending.join("; ")))
+    }
+}
+
+fn check_single_line(line: &str, offending: &mut Vec<String>) {
+    let upper = line.to_ascii_uppercase();
+    if upper.starts_with("COPY ") {
+        // Allow COPY --from=<stage>
+        let rest = line[5..].trim_start();
+        if !rest.starts_with("--from=") && !rest.to_ascii_uppercase().starts_with("--FROM=") {
+            offending.push(line.to_string());
+        }
+    } else if upper.starts_with("ADD ") {
+        // Allow ADD http:// or https://
+        let rest = line[4..].trim_start();
+        if !rest.starts_with("http://") && !rest.starts_with("https://") {
+            offending.push(line.to_string());
+        }
+    }
+}
 
 /// Parse and resolve a devcontainer config from a repo directory.
 pub struct DevcontainerResolver;
@@ -172,6 +238,8 @@ impl DevcontainerResolver {
                 )
             };
 
+            check_no_build_context_copies(&dockerfile)?;
+
             return Ok(DevcontainerConfig {
                 dockerfile,
                 build_context: compose_base_dir.to_path_buf(),
@@ -226,6 +294,7 @@ impl DevcontainerResolver {
                         source,
                     }
                 })?;
+                check_no_build_context_copies(&content)?;
                 let args: HashMap<String, String> = build
                     .args
                     .iter()
@@ -472,5 +541,89 @@ impl DevcontainerResolver {
                 _ => None,
             })
             .collect()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn copy_local_file_is_rejected() {
+        let dockerfile = "FROM ubuntu\nCOPY . /app\n";
+        let err = check_no_build_context_copies(dockerfile).unwrap_err();
+        assert!(
+            matches!(err, DevcontainerError::UnsupportedCopyAdd(_)),
+            "expected UnsupportedCopyAdd, got: {err:?}"
+        );
+        assert!(err.to_string().contains("COPY . /app"));
+    }
+
+    #[test]
+    fn add_local_file_is_rejected() {
+        let dockerfile = "FROM ubuntu\nADD local.tar.gz /opt/\n";
+        let err = check_no_build_context_copies(dockerfile).unwrap_err();
+        assert!(err.to_string().contains("ADD local.tar.gz /opt/"));
+    }
+
+    #[test]
+    fn copy_from_stage_is_allowed() {
+        let dockerfile =
+            "FROM builder AS build\nRUN make\nFROM ubuntu\nCOPY --from=builder /app /app\n";
+        check_no_build_context_copies(dockerfile).unwrap();
+    }
+
+    #[test]
+    fn add_url_is_allowed() {
+        let dockerfile = "FROM ubuntu\nADD https://example.com/file.tar.gz /opt/\n";
+        check_no_build_context_copies(dockerfile).unwrap();
+    }
+
+    #[test]
+    fn add_http_url_is_allowed() {
+        let dockerfile = "FROM ubuntu\nADD http://example.com/file.tar.gz /opt/\n";
+        check_no_build_context_copies(dockerfile).unwrap();
+    }
+
+    #[test]
+    fn only_from_and_run_is_allowed() {
+        let dockerfile = "FROM ubuntu\nRUN apt-get update\nENV FOO=bar\n";
+        check_no_build_context_copies(dockerfile).unwrap();
+    }
+
+    #[test]
+    fn multiline_continuation_copy_is_rejected() {
+        let dockerfile = "FROM ubuntu\nCOPY \\\n  . /app\n";
+        let err = check_no_build_context_copies(dockerfile).unwrap_err();
+        assert!(matches!(err, DevcontainerError::UnsupportedCopyAdd(_)));
+    }
+
+    #[test]
+    fn case_insensitive_copy_is_rejected() {
+        let dockerfile = "FROM ubuntu\ncopy . /app\n";
+        let err = check_no_build_context_copies(dockerfile).unwrap_err();
+        assert!(err.to_string().contains("copy . /app"));
+    }
+
+    #[test]
+    fn case_insensitive_add_is_rejected() {
+        let dockerfile = "FROM ubuntu\nadd local.tar.gz /opt/\n";
+        let err = check_no_build_context_copies(dockerfile).unwrap_err();
+        assert!(err.to_string().contains("add local.tar.gz /opt/"));
+    }
+
+    #[test]
+    fn multiple_offending_lines_reported() {
+        let dockerfile = "FROM ubuntu\nCOPY . /app\nADD foo.tar /opt/\n";
+        let err = check_no_build_context_copies(dockerfile).unwrap_err();
+        let msg = err.to_string();
+        assert!(msg.contains("COPY . /app"));
+        assert!(msg.contains("ADD foo.tar /opt/"));
+    }
+
+    #[test]
+    fn comments_and_empty_lines_are_skipped() {
+        let dockerfile = "FROM ubuntu\n\n# COPY . /app\n  \nRUN echo hi\n";
+        check_no_build_context_copies(dockerfile).unwrap();
     }
 }
