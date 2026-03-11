@@ -153,8 +153,8 @@ pub async fn run_retro_agent(
     let profile: Arc<dyn ProviderProfile> = Arc::from(profile);
 
     let config = SessionConfig {
-        max_tool_rounds_per_input: 10,
-        wall_clock_timeout: Some(Duration::from_secs(120)),
+        max_tool_rounds_per_input: 20,
+        wall_clock_timeout: Some(Duration::from_secs(180)),
         // Disable features not needed for retro analysis
         enable_context_compaction: false,
         skill_dirs: Some(vec![]),
