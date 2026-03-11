@@ -1,0 +1,14 @@
+digraph FixedLoop {
+    graph [goal="Run an improvement loop 5 times"]
+    rankdir=LR
+
+    start [shape=Mdiamond, label="Start"]
+    exit  [shape=Msquare, label="Exit"]
+
+    improve [label="Improve", prompt="Pick an area and improve it."]
+    gate    [shape=diamond, label="5 Done?"]
+
+    start -> improve -> gate
+    gate -> exit    [condition="context.internal.node_visit_count >= 5"]
+    gate -> improve
+}
