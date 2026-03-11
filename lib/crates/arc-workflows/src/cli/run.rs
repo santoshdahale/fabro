@@ -637,7 +637,7 @@ pub async fn run_command(
         .and_then(|s| s.devcontainer)
         .unwrap_or(false)
     {
-        match devcontainer_bridge::resolve_devcontainer(&cwd).await {
+        match arc_devcontainer::DevcontainerResolver::resolve(&cwd).await {
             Ok(dc) => {
                 let lifecycle_command_count = dc.on_create_commands.len()
                     + dc.post_create_commands.len()
@@ -658,33 +658,45 @@ pub async fn run_command(
                 // Run initialize_commands on host
                 let timeout = std::time::Duration::from_millis(300_000);
                 for cmd in &dc.initialize_commands {
-                    let shell_cmd = match cmd {
-                        arc_devcontainer::Command::Shell(s) => s.clone(),
-                        arc_devcontainer::Command::Args(args) => args.join(" "),
-                        arc_devcontainer::Command::Parallel(_) => continue,
+                    let shell_cmds = match cmd {
+                        arc_devcontainer::Command::Shell(s) => vec![s.clone()],
+                        arc_devcontainer::Command::Args(args) => {
+                            vec![args
+                                .iter()
+                                .map(|a| {
+                                    shlex::try_quote(a).unwrap_or_else(|_| a.into()).to_string()
+                                })
+                                .collect::<Vec<_>>()
+                                .join(" ")]
+                        }
+                        arc_devcontainer::Command::Parallel(map) => map.values().cloned().collect(),
                     };
-                    let fut = tokio::process::Command::new("sh")
-                        .arg("-c")
-                        .arg(&shell_cmd)
-                        .current_dir(&cwd)
-                        .output();
-                    let output = tokio::time::timeout(timeout, fut)
-                        .await
-                        .with_context(|| {
-                            format!("Devcontainer initializeCommand timed out: {shell_cmd}")
-                        })?
-                        .with_context(|| {
-                            format!("Failed to execute devcontainer initializeCommand: {shell_cmd}")
-                        })?;
-                    if !output.status.success() {
-                        let code = output
-                            .status
-                            .code()
-                            .map_or("unknown".to_string(), |c| c.to_string());
-                        let stderr = String::from_utf8_lossy(&output.stderr);
-                        bail!(
-                            "Devcontainer initializeCommand failed (exit code {code}): {shell_cmd}\n{stderr}"
-                        );
+                    for shell_cmd in &shell_cmds {
+                        let fut = tokio::process::Command::new("sh")
+                            .arg("-c")
+                            .arg(shell_cmd)
+                            .current_dir(&cwd)
+                            .output();
+                        let output = tokio::time::timeout(timeout, fut)
+                            .await
+                            .with_context(|| {
+                                format!("Devcontainer initializeCommand timed out: {shell_cmd}")
+                            })?
+                            .with_context(|| {
+                                format!(
+                                    "Failed to execute devcontainer initializeCommand: {shell_cmd}"
+                                )
+                            })?;
+                        if !output.status.success() {
+                            let code = output
+                                .status
+                                .code()
+                                .map_or("unknown".to_string(), |c| c.to_string());
+                            let stderr = String::from_utf8_lossy(&output.stderr);
+                            bail!(
+                                "Devcontainer initializeCommand failed (exit code {code}): {shell_cmd}\n{stderr}"
+                            );
+                        }
                     }
                 }
 
@@ -910,7 +922,7 @@ pub async fn run_command(
                 .exec_command(cmd, 300_000, None, None, None)
                 .await
                 .map_err(|e| anyhow::anyhow!("Setup command failed: {e}"))?;
-            let cmd_duration = u64::try_from(cmd_start.elapsed().as_millis()).unwrap_or(u64::MAX);
+            let cmd_duration = crate::millis_u64(cmd_start.elapsed());
             if result.exit_code != 0 {
                 emitter.emit(&crate::event::WorkflowRunEvent::SetupFailed {
                     command: cmd.clone(),
@@ -931,7 +943,7 @@ pub async fn run_command(
                 duration_ms: cmd_duration,
             });
         }
-        let setup_duration = u64::try_from(setup_start.elapsed().as_millis()).unwrap_or(u64::MAX);
+        let setup_duration = crate::millis_u64(setup_start.elapsed());
         emitter.emit(&crate::event::WorkflowRunEvent::SetupCompleted {
             duration_ms: setup_duration,
         });
@@ -939,30 +951,21 @@ pub async fn run_command(
 
     // Run devcontainer lifecycle hooks inside the sandbox
     if let Some(ref dc) = devcontainer_config {
-        devcontainer_bridge::run_devcontainer_lifecycle(
-            sandbox.as_ref(),
-            &emitter,
-            "on_create",
-            &dc.on_create_commands,
-            300_000,
-        )
-        .await?;
-        devcontainer_bridge::run_devcontainer_lifecycle(
-            sandbox.as_ref(),
-            &emitter,
-            "post_create",
-            &dc.post_create_commands,
-            300_000,
-        )
-        .await?;
-        devcontainer_bridge::run_devcontainer_lifecycle(
-            sandbox.as_ref(),
-            &emitter,
-            "post_start",
-            &dc.post_start_commands,
-            300_000,
-        )
-        .await?;
+        let phases: &[(&str, &[arc_devcontainer::Command])] = &[
+            ("on_create", &dc.on_create_commands),
+            ("post_create", &dc.post_create_commands),
+            ("post_start", &dc.post_start_commands),
+        ];
+        for (phase, commands) in phases {
+            devcontainer_bridge::run_devcontainer_lifecycle(
+                sandbox.as_ref(),
+                &emitter,
+                phase,
+                commands,
+                300_000,
+            )
+            .await?;
+        }
     }
 
     // 6. Resolve backend, model, and provider
@@ -1011,7 +1014,7 @@ pub async fn run_command(
     // Devcontainer env is layered underneath TOML env (TOML wins on conflict)
     let sandbox_env: HashMap<String, String> = {
         let mut env = if let Some(ref dc) = devcontainer_config {
-            devcontainer_bridge::devcontainer_env(dc)
+            dc.environment.clone()
         } else {
             HashMap::new()
         };

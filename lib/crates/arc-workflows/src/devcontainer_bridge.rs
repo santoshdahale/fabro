@@ -1,10 +1,8 @@
-use std::collections::HashMap;
-use std::path::Path;
 use std::time::Instant;
 
 use sha2::{Digest, Sha256};
 
-use arc_devcontainer::{DevcontainerConfig, DevcontainerResolver};
+use arc_devcontainer::DevcontainerConfig;
 
 use crate::daytona_sandbox::{DaytonaSnapshotConfig, DockerfileSource};
 use crate::event::{EventEmitter, WorkflowRunEvent};
@@ -25,18 +23,6 @@ pub fn devcontainer_to_snapshot_config(dc: &DevcontainerConfig) -> DaytonaSnapsh
         memory: None,
         disk: None,
     }
-}
-
-/// Extract the environment variables from a `DevcontainerConfig`.
-pub fn devcontainer_env(dc: &DevcontainerConfig) -> HashMap<String, String> {
-    dc.environment.clone()
-}
-
-/// Resolve devcontainer.json from a repo directory.
-pub async fn resolve_devcontainer(
-    repo_path: &Path,
-) -> Result<DevcontainerConfig, arc_devcontainer::DevcontainerError> {
-    DevcontainerResolver::resolve(repo_path).await
 }
 
 /// Run a set of devcontainer lifecycle commands inside a sandbox.
@@ -197,6 +183,7 @@ mod tests {
     use super::*;
     use arc_agent::sandbox::{ExecResult, GrepOptions, Sandbox};
     use async_trait::async_trait;
+    use std::collections::HashMap;
     use std::sync::{Arc, Mutex};
     use tokio_util::sync::CancellationToken;
 
@@ -354,16 +341,6 @@ mod tests {
         let snapshot = devcontainer_to_snapshot_config(&dc);
         let expected = snapshot_name_for_dockerfile(&dc.dockerfile);
         assert_eq!(snapshot.name, expected);
-    }
-
-    #[test]
-    fn returns_environment_map() {
-        let mut dc = test_devcontainer_config("FROM ubuntu");
-        dc.environment.insert("FOO".to_string(), "bar".to_string());
-        dc.environment.insert("BAZ".to_string(), "qux".to_string());
-        let env = devcontainer_env(&dc);
-        assert_eq!(env["FOO"], "bar");
-        assert_eq!(env["BAZ"], "qux");
     }
 
     #[tokio::test]
