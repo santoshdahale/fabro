@@ -485,9 +485,12 @@ async fn main_inner() -> Result<()> {
             }
         },
         Command::SendAnalytics { path } => {
-            let json = std::fs::read(&path)?;
-            let track: arc_util::telemetry::event::Track = serde_json::from_slice(&json)?;
-            let result = arc_util::telemetry::sender::send_to_segment(&track).await;
+            let result = async {
+                let json = std::fs::read(&path)?;
+                let track: arc_util::telemetry::event::Track = serde_json::from_slice(&json)?;
+                arc_util::telemetry::sender::send_to_segment(&track).await
+            }
+            .await;
             let _ = std::fs::remove_file(&path);
             result?;
         }
