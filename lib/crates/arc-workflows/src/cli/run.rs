@@ -1206,9 +1206,6 @@ pub async fn run_command(
         let _ = conclusion.save(&run_dir.join("conclusion.json"));
     }
 
-    // Finish progress bars before printing summary
-    progress_ui.lock().expect("progress lock poisoned").finish();
-
     // Auto-derive retro (always, cheap) and optionally run retro agent
     if !args.no_retro && super::project_config::is_retro_enabled() {
         let (failed, failure_reason) = match &engine_result {
@@ -1232,9 +1229,13 @@ pub async fn run_command(
             provider_enum,
             &model,
             styles,
+            Some(&progress_ui),
         )
         .await;
     }
+
+    // Finish progress bars after retro (retro stage uses the same ProgressUI)
+    progress_ui.lock().expect("progress lock poisoned").finish();
 
     // Write finalize commit with retro.json + final node files (captures last diff.patch)
     write_finalize_commit(&config, &run_dir).await;
@@ -1761,6 +1762,7 @@ async fn run_from_branch(
             provider_enum,
             &model,
             styles,
+            None,
         )
         .await;
     }
@@ -2160,6 +2162,7 @@ async fn generate_retro(
     provider_enum: Provider,
     model: &str,
     styles: &'static Styles,
+    progress_ui: Option<&Arc<Mutex<progress::ProgressUI>>>,
 ) {
     let cp = match Checkpoint::load(&run_dir.join("checkpoint.json")) {
         Ok(cp) => cp,
@@ -2196,19 +2199,71 @@ async fn generate_retro(
 
     // Run retro agent session
     eprintln!("\n{}", styles.bold.apply_to("=== Retro ==="));
-    eprintln!(
-        "{}",
-        styles.dim.apply_to(format!("Running retro ({model})..."))
-    );
+
     let retro_start = std::time::Instant::now();
+    let emitter = if let Some(pui) = progress_ui {
+        let mut em = EventEmitter::new();
+        progress::ProgressUI::register(pui, &mut em);
+        let em = Arc::new(em);
+        em.emit(&crate::event::WorkflowRunEvent::StageStarted {
+            node_id: "retro".to_string(),
+            name: "Retro".to_string(),
+            index: 0,
+            handler_type: Some("agent".to_string()),
+            script: None,
+            attempt: 1,
+            max_attempts: 1,
+        });
+        Some(em)
+    } else {
+        eprintln!(
+            "{}",
+            styles.dim.apply_to(format!("Running retro ({model})..."))
+        );
+        None
+    };
+
     let narrative_result = if dry_run_mode {
         Ok(crate::retro_agent::dry_run_narrative())
     } else if let Some(client) = llm_client {
-        crate::retro_agent::run_retro_agent(sandbox, run_dir, client, provider_enum, model).await
+        crate::retro_agent::run_retro_agent(
+            sandbox,
+            run_dir,
+            client,
+            provider_enum,
+            model,
+            emitter.clone(),
+        )
+        .await
     } else {
         Err(anyhow::anyhow!("No LLM client available"))
     };
-    let retro_dur = progress::format_duration_short(retro_start.elapsed());
+    let retro_dur_elapsed = retro_start.elapsed();
+
+    if let Some(ref em) = emitter {
+        let status = if narrative_result.is_ok() {
+            "success"
+        } else {
+            "fail"
+        };
+        em.emit(&crate::event::WorkflowRunEvent::StageCompleted {
+            node_id: "retro".to_string(),
+            name: "Retro".to_string(),
+            index: 0,
+            duration_ms: retro_dur_elapsed.as_millis() as u64,
+            status: status.to_string(),
+            preferred_label: None,
+            suggested_next_ids: vec![],
+            usage: None,
+            failure: None,
+            notes: None,
+            files_touched: vec![],
+            attempt: 1,
+            max_attempts: 1,
+        });
+    }
+
+    let retro_dur = progress::format_duration_short(retro_dur_elapsed);
 
     match narrative_result {
         Ok(narrative) => {
