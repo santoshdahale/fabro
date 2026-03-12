@@ -80,8 +80,9 @@ pub async fn compact_context(
     };
 
     let summarization_prompt = format!(
-        "You are summarizing a coding assistant conversation to provide continuity. A new context \
-window will continue this work with only your summary and the most recent messages.\n\n\
+        "You are creating a handoff document for a different coding assistant that will take over \
+this task. That assistant will only see your summary and the most recent messages — nothing else \
+from the conversation so far.\n\n\
 Write a summary using EXACTLY these sections:\n\n\
 ## Goal\nWhat the user asked for and any constraints or preferences stated.\n\n\
 ## Progress\nWhat was accomplished, with file paths and key decisions.\n\n\
@@ -89,8 +90,9 @@ Write a summary using EXACTLY these sections:\n\n\
 ## Failed Approaches\nWhat was tried and didn't work, and why.\n\n\
 ## Open Issues\nBugs, edge cases, or TODOs that remain.\n\n\
 ## Next Steps\nWhat should happen next to make progress.\n\n\
-Be specific — include file paths, function names, and error messages. Omit pleasantries \
-and conversational filler.{file_ops_section}"
+Be thorough and specific — the assistant taking over has no prior context. Include file paths, \
+function names, error messages, and exact values. Omit pleasantries and conversational filler.\
+{file_ops_section}"
     );
 
     let summary_request = Request {
@@ -124,7 +126,10 @@ and conversational filler.{file_ops_section}"
         summary_len = summary_text.len(),
         "Compaction summary generated"
     );
-    let summary_content = format!("[Context Summary]\n{summary_text}");
+    let summary_content = format!(
+        "A different assistant began this task and produced the following summary. \
+Build on their progress — do not repeat completed steps.\n\n{summary_text}"
+    );
     let summary_token_estimate = summary_content.len() / 4;
 
     history.compact(preserve_count, summary_content);

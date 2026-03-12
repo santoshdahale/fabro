@@ -21,11 +21,13 @@ impl History {
             return;
         }
         let preserved = self.turns.split_off(self.turns.len() - preserve_count);
+        let extracted_user_messages = extract_recent_user_messages(&self.turns, 20_000);
         self.turns.clear();
         self.turns.push(Turn::System {
             content: summary,
             timestamp: std::time::SystemTime::now(),
         });
+        self.turns.extend(extracted_user_messages);
         self.turns.extend(preserved);
         self.strip_opaque_provider_items();
     }
@@ -99,6 +101,29 @@ impl History {
     }
 }
 
+/// Walk discarded turns in reverse, collecting `Turn::User` variants up to
+/// a token budget (estimated at ~4 chars per token). Returns them in
+/// chronological order so they can be inserted between the summary and the
+/// preserved tail.
+fn extract_recent_user_messages(discarded: &[Turn], token_budget: usize) -> Vec<Turn> {
+    let char_budget = token_budget * 4;
+    let mut total_chars = 0;
+    let mut collected: Vec<Turn> = Vec::new();
+
+    for turn in discarded.iter().rev() {
+        if let Turn::User { content, .. } = turn {
+            if total_chars + content.len() > char_budget {
+                break;
+            }
+            total_chars += content.len();
+            collected.push(turn.clone());
+        }
+    }
+
+    collected.reverse();
+    collected
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -115,7 +140,8 @@ mod tests {
             });
         }
         history.compact(4, "Summary of old conversation".into());
-        assert_eq!(history.turns().len(), 5); // 1 summary + 4 preserved
+        // 1 summary + 4 extracted user messages + 4 preserved = 9
+        assert_eq!(history.turns().len(), 9);
     }
 
     #[test]
@@ -142,11 +168,16 @@ mod tests {
         }
         history.compact(4, "Summary".into());
         let turns = history.turns();
-        // Last 4 turns should be msg 4..7
-        assert!(matches!(&turns[1], Turn::User { content, .. } if content == "msg 4"));
-        assert!(matches!(&turns[2], Turn::User { content, .. } if content == "msg 5"));
-        assert!(matches!(&turns[3], Turn::User { content, .. } if content == "msg 6"));
-        assert!(matches!(&turns[4], Turn::User { content, .. } if content == "msg 7"));
+        // Layout: summary, extracted user msgs (0..3), preserved (4..7)
+        assert!(matches!(&turns[0], Turn::System { .. }));
+        assert!(matches!(&turns[1], Turn::User { content, .. } if content == "msg 0"));
+        assert!(matches!(&turns[2], Turn::User { content, .. } if content == "msg 1"));
+        assert!(matches!(&turns[3], Turn::User { content, .. } if content == "msg 2"));
+        assert!(matches!(&turns[4], Turn::User { content, .. } if content == "msg 3"));
+        assert!(matches!(&turns[5], Turn::User { content, .. } if content == "msg 4"));
+        assert!(matches!(&turns[6], Turn::User { content, .. } if content == "msg 5"));
+        assert!(matches!(&turns[7], Turn::User { content, .. } if content == "msg 6"));
+        assert!(matches!(&turns[8], Turn::User { content, .. } if content == "msg 7"));
     }
 
     #[test]
@@ -434,7 +465,8 @@ mod tests {
 
         history.compact(2, "Summary".into());
 
-        let assistant_turn = &history.turns()[2];
+        // Layout: summary, extracted User("old msg"), preserved User("recent msg"), preserved Assistant
+        let assistant_turn = &history.turns()[3];
         if let Turn::Assistant {
             provider_parts,
             tool_calls,
@@ -480,7 +512,8 @@ mod tests {
 
         history.compact(2, "Summary".into());
 
-        let assistant_turn = &history.turns()[2];
+        // Layout: summary, extracted User("old msg"), preserved User("recent msg"), preserved Assistant
+        let assistant_turn = &history.turns()[3];
         if let Turn::Assistant { provider_parts, .. } = assistant_turn {
             assert_eq!(
                 provider_parts.len(),
@@ -525,5 +558,80 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn extract_recent_user_messages_collects_in_chronological_order() {
+        let turns = vec![
+            Turn::User {
+                content: "first".into(),
+                timestamp: SystemTime::now(),
+            },
+            Turn::Assistant {
+                content: "reply".into(),
+                tool_calls: vec![],
+                provider_parts: vec![],
+                usage: Usage::default(),
+                response_id: "r1".into(),
+                timestamp: SystemTime::now(),
+            },
+            Turn::User {
+                content: "second".into(),
+                timestamp: SystemTime::now(),
+            },
+        ];
+        let extracted = extract_recent_user_messages(&turns, 20_000);
+        assert_eq!(extracted.len(), 2);
+        assert!(matches!(&extracted[0], Turn::User { content, .. } if content == "first"));
+        assert!(matches!(&extracted[1], Turn::User { content, .. } if content == "second"));
+    }
+
+    #[test]
+    fn extract_recent_user_messages_respects_token_budget() {
+        let turns = vec![
+            Turn::User {
+                content: "a".repeat(100),
+                timestamp: SystemTime::now(),
+            },
+            Turn::User {
+                content: "b".repeat(100),
+                timestamp: SystemTime::now(),
+            },
+        ];
+        // Budget of 30 tokens = 120 chars; second message (100 chars) fits, first would exceed
+        let extracted = extract_recent_user_messages(&turns, 30);
+        assert_eq!(extracted.len(), 1);
+        assert!(matches!(&extracted[0], Turn::User { content, .. } if content.starts_with('b')));
+    }
+
+    #[test]
+    fn compact_extracts_only_user_turns_from_discarded() {
+        let mut history = History::default();
+        history.push(Turn::User {
+            content: "user msg".into(),
+            timestamp: SystemTime::now(),
+        });
+        history.push(Turn::Assistant {
+            content: "assistant msg".into(),
+            tool_calls: vec![],
+            provider_parts: vec![],
+            usage: Usage::default(),
+            response_id: "r1".into(),
+            timestamp: SystemTime::now(),
+        });
+        history.push(Turn::User {
+            content: "preserved".into(),
+            timestamp: SystemTime::now(),
+        });
+
+        history.compact(1, "Summary".into());
+
+        // Layout: summary, extracted User("user msg"), preserved User("preserved")
+        assert_eq!(history.turns().len(), 3);
+        assert!(matches!(&history.turns()[0], Turn::System { .. }));
+        assert!(matches!(&history.turns()[1], Turn::User { content, .. } if content == "user msg"));
+        assert!(
+            matches!(&history.turns()[2], Turn::User { content, .. } if content == "preserved")
+        );
     }
 }

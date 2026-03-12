@@ -564,6 +564,40 @@ impl Session {
                 return Err(self.aborted_error());
             }
 
+            // Pre-turn compaction check: compact before building the request so the
+            // LLM call uses a trimmed context when we're already over threshold.
+            let over_threshold = crate::compaction::check_context_usage(
+                &self.system_prompt,
+                &self.history,
+                self.provider_profile.as_ref(),
+                self.config.compaction_threshold_percent,
+                &self.event_emitter,
+                &self.id,
+            );
+            if over_threshold && self.config.enable_context_compaction {
+                if let Err(e) = crate::compaction::compact_context(
+                    &mut self.history,
+                    &self.llm_client,
+                    self.provider_profile.as_ref(),
+                    &self.system_prompt,
+                    &self.file_tracker,
+                    self.config.compaction_preserve_turns,
+                    &self.event_emitter,
+                    &self.id,
+                )
+                .await
+                {
+                    self.event_emitter.emit(
+                        self.id.clone(),
+                        AgentEvent::Error {
+                            error: AgentError::InvalidState(format!(
+                                "Context compaction failed: {e}"
+                            )),
+                        },
+                    );
+                }
+            }
+
             // Build request
             let request = self.build_request();
 
@@ -1887,7 +1921,7 @@ mod tests {
         // History should have been compacted: summary turn + preserved turns
         let turns = session.history().turns();
         assert!(
-            turns.iter().any(|t| matches!(t, Turn::System { content, .. } if content.contains("[Context Summary]"))),
+            turns.iter().any(|t| matches!(t, Turn::System { content, .. } if content.contains("A different assistant began this task"))),
             "Should contain a summary system turn"
         );
     }
