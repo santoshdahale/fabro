@@ -1,0 +1,12 @@
+[package]
+name = "arc-tracker"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+description = "Tracker trait and types for issue tracking integrations"
+
+[lib]
+doctest = false
+
+[dependencies]
+async-trait.workspace = true

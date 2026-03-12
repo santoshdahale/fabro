@@ -303,6 +303,8 @@ dependencies = [
 name = "arc-github"
 version = "0.2.0"
 dependencies = [
+ "arc-tracker",
+ "async-trait",
  "base64",
  "chrono",
  "jsonwebtoken",
@@ -318,6 +320,8 @@ dependencies = [
 name = "arc-linear"
 version = "0.2.0"
 dependencies = [
+ "arc-tracker",
+ "async-trait",
  "mockito",
  "reqwest 0.12.28",
  "serde",
@@ -437,6 +441,13 @@ dependencies = [
  "tokio",
  "tokio-util",
  "tracing",
+]
+
+[[package]]
+name = "arc-tracker"
+version = "0.2.0"
+dependencies = [
+ "async-trait",
 ]
 
 [[package]]

@@ -9,12 +9,15 @@ description = "GitHub App authentication and API helpers for Arc"
 doctest = false
 
 [dependencies]
+arc-tracker = { path = "../arc-tracker" }
+async-trait.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 reqwest.workspace = true
 jsonwebtoken.workspace = true
 chrono.workspace = true
 tracing.workspace = true
+tokio = { workspace = true }
 
 [dev-dependencies]
 mockito = "1"
