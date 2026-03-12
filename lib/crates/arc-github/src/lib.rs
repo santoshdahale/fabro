@@ -689,39 +689,42 @@ pub async fn create_installation_access_token_for_projects(
 /// Scoped to a single project board identified by `project_number`.
 pub struct GitHubTracker {
     creds: GitHubAppCredentials,
+    client: reqwest::Client,
     owner: String,
     repo: String,
     project_number: u64,
     base_url: String,
-    graphql_url: String,
     project_node_id: OnceCell<String>,
 }
 
 impl GitHubTracker {
     pub fn new(
         creds: GitHubAppCredentials,
+        client: reqwest::Client,
         owner: String,
         repo: String,
         project_number: u64,
         base_url: String,
     ) -> Self {
-        let graphql_url = format!("{base_url}/graphql");
         Self {
             creds,
+            client,
             owner,
             repo,
             project_number,
             base_url,
-            graphql_url,
             project_node_id: OnceCell::new(),
         }
     }
 
+    fn graphql_url(&self) -> String {
+        format!("{}/graphql", self.base_url)
+    }
+
     async fn fresh_token(&self) -> Result<String, String> {
         let jwt = sign_app_jwt(&self.creds.app_id, &self.creds.private_key_pem)?;
-        let client = reqwest::Client::new();
         create_installation_access_token_for_projects(
-            &client,
+            &self.client,
             &jwt,
             &self.owner,
             &self.repo,
@@ -738,7 +741,7 @@ impl GitHubTracker {
                     project_number = self.project_number,
                     "Resolving GitHub project node ID"
                 );
-                let client = reqwest::Client::new();
+                let graphql_url = self.graphql_url();
                 let query = r#"
                     query($owner: String!, $number: Int!) {
                         organization(login: $owner) {
@@ -752,9 +755,9 @@ impl GitHubTracker {
                 });
 
                 let resp = execute_github_graphql(
-                    &client,
+                    &self.client,
                     token,
-                    &self.graphql_url,
+                    &graphql_url,
                     query,
                     variables.clone(),
                 )
@@ -773,9 +776,9 @@ impl GitHubTracker {
                     }
                 "#;
                 let user_resp = execute_github_graphql(
-                    &client,
+                    &self.client,
                     token,
-                    &self.graphql_url,
+                    &graphql_url,
                     user_query,
                     variables,
                 )
@@ -914,12 +917,11 @@ impl Tracker for GitHubTracker {
     async fn fetch_viewer_id(&self) -> Result<String, String> {
         tracing::debug!("Fetching viewer ID from GitHub");
         let token = self.fresh_token().await?;
-        let client = reqwest::Client::new();
         let query = "query { viewer { id } }";
         let resp = execute_github_graphql(
-            &client,
+            &self.client,
             &token,
-            &self.graphql_url,
+            &self.graphql_url(),
             query,
             serde_json::json!({}),
         )
@@ -934,7 +936,6 @@ impl Tracker for GitHubTracker {
     async fn create_comment(&self, issue: &Issue, body: &str) -> Result<(), String> {
         tracing::debug!(issue_id = %issue.id, "Creating comment on GitHub issue");
         let token = self.fresh_token().await?;
-        let client = reqwest::Client::new();
         let query = r#"
             mutation($subjectId: ID!, $body: String!) {
                 addComment(input: { subjectId: $subjectId, body: $body }) {
@@ -946,7 +947,7 @@ impl Tracker for GitHubTracker {
             "subjectId": issue.id,
             "body": body,
         });
-        execute_github_graphql(&client, &token, &self.graphql_url, query, variables).await?;
+        execute_github_graphql(&self.client, &token, &self.graphql_url(), query, variables).await?;
         Ok(())
     }
 
@@ -963,8 +964,8 @@ impl Tracker for GitHubTracker {
         );
 
         let token = self.fresh_token().await?;
-        let client = reqwest::Client::new();
         let project_node_id = self.resolve_project_node_id(&token).await?;
+        let graphql_url = self.graphql_url();
 
         // Step 1: Get the Status field ID and the target option ID
         let field_query = r#"
@@ -982,9 +983,9 @@ impl Tracker for GitHubTracker {
             }
         "#;
         let field_resp = execute_github_graphql(
-            &client,
+            &self.client,
             &token,
-            &self.graphql_url,
+            &graphql_url,
             field_query,
             serde_json::json!({ "projectId": project_node_id }),
         )
@@ -1023,9 +1024,9 @@ impl Tracker for GitHubTracker {
             }
         "#;
         execute_github_graphql(
-            &client,
+            &self.client,
             &token,
-            &self.graphql_url,
+            &graphql_url,
             update_query,
             serde_json::json!({
                 "projectId": project_node_id,
@@ -1049,16 +1050,16 @@ impl Tracker for GitHubTracker {
 
         let token = self.fresh_token().await?;
         let project_node_id = self.resolve_project_node_id(&token).await?;
-        let client = reqwest::Client::new();
+        let graphql_url = self.graphql_url();
 
         let mut all_issues = Vec::new();
         let mut cursor: Option<String> = None;
 
         loop {
             let (nodes, has_next, end_cursor) = fetch_project_items_page(
-                &client,
+                &self.client,
                 &token,
-                &self.graphql_url,
+                &graphql_url,
                 project_node_id,
                 cursor.as_deref(),
             )
@@ -1097,7 +1098,7 @@ impl Tracker for GitHubTracker {
 
         let token = self.fresh_token().await?;
         let project_node_id = self.resolve_project_node_id(&token).await?;
-        let client = reqwest::Client::new();
+        let graphql_url = self.graphql_url();
 
         let id_set: std::collections::HashSet<&str> = ids.iter().copied().collect();
         let mut issue_map: std::collections::HashMap<String, Issue> =
@@ -1106,9 +1107,9 @@ impl Tracker for GitHubTracker {
 
         loop {
             let (nodes, has_next, end_cursor) = fetch_project_items_page(
-                &client,
+                &self.client,
                 &token,
-                &self.graphql_url,
+                &graphql_url,
                 project_node_id,
                 cursor.as_deref(),
             )
@@ -1987,11 +1988,31 @@ mod tests {
                 app_id: "test-app".to_string(),
                 private_key_pem: pem,
             },
+            reqwest::Client::new(),
             "owner".to_string(),
             "repo".to_string(),
             1,
             server_url.to_string(),
         )
+    }
+
+    fn make_test_issue(state: &str) -> Issue {
+        Issue {
+            id: "I_issue1".to_string(),
+            project_item_id: Some("PVTI_item1".to_string()),
+            identifier: "#42".to_string(),
+            title: "Fix bug".to_string(),
+            description: None,
+            priority: None,
+            state: state.to_string(),
+            branch_name: None,
+            url: "https://github.com/owner/repo/issues/42".to_string(),
+            assignee_id: None,
+            labels: vec![],
+            blocked_by: vec![],
+            created_at: None,
+            updated_at: None,
+        }
     }
 
     fn org_project_node_id_response() -> &'static str {
@@ -2177,23 +2198,7 @@ mod tests {
             .create_async()
             .await;
 
-        let issue = Issue {
-            id: "I_issue1".to_string(),
-            project_item_id: Some("PVTI_item1".to_string()),
-            identifier: "#42".to_string(),
-            title: "Fix bug".to_string(),
-            description: None,
-            priority: None,
-            state: "In Progress".to_string(),
-            branch_name: None,
-            url: "https://github.com/owner/repo/issues/42".to_string(),
-            assignee_id: None,
-            labels: vec![],
-            blocked_by: vec![],
-            created_at: None,
-            updated_at: None,
-        };
-
+        let issue = make_test_issue("In Progress");
         tracker.create_comment(&issue, "Great work!").await.unwrap();
     }
 
@@ -2241,23 +2246,7 @@ mod tests {
             .create_async()
             .await;
 
-        let issue = Issue {
-            id: "I_issue1".to_string(),
-            project_item_id: Some("PVTI_item1".to_string()),
-            identifier: "#42".to_string(),
-            title: "Fix bug".to_string(),
-            description: None,
-            priority: None,
-            state: "In Progress".to_string(),
-            branch_name: None,
-            url: "https://github.com/owner/repo/issues/42".to_string(),
-            assignee_id: None,
-            labels: vec![],
-            blocked_by: vec![],
-            created_at: None,
-            updated_at: None,
-        };
-
+        let issue = make_test_issue("In Progress");
         tracker.update_issue_state(&issue, "Done").await.unwrap();
     }
 
@@ -2294,23 +2283,7 @@ mod tests {
             .create_async()
             .await;
 
-        let issue = Issue {
-            id: "I_issue1".to_string(),
-            project_item_id: Some("PVTI_item1".to_string()),
-            identifier: "#42".to_string(),
-            title: "Fix bug".to_string(),
-            description: None,
-            priority: None,
-            state: "Todo".to_string(),
-            branch_name: None,
-            url: "https://github.com/owner/repo/issues/42".to_string(),
-            assignee_id: None,
-            labels: vec![],
-            blocked_by: vec![],
-            created_at: None,
-            updated_at: None,
-        };
-
+        let issue = make_test_issue("Todo");
         let err = tracker
             .update_issue_state(&issue, "Nonexistent")
             .await
