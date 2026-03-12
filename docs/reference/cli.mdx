@@ -56,7 +56,7 @@ arc run --run-branch arc/run/abc123
 | `--model <MODEL>` | Override default LLM model |
 | `--provider <PROVIDER>` | Override default LLM provider |
 | `-v, --verbose` | Enable verbose output |
-| `--sandbox <SANDBOX>` | Sandbox for agent tools: `local`, `docker`, `daytona`, or `exe` |
+| `--sandbox <SANDBOX>` | Sandbox for agent tools: `local`, `docker`, `daytona`, `ssh`, or `exe` |
 | `--label <KEY=VALUE>` | Attach a label to this run (repeatable) |
 | `--goal <GOAL>` | Override the workflow goal (exposed as `$goal` in prompts) |
 | `--goal-file <FILE>` | Read the goal from a file instead of inline text |
@@ -224,7 +224,7 @@ arc serve --sandbox daytona --max-concurrent-runs 4
 | `--model <MODEL>` | Override default LLM model | — |
 | `--provider <PROVIDER>` | Override default LLM provider | — |
 | `--dry-run` | Execute with simulated LLM backend | — |
-| `--sandbox <SANDBOX>` | Sandbox for agent tools: `local`, `docker`, `daytona`, or `exe` | — |
+| `--sandbox <SANDBOX>` | Sandbox for agent tools: `local`, `docker`, `daytona`, `ssh`, or `exe` | — |
 | `--max-concurrent-runs <N>` | Maximum number of concurrent run executions | — |
 | `--config <PATH>` | Path to server config file | `~/.arc/server.toml` |
 
@@ -337,6 +337,40 @@ arc system df -v
 | Flag | Description |
 |---|---|
 | `-v, --verbose` | Show per-run breakdown |
+
+## `arc graph`
+
+Render a workflow DOT graph as SVG or PNG. Requires [Graphviz](https://graphviz.org) (`dot`) to be installed.
+
+```bash
+arc graph workflow.dot
+arc graph workflow.dot --format png -o diagram.png
+arc graph run.toml --format svg
+```
+
+| Argument / Flag | Description |
+|---|---|
+| `<WORKFLOW>` | Path to a `.dot` workflow file or `.toml` run config (required) |
+| `--format <FORMAT>` | Output format: `svg` (default) or `png` |
+| `-o, --output <FILE>` | Output file path. Defaults to stdout. |
+
+## `arc skill install`
+
+Install the built-in `arc-create-workflow` skill for AI assistants (Claude Code, Codex). The skill teaches AI assistants Arc's DOT syntax, node types, and run configuration format.
+
+```bash
+# Install into the current project (.claude/skills/ or .agents/skills/)
+arc skill install --for project --dir claude
+
+# Install for all projects (user-level, ~/.claude/skills/)
+arc skill install --for user --dir claude
+```
+
+| Flag | Description |
+|---|---|
+| `--for <SCOPE>` | `user` (default) — installs to `~/<dir>/skills/`. `project` — installs to `./<dir>/skills/`. |
+| `--dir <DIR>` | Directory convention: `claude` (`.claude/skills/`) or `agents` (`.agents/skills/`). Required. |
+| `--force` | Overwrite an existing installation without prompting. |
 
 ## `arc validate`
 
