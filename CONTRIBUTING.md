@@ -1,6 +1,6 @@
-# Contributing to Arc
+# Contributing to Fabro
 
-Thanks for your interest in contributing to Arc!
+Thanks for your interest in contributing to Fabro!
 
 ## Getting started
 
@@ -24,10 +24,10 @@ cargo fmt --check --all
 cargo clippy --workspace -- -D warnings
 ```
 
-### Web frontend (arc-web)
+### Web frontend (fabro-web)
 
 ```bash
-cd apps/arc-web
+cd apps/fabro-web
 bun install
 bun run dev        # start dev server
 bun test           # run tests
