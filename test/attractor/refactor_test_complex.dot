@@ -6,10 +6,10 @@ digraph dttf {
         retry_target="impl_setup",
         fallback_retry_target="impl_loader",
         model_stylesheet="
-            * { llm_model: gemini-3-flash-preview; llm_provider: google; reasoning_effort: medium; }
-            .hard { llm_model: gemini-3-flash-preview; llm_provider: google; reasoning_effort: high; }
-            .verify { llm_model: gemini-3-flash-preview; llm_provider: google; reasoning_effort: medium; }
-            .review { llm_model: gemini-3-flash-preview; llm_provider: google; reasoning_effort: high; }
+            * { model: gemini-3-flash-preview; provider: google; reasoning_effort: medium; }
+            .hard { model: gemini-3-flash-preview; provider: google; reasoning_effort: high; }
+            .verify { model: gemini-3-flash-preview; provider: google; reasoning_effort: medium; }
+            .review { model: gemini-3-flash-preview; provider: google; reasoning_effort: high; }
         "
     ]
 

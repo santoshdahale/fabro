@@ -809,9 +809,9 @@ fn variable_expansion_replaces_goal_in_prompts() {
 #[test]
 fn stylesheet_application_by_specificity() {
     let stylesheet_text = r"
-        * { llm_model: claude-sonnet-4-5; llm_provider: anthropic; }
-        .code { llm_model: claude-opus-4-6; llm_provider: anthropic; }
-        #critical_review { llm_model: gpt-5.2; llm_provider: openai; reasoning_effort: high; }
+        * { model: claude-sonnet-4-5; provider: anthropic; }
+        .code { model: claude-opus-4-6; provider: anthropic; }
+        #critical_review { model: gpt-5.2; provider: openai; reasoning_effort: high; }
     ";
 
     let mut graph = Graph::new("test");
@@ -834,10 +834,10 @@ fn stylesheet_application_by_specificity() {
     critical.classes.push("code".to_string());
     graph.nodes.insert("critical_review".to_string(), critical);
 
-    // explicit node: has explicit llm_model, should NOT be overridden
+    // explicit node: has explicit model, should NOT be overridden
     let mut explicit = Node::new("explicit_node");
     explicit.attrs.insert(
-        "llm_model".to_string(),
+        "model".to_string(),
         AttrValue::String("my-custom-model".to_string()),
     );
     graph.nodes.insert("explicit_node".to_string(), explicit);
@@ -847,31 +847,31 @@ fn stylesheet_application_by_specificity() {
 
     // plan: universal -> claude-sonnet-4-5
     assert_eq!(
-        graph.nodes["plan"].attrs.get("llm_model"),
+        graph.nodes["plan"].attrs.get("model"),
         Some(&AttrValue::String("claude-sonnet-4-5".to_string()))
     );
     assert_eq!(
-        graph.nodes["plan"].attrs.get("llm_provider"),
+        graph.nodes["plan"].attrs.get("provider"),
         Some(&AttrValue::String("anthropic".to_string()))
     );
 
     // implement: .code -> claude-opus-4-6
     assert_eq!(
-        graph.nodes["implement"].attrs.get("llm_model"),
+        graph.nodes["implement"].attrs.get("model"),
         Some(&AttrValue::String("claude-opus-4-6".to_string()))
     );
     assert_eq!(
-        graph.nodes["implement"].attrs.get("llm_provider"),
+        graph.nodes["implement"].attrs.get("provider"),
         Some(&AttrValue::String("anthropic".to_string()))
     );
 
     // critical_review: #critical_review -> gpt-5.2 (id overrides class)
     assert_eq!(
-        graph.nodes["critical_review"].attrs.get("llm_model"),
+        graph.nodes["critical_review"].attrs.get("model"),
         Some(&AttrValue::String("gpt-5.2".to_string()))
     );
     assert_eq!(
-        graph.nodes["critical_review"].attrs.get("llm_provider"),
+        graph.nodes["critical_review"].attrs.get("provider"),
         Some(&AttrValue::String("openai".to_string()))
     );
     assert_eq!(
@@ -881,7 +881,7 @@ fn stylesheet_application_by_specificity() {
 
     // explicit_node: explicit attr NOT overridden by universal
     assert_eq!(
-        graph.nodes["explicit_node"].attrs.get("llm_model"),
+        graph.nodes["explicit_node"].attrs.get("model"),
         Some(&AttrValue::String("my-custom-model".to_string()))
     );
 }
@@ -891,7 +891,7 @@ fn stylesheet_application_via_parsed_graph() {
     let input = r#"digraph StyleTest {
         graph [
             goal="Test stylesheet",
-            model_stylesheet="* { llm_model: sonnet; }"
+            model_stylesheet="* { model: sonnet; }"
         ]
         start [shape=Mdiamond]
         exit  [shape=Msquare]
@@ -905,24 +905,24 @@ fn stylesheet_application_via_parsed_graph() {
     let transform = StylesheetApplicationTransform;
     transform.apply(&mut graph);
 
-    // All nodes without explicit llm_model should get "sonnet"
+    // All nodes without explicit model should get "sonnet"
     assert_eq!(
-        graph.nodes["work"].attrs.get("llm_model"),
+        graph.nodes["work"].attrs.get("model"),
         Some(&AttrValue::String("sonnet".to_string()))
     );
     assert_eq!(
-        graph.nodes["start"].attrs.get("llm_model"),
+        graph.nodes["start"].attrs.get("model"),
         Some(&AttrValue::String("sonnet".to_string()))
     );
     assert_eq!(
-        graph.nodes["exit"].attrs.get("llm_model"),
+        graph.nodes["exit"].attrs.get("model"),
         Some(&AttrValue::String("sonnet".to_string()))
     );
 }
 
 #[test]
 fn stylesheet_parse_and_apply_directly() {
-    let stylesheet_text = "* { llm_model: base; } .fast { llm_model: turbo; }";
+    let stylesheet_text = "* { model: base; } .fast { model: turbo; }";
     let stylesheet = parse_stylesheet(stylesheet_text).expect("stylesheet parse should succeed");
     assert_eq!(stylesheet.rules.len(), 2);
 
@@ -937,11 +937,11 @@ fn stylesheet_parse_and_apply_directly() {
     apply_stylesheet(&stylesheet, &mut graph);
 
     assert_eq!(
-        graph.nodes["a"].attrs.get("llm_model"),
+        graph.nodes["a"].attrs.get("model"),
         Some(&AttrValue::String("base".to_string()))
     );
     assert_eq!(
-        graph.nodes["b"].attrs.get("llm_model"),
+        graph.nodes["b"].attrs.get("model"),
         Some(&AttrValue::String("turbo".to_string()))
     );
 }
@@ -3341,7 +3341,7 @@ async fn stylesheet_applies_model_override() {
     let input = r#"digraph StylesheetTest {
         graph [
             goal="Test stylesheet",
-            model_stylesheet="* { llm_model: custom-model; }"
+            model_stylesheet="* { model: custom-model; }"
         ]
         start [shape=Mdiamond]
         exit  [shape=Msquare]
@@ -3351,7 +3351,7 @@ async fn stylesheet_applies_model_override() {
     let mut graph = parse(input).expect("parse");
     validate_or_raise(&graph, &[]).expect("validate");
     StylesheetApplicationTransform.apply(&mut graph);
-    assert_eq!(graph.nodes["work"].llm_model(), Some("custom-model"));
+    assert_eq!(graph.nodes["work"].model(), Some("custom-model"));
 
     let dir = tempfile::tempdir().unwrap();
     let engine = WorkflowRunEngine::new(
@@ -3453,7 +3453,7 @@ async fn integration_smoke_plan_implement_review_done() {
     let dot = r#"digraph SmokeIntegration {
         graph [
             goal="Build the feature",
-            model_stylesheet="* { llm_model: test-model; }"
+            model_stylesheet="* { model: test-model; }"
         ]
         rankdir=LR
         start [shape=Mdiamond]
@@ -3484,7 +3484,7 @@ async fn integration_smoke_plan_implement_review_done() {
         graph.nodes["plan"].prompt().unwrap(),
         "Plan: Build the feature"
     );
-    assert_eq!(graph.nodes["plan"].llm_model(), Some("test-model"));
+    assert_eq!(graph.nodes["plan"].model(), Some("test-model"));
 
     // Run pipeline
     let interviewer = Arc::new(AutoApproveInterviewer);
@@ -6530,7 +6530,7 @@ mod real_llm {
             ),
         );
         classify.attrs.insert(
-            "llm_model".to_string(),
+            "model".to_string(),
             AttrValue::String("claude-haiku-4-5".to_string()),
         );
         graph.nodes.insert("classify".to_string(), classify);
@@ -9910,7 +9910,7 @@ async fn cli_backend_run_uses_node_model_override() {
 
     let mut node = Node::new("step");
     node.attrs.insert(
-        "llm_model".to_string(),
+        "model".to_string(),
         AttrValue::String("claude-sonnet-4-5".to_string()),
     );
 
@@ -9956,11 +9956,11 @@ async fn cli_backend_run_uses_node_provider_override() {
 
     let mut node = Node::new("step");
     node.attrs.insert(
-        "llm_provider".to_string(),
+        "provider".to_string(),
         AttrValue::String("openai".to_string()),
     );
     node.attrs.insert(
-        "llm_model".to_string(),
+        "model".to_string(),
         AttrValue::String("gpt-5.3-codex".to_string()),
     );
 
@@ -10133,7 +10133,7 @@ async fn backend_router_delegates_to_cli_for_backend_attr() {
     node.attrs
         .insert("backend".to_string(), AttrValue::String("cli".to_string()));
     node.attrs.insert(
-        "llm_provider".to_string(),
+        "provider".to_string(),
         AttrValue::String("openai".to_string()),
     );
 

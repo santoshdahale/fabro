@@ -29,9 +29,9 @@ digraph SpecDoD {
         default_max_retry="3",
         retry_target="triage",
         model_stylesheet="
-            * { llm_model: claude-opus-4-6; llm_provider: anthropic; }
+            * { model: claude-opus-4-6;}
             .audit { reasoning_effort: high; }
-            .fix { llm_model: claude-opus-4-6; reasoning_effort: high; }
+            .fix { model: claude-opus-4-6; reasoning_effort: high; }
             #final_audit { reasoning_effort: high; }
         "
     ]
@@ -286,11 +286,11 @@ digraph SpecDoDMultiModel {
         retry_target="triage_merge",
         default_fidelity="full",
         model_stylesheet="
-            * { llm_model: claude-opus-4-6; llm_provider: anthropic; }
-            .opus   { llm_model: claude-opus-4-6; llm_provider: anthropic; reasoning_effort: high; }
-            .gpt    { llm_model: gpt-5.2;         llm_provider: openai;    reasoning_effort: high; }
-            .codex  { llm_model: gpt-5.2-codex;   llm_provider: openai;    reasoning_effort: high; }
-            .merge  { llm_model: claude-opus-4-6;  llm_provider: anthropic; reasoning_effort: high; }
+            * { model: claude-opus-4-6;}
+            .opus   { model: claude-opus-4-6;reasoning_effort: high; }
+            .gpt    { model: gpt-5.2;        reasoning_effort: high; }
+            .codex  { model: gpt-5.2-codex;  reasoning_effort: high; }
+            .merge  { model: claude-opus-4-6; reasoning_effort: high; }
         "
     ]
 

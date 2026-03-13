@@ -242,9 +242,9 @@ impl CodergenBackend for AgentApiBackend {
             .await
             .map_err(|e| FabroError::handler(format!("Failed to create LLM client: {e}")))?;
 
-        let model = node.llm_model().unwrap_or(&self.model);
+        let model = node.model().unwrap_or(&self.model);
         let provider = node
-            .llm_provider()
+            .provider()
             .map(String::from)
             .or_else(|| Some(self.provider.as_str().to_string()));
 
@@ -281,7 +281,7 @@ impl CodergenBackend for AgentApiBackend {
 
         // Build per-request fallback chain: if the node overrides the provider,
         // no failover is available; otherwise use the backend's.
-        let fallback_chain: &[FallbackTarget] = if node.llm_provider().is_some() {
+        let fallback_chain: &[FallbackTarget] = if node.provider().is_some() {
             &[]
         } else {
             &self.fallback_chain

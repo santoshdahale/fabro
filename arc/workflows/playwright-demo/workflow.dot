@@ -1,5 +1,5 @@
 digraph PlaywrightDemo {
-    graph [goal="Use Playwright MCP to browse Hacker News and take screenshots", model_stylesheet="* { llm_model: claude-sonnet-4-6; llm_provider: anthropic }"]
+    graph [goal="Use Playwright MCP to browse Hacker News and take screenshots", model_stylesheet="* { model: claude-sonnet-4-6;}"]
     rankdir=LR
 
     start [shape=Mdiamond, label="Start"]

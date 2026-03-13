@@ -24,11 +24,11 @@ GitHub to Railway validated by code review only — no live deployment execution
         retry_target="plan_fanout",
         fallback_retry_target="plan_fanout",
         model_stylesheet="
-            *          { llm_model: claude-opus-4-6;       llm_provider: anthropic; }
-            .hard      { llm_model: gpt-5.3-codex;        llm_provider: openai;    }
-            .verify    { llm_model: claude-opus-4-6;       llm_provider: anthropic; }
-            .branch-a  { llm_model: claude-opus-4-6;       llm_provider: anthropic; }
-            .branch-b  { llm_model: gemini-3-flash-preview; llm_provider: gemini;   }
+            *          { model: claude-opus-4-6;      }
+            .hard      { model: gpt-5.3-codex;       }
+            .verify    { model: claude-opus-4-6;      }
+            .branch-a  { model: claude-opus-4-6;      }
+            .branch-b  { model: gemini-3-flash-preview;}
         "
     ]
 

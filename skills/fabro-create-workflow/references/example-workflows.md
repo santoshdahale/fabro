@@ -151,9 +151,9 @@ digraph MultiModel {
     graph [
         goal="Build and review a utility function using multiple models",
         model_stylesheet="
-            * { llm_model: claude-haiku-4-5; llm_provider: anthropic; reasoning_effort: low; }
-            .coding { llm_model: claude-sonnet-4-6; llm_provider: anthropic; reasoning_effort: high; }
-            #review { llm_model: claude-sonnet-4-6; llm_provider: anthropic; reasoning_effort: high; }
+            * { model: claude-haiku-4-5;reasoning_effort: low; }
+            .coding { model: claude-sonnet-4-6;reasoning_effort: high; }
+            #review { model: claude-sonnet-4-6;reasoning_effort: high; }
         "
     ]
     rankdir=LR
@@ -179,10 +179,10 @@ digraph Ensemble {
     graph [
         goal="Get independent opinions from multiple providers, then synthesize",
         model_stylesheet="
-            #opus    { llm_model: claude-opus-4-6;       llm_provider: anthropic; }
-            #gemini  { llm_model: gemini-3.1-pro-preview; llm_provider: gemini;   }
-            #codex   { llm_model: gpt-5.3-codex;        llm_provider: openai;    }
-            #synth   { llm_model: claude-opus-4-6;       llm_provider: anthropic; reasoning_effort: high; }
+            #opus    { model: claude-opus-4-6;      }
+            #gemini  { model: gemini-3.1-pro-preview;}
+            #codex   { model: gpt-5.3-codex;       }
+            #synth   { model: claude-opus-4-6;      reasoning_effort: high; }
         "
     ]
     rankdir=LR
@@ -219,7 +219,7 @@ digraph ImplementAndSimplify {
     graph [
         goal="Implement and simplify",
         model_stylesheet="
-            * { backend: api; llm_model: claude-opus-4-6; llm_provider: anthropic; }
+            * { backend: api; model: claude-opus-4-6;}
         "
     ]
     rankdir=LR

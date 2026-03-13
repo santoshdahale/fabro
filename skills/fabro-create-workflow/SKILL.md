@@ -81,9 +81,9 @@ Use `model_stylesheet` for model assignment rather than per-node attributes:
 
 ```dot
 graph [model_stylesheet="
-    *        { llm_model: claude-sonnet-4-6; llm_provider: anthropic; }
-    .coding  { llm_model: claude-opus-4-6; llm_provider: anthropic; }
-    .review  { llm_model: gemini-3.1-pro-preview; llm_provider: gemini; }
+    *        { model: claude-sonnet-4-6;}
+    .coding  { model: claude-opus-4-6;}
+    .review  { model: gemini-3.1-pro-preview;}
 "]
 ```
 

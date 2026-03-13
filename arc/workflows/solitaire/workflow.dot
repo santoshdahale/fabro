@@ -6,9 +6,9 @@ digraph BuildSolitaire {
         retry_target="impl_setup",
         fallback_retry_target="impl_logic",
         model_stylesheet="
-            *       { llm_model: claude-sonnet; llm_provider: anthropic; }
-            .hard   { llm_model: claude-opus;   llm_provider: anthropic; }
-            .verify { llm_model: claude-haiku;  llm_provider: anthropic; }
+            *       { model: claude-sonnet;}
+            .hard   { model: claude-opus;  }
+            .verify { model: claude-haiku; }
         "
     ]
 

@@ -2,8 +2,8 @@ digraph NLSpecConformance {
     graph [
         goal="Implement a conformant system from a natural language specification",
         model_stylesheet="
-            *      { llm_model: claude-haiku-4-5; llm_provider: anthropic; }
-            .impl  { llm_model: claude-sonnet-4-5; reasoning_effort: high; }
+            *      { model: claude-haiku-4-5;}
+            .impl  { model: claude-sonnet-4-5; reasoning_effort: high; }
         "
     ]
     rankdir=LR

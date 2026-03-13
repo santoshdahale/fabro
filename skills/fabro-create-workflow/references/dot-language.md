@@ -73,7 +73,7 @@ Comments: `//` line and `/* */` block.
 
 Multi-turn LLM with tools (shell, read_file, write_file, grep, glob, web_search, web_fetch, edit_file).
 
-Key attributes: `prompt`, `reasoning_effort` (low/medium/high), `max_tokens`, `fidelity`, `thread_id`, `timeout`, `backend` (api or cli), `llm_model`, `llm_provider`, `project_memory`.
+Key attributes: `prompt`, `reasoning_effort` (low/medium/high), `max_tokens`, `fidelity`, `thread_id`, `timeout`, `backend` (api or cli), `model`, `provider`, `project_memory`.
 
 ### Prompt Nodes (tab)
 
@@ -156,17 +156,17 @@ CSS-like syntax for assigning models to nodes:
 
 ```dot
 graph [model_stylesheet="
-    *        { llm_model: claude-haiku-4-5; llm_provider: anthropic; }
-    .coding  { llm_model: claude-sonnet-4-6; llm_provider: anthropic; }
-    #review  { llm_model: gemini-3.1-pro-preview; llm_provider: gemini; }
+    *        { model: claude-haiku-4-5;}
+    .coding  { model: claude-sonnet-4-6;}
+    #review  { model: gemini-3.1-pro-preview;}
 "]
 ```
 
 Selectors by specificity (low to high): `*` (universal, 0), shape name (1), `.class` (2), `#nodeid` (3). Higher specificity wins. Same specificity: last rule wins. Explicit node attributes override stylesheets.
 
-Properties: `llm_model`, `llm_provider`, `reasoning_effort`, `backend`.
+Properties: `model`, `provider`, `reasoning_effort`, `backend`.
 
-**Critical:** Use semicolons between properties (e.g. `llm_model: foo; llm_provider: bar;`).
+**Critical:** Use semicolons between properties (e.g. `model: foo; provider: bar;`).
 
 ## Variables
 

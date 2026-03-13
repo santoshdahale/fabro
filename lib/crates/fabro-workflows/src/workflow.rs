@@ -3,7 +3,8 @@ use std::path::Path;
 use crate::error::FabroError;
 use crate::graph::Graph;
 use crate::transform::{
-    FileInliningTransform, StylesheetApplicationTransform, Transform, VariableExpansionTransform,
+    FileInliningTransform, ProviderInferenceTransform, StylesheetApplicationTransform, Transform,
+    VariableExpansionTransform,
 };
 use crate::validation::{self, Diagnostic};
 
@@ -60,6 +61,7 @@ impl WorkflowBuilder {
         // Built-in transforms (PreambleTransform moved to engine execution time)
         VariableExpansionTransform.apply(&mut graph);
         StylesheetApplicationTransform.apply(&mut graph);
+        ProviderInferenceTransform.apply(&mut graph);
 
         // File inlining when base_dir is provided
         if let Some(dir) = base_dir {
@@ -148,7 +150,7 @@ mod tests {
     #[test]
     fn prepare_from_source_applies_stylesheet() {
         let dot = r#"digraph Test {
-            graph [goal="Test", model_stylesheet="* { llm_model: sonnet; }"]
+            graph [goal="Test", model_stylesheet="* { model: sonnet; }"]
             start [shape=Mdiamond]
             work  [label="Work"]
             exit  [shape=Msquare]
@@ -156,7 +158,7 @@ mod tests {
         }"#;
         let graph = prepare_from_source(dot).unwrap();
         assert_eq!(
-            graph.nodes["work"].attrs.get("llm_model"),
+            graph.nodes["work"].attrs.get("model"),
             Some(&AttrValue::String("sonnet".into()))
         );
     }

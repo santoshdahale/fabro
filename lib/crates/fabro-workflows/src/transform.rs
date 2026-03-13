@@ -112,6 +112,29 @@ impl Transform for StylesheetApplicationTransform {
     }
 }
 
+/// For nodes with `model` but no `provider`, infer the provider from the model catalog.
+pub struct ProviderInferenceTransform;
+
+impl Transform for ProviderInferenceTransform {
+    fn apply(&self, graph: &mut Graph) {
+        for node in graph.nodes.values_mut() {
+            let model = node
+                .attrs
+                .get("model")
+                .and_then(AttrValue::as_str)
+                .map(String::from);
+            if let Some(model) = model {
+                if !node.attrs.contains_key("provider") {
+                    if let Some(info) = fabro_llm::catalog::get_model_info(&model) {
+                        node.attrs
+                            .insert("provider".to_string(), AttrValue::String(info.provider));
+                    }
+                }
+            }
+        }
+    }
+}
+
 /// Resolve a potential `@path` file reference.
 ///
 /// If `value` starts with `@` and the referenced file exists locally, the file
@@ -479,7 +502,7 @@ mod tests {
         );
         primary.attrs.insert(
             "model_stylesheet".to_string(),
-            AttrValue::String("* { llm_model: sonnet; }".to_string()),
+            AttrValue::String("* { model: sonnet; }".to_string()),
         );
 
         let mut secondary = Graph::new("sub");
@@ -493,7 +516,7 @@ mod tests {
         transform.apply(&mut primary);
 
         assert_eq!(primary.goal(), "Build feature");
-        assert_eq!(primary.model_stylesheet(), "* { llm_model: sonnet; }");
+        assert_eq!(primary.model_stylesheet(), "* { model: sonnet; }");
     }
 
     #[test]
@@ -590,6 +613,82 @@ mod tests {
                 .and_then(AttrValue::as_str),
             Some("outcome=success")
         );
+    }
+
+    // -----------------------------------------------------------------------
+    // ProviderInferenceTransform tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn provider_inference_sets_provider_from_catalog() {
+        let mut graph = Graph::new("test");
+        let mut node = Node::new("a");
+        node.attrs.insert(
+            "model".to_string(),
+            AttrValue::String("claude-sonnet-4-5".to_string()),
+        );
+        graph.nodes.insert("a".to_string(), node);
+
+        ProviderInferenceTransform.apply(&mut graph);
+
+        assert_eq!(
+            graph.nodes["a"]
+                .attrs
+                .get("provider")
+                .and_then(AttrValue::as_str),
+            Some("anthropic")
+        );
+    }
+
+    #[test]
+    fn provider_inference_does_not_override_explicit_provider() {
+        let mut graph = Graph::new("test");
+        let mut node = Node::new("a");
+        node.attrs.insert(
+            "model".to_string(),
+            AttrValue::String("claude-sonnet-4-5".to_string()),
+        );
+        node.attrs.insert(
+            "provider".to_string(),
+            AttrValue::String("custom".to_string()),
+        );
+        graph.nodes.insert("a".to_string(), node);
+
+        ProviderInferenceTransform.apply(&mut graph);
+
+        assert_eq!(
+            graph.nodes["a"]
+                .attrs
+                .get("provider")
+                .and_then(AttrValue::as_str),
+            Some("custom")
+        );
+    }
+
+    #[test]
+    fn provider_inference_unknown_model_leaves_no_provider() {
+        let mut graph = Graph::new("test");
+        let mut node = Node::new("a");
+        node.attrs.insert(
+            "model".to_string(),
+            AttrValue::String("unknown-model-xyz".to_string()),
+        );
+        graph.nodes.insert("a".to_string(), node);
+
+        ProviderInferenceTransform.apply(&mut graph);
+
+        assert_eq!(graph.nodes["a"].attrs.get("provider"), None);
+    }
+
+    #[test]
+    fn provider_inference_no_model_no_change() {
+        let mut graph = Graph::new("test");
+        let node = Node::new("a");
+        graph.nodes.insert("a".to_string(), node);
+
+        ProviderInferenceTransform.apply(&mut graph);
+
+        assert_eq!(graph.nodes["a"].attrs.get("provider"), None);
     }
 
     // -----------------------------------------------------------------------

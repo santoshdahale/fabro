@@ -6,7 +6,7 @@ digraph solitaire {
         retry_target="impl_setup",
         fallback_retry_target="impl_game_logic",
         model_stylesheet="
-            * { llm_model: gemini-3-flash-preview; llm_provider: google; }
+            * { model: gemini-3-flash-preview; provider: google; }
         "
     ]
 

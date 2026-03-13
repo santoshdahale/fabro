@@ -20,9 +20,9 @@ digraph SemanticPort {
         rankdir=LR,
         default_max_retry=3,
         model_stylesheet="
-            *        { llm_model: claude-sonnet-4-5; llm_provider: anthropic; }
-            .hard    { llm_model: claude-opus-4-6;   llm_provider: anthropic; }
-            .analyze { llm_model: gemini-3.1-pro-preview; llm_provider: gemini; }
+            *        { model: claude-sonnet-4-5;}
+            .hard    { model: claude-opus-4-6;  }
+            .analyze { model: gemini-3.1-pro-preview;}
         "
     ]
 
@@ -170,7 +170,7 @@ The `analyze` node is the decision point. It examines each upstream commit for *
 This distinction is critical — routing a different model (Gemini) to the analysis node via the `.analyze` class brings a fresh perspective to the port/skip decision:
 
 ```
-.analyze { llm_model: gemini-3.1-pro-preview; llm_provider: gemini; }
+.analyze { model: gemini-3.1-pro-preview;}
 ```
 
 ### The fix loop
@@ -200,9 +200,9 @@ When the agent decides a commit is irrelevant, it updates the ledger, commits th
 The stylesheet assigns three tiers of models:
 
 ```
-*        { llm_model: claude-sonnet-4-5; }    // Default: plan, finalize
-.hard    { llm_model: claude-opus-4-6; }      // Implementation, fixing
-.analyze { llm_model: gemini-3.1-pro-preview; } // Analysis: fresh eyes
+*        { model: claude-sonnet-4-5; }    // Default: plan, finalize
+.hard    { model: claude-opus-4-6; }      // Implementation, fixing
+.analyze { model: gemini-3.1-pro-preview; } // Analysis: fresh eyes
 ```
 
 - **Sonnet** handles routine tasks: fetching commits, finalizing plans, updating the ledger

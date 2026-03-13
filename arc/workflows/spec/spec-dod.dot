@@ -4,9 +4,9 @@ digraph SpecDoD {
         default_max_retry="3",
         retry_target="triage",
         model_stylesheet="
-            * { llm_model: claude-opus-4-6; llm_provider: anthropic; }
+            * { model: claude-opus-4-6;}
             .audit { reasoning_effort: high; }
-            .fix { llm_model: claude-opus-4-6; reasoning_effort: high; }
+            .fix { model: claude-opus-4-6; reasoning_effort: high; }
             #final_audit { reasoning_effort: high; }
         "
     ]

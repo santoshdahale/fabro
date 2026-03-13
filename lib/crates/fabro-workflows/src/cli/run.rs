@@ -2094,8 +2094,8 @@ async fn run_preflight(
                 if !crate::graph::types::is_llm_handler_type(node.handler_type()) {
                     continue;
                 }
-                let node_model = node.llm_model().unwrap_or(&model);
-                let node_provider = node.llm_provider().unwrap_or(default_provider);
+                let node_model = node.model().unwrap_or(&model);
+                let node_provider = node.provider().unwrap_or(default_provider);
 
                 // Resolve through catalog to get canonical model ID and provider
                 let (resolved_model, resolved_provider) =
@@ -2106,7 +2106,7 @@ async fn run_preflight(
                     };
 
                 // Use node-level provider override if explicitly set, otherwise catalog provider
-                let final_provider = if node.llm_provider().is_some() {
+                let final_provider = if node.provider().is_some() {
                     node_provider.to_string()
                 } else {
                     resolved_provider

@@ -1,9 +1,9 @@
 digraph Example {
     graph [
         model_stylesheet="
-            *        { llm_model: claude-haiku-4-5; }
-            .coding  { llm_model: claude-sonnet-4-5; reasoning_effort: high; }
-            #review  { llm_model: gemini-3.1-pro-preview; }
+            *        { model: claude-haiku-4-5; }
+            .coding  { model: claude-sonnet-4-5; reasoning_effort: high; }
+            #review  { model: gemini-3.1-pro-preview; }
         "
     ]
 

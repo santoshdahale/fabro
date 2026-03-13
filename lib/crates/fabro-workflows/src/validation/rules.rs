@@ -929,7 +929,7 @@ impl LintRule for StylesheetModelKnownRule {
             let label = Self::selector_label(&rule.selector);
             for decl in &rule.declarations {
                 match decl.property.as_str() {
-                    "llm_model" => {
+                    "model" => {
                         if fabro_llm::catalog::get_model_info(&decl.value).is_none() {
                             diagnostics.push(Diagnostic {
                                 rule: self.name().to_string(),
@@ -944,7 +944,7 @@ impl LintRule for StylesheetModelKnownRule {
                             });
                         }
                     }
-                    "llm_provider" => {
+                    "provider" => {
                         if fabro_llm::Provider::from_str(&decl.value).is_err() {
                             let valid: Vec<&str> = fabro_llm::Provider::ALL
                                 .iter()
@@ -1432,7 +1432,7 @@ mod tests {
         let mut g = minimal_graph();
         g.attrs.insert(
             "model_stylesheet".to_string(),
-            AttrValue::String("* { llm_model: foo;".to_string()),
+            AttrValue::String("* { model: foo;".to_string()),
         );
         let rule = StylesheetSyntaxRule;
         let d = rule.apply(&g);
@@ -1445,7 +1445,7 @@ mod tests {
         let mut g = minimal_graph();
         g.attrs.insert(
             "model_stylesheet".to_string(),
-            AttrValue::String("* { llm_model: foo; }".to_string()),
+            AttrValue::String("* { model: foo; }".to_string()),
         );
         let rule = StylesheetSyntaxRule;
         let d = rule.apply(&g);
@@ -2228,8 +2228,7 @@ mod tests {
         g.attrs.insert(
             "model_stylesheet".to_string(),
             AttrValue::String(
-                "* { llm_model: gpt-4; } .fast { llm_model: gpt-3.5; reasoning_effort: low; }"
-                    .to_string(),
+                "* { model: gpt-4; } .fast { model: gpt-3.5; reasoning_effort: low; }".to_string(),
             ),
         );
         let rule = StylesheetSyntaxRule;
@@ -2836,9 +2835,7 @@ mod tests {
         let mut g = minimal_graph();
         g.attrs.insert(
             "model_stylesheet".to_string(),
-            AttrValue::String(
-                "* { llm_model: claude-sonnet-4-5; llm_provider: anthropic; }".to_string(),
-            ),
+            AttrValue::String("* { model: claude-sonnet-4-5; provider: anthropic; }".to_string()),
         );
         let rule = StylesheetModelKnownRule;
         let d = rule.apply(&g);
@@ -2850,7 +2847,7 @@ mod tests {
         let mut g = minimal_graph();
         g.attrs.insert(
             "model_stylesheet".to_string(),
-            AttrValue::String("#opus { llm_model: claude-opus-4-5; }".to_string()),
+            AttrValue::String("#opus { model: claude-opus-4-5; }".to_string()),
         );
         let rule = StylesheetModelKnownRule;
         let d = rule.apply(&g);
@@ -2865,7 +2862,7 @@ mod tests {
         let mut g = minimal_graph();
         g.attrs.insert(
             "model_stylesheet".to_string(),
-            AttrValue::String("* { llm_provider: google; }".to_string()),
+            AttrValue::String("* { provider: google; }".to_string()),
         );
         let rule = StylesheetModelKnownRule;
         let d = rule.apply(&g);
@@ -2879,7 +2876,7 @@ mod tests {
         let mut g = minimal_graph();
         g.attrs.insert(
             "model_stylesheet".to_string(),
-            AttrValue::String("* { llm_model: opus; }".to_string()),
+            AttrValue::String("* { model: opus; }".to_string()),
         );
         let rule = StylesheetModelKnownRule;
         let d = rule.apply(&g);

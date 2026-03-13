@@ -22,9 +22,9 @@ digraph BuildSolitaire {
         retry_target="impl_setup",
         fallback_retry_target="impl_logic",
         model_stylesheet="
-            *       { llm_model: claude-sonnet; llm_provider: anthropic; }
-            .hard   { llm_model: claude-opus;   llm_provider: anthropic; }
-            .verify { llm_model: claude-haiku;  llm_provider: anthropic; }
+            *       { model: claude-sonnet;}
+            .hard   { model: claude-opus;  }
+            .verify { model: claude-haiku; }
         "
     ]
 
@@ -218,9 +218,9 @@ If a node fails and has no local retry target, Fabro jumps back to `impl_setup` 
 The stylesheet assigns models by role:
 
 ```
-*       { llm_model: claude-sonnet-4-5; }    // Default: spec, setup, integration
-.hard   { llm_model: claude-opus-4-6; }      // Hard work: game logic, UI, review
-.verify { llm_model: claude-haiku-4-5; }     // Verification: fast, cheap checks
+*       { model: claude-sonnet-4-5; }    // Default: spec, setup, integration
+.hard   { model: claude-opus-4-6; }      // Hard work: game logic, UI, review
+.verify { model: claude-haiku-4-5; }     // Verification: fast, cheap checks
 ```
 
 - **Sonnet** handles routine phases: expanding the spec, setting up the project, wiring integration

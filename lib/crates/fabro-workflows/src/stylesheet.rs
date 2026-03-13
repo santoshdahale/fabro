@@ -177,8 +177,7 @@ fn parse_declarations(remaining: &mut &str) -> Result<Vec<Declaration>, FabroErr
 }
 
 /// Recognized stylesheet properties.
-const STYLESHEET_PROPERTIES: &[&str] =
-    &["llm_model", "llm_provider", "reasoning_effort", "backend"];
+const STYLESHEET_PROPERTIES: &[&str] = &["model", "provider", "reasoning_effort", "backend"];
 
 /// Apply a stylesheet to a graph. Rules are applied by specificity order;
 /// higher specificity wins. Explicit node attributes are never overridden.
@@ -246,26 +245,24 @@ mod tests {
 
     #[test]
     fn parse_universal_rule() {
-        let ss = parse_stylesheet("* { llm_model: claude-sonnet-4-5; llm_provider: anthropic; }")
-            .unwrap();
+        let ss = parse_stylesheet("* { model: claude-sonnet-4-5; provider: anthropic; }").unwrap();
         assert_eq!(ss.rules.len(), 1);
         assert_eq!(ss.rules[0].selector, Selector::Universal);
         assert_eq!(ss.rules[0].declarations.len(), 2);
-        assert_eq!(ss.rules[0].declarations[0].property, "llm_model");
+        assert_eq!(ss.rules[0].declarations[0].property, "model");
         assert_eq!(ss.rules[0].declarations[0].value, "claude-sonnet-4-5");
     }
 
     #[test]
     fn parse_class_rule() {
-        let ss = parse_stylesheet(".code { llm_model: claude-opus-4-6; }").unwrap();
+        let ss = parse_stylesheet(".code { model: claude-opus-4-6; }").unwrap();
         assert_eq!(ss.rules[0].selector, Selector::Class("code".into()));
     }
 
     #[test]
     fn parse_id_rule() {
-        let ss =
-            parse_stylesheet("#critical_review { llm_model: gpt-5.2; reasoning_effort: high; }")
-                .unwrap();
+        let ss = parse_stylesheet("#critical_review { model: gpt-5.2; reasoning_effort: high; }")
+            .unwrap();
         assert_eq!(ss.rules[0].selector, Selector::Id("critical_review".into()));
         assert_eq!(ss.rules[0].declarations.len(), 2);
     }
@@ -273,9 +270,9 @@ mod tests {
     #[test]
     fn parse_multiple_rules() {
         let input = r"
-            * { llm_model: claude-sonnet-4-5; llm_provider: anthropic; }
-            .code { llm_model: claude-opus-4-6; llm_provider: anthropic; }
-            #critical_review { llm_model: gpt-5.2; llm_provider: openai; reasoning_effort: high; }
+            * { model: claude-sonnet-4-5; provider: anthropic; }
+            .code { model: claude-opus-4-6; provider: anthropic; }
+            #critical_review { model: gpt-5.2; provider: openai; reasoning_effort: high; }
         ";
         let ss = parse_stylesheet(input).unwrap();
         assert_eq!(ss.rules.len(), 3);
@@ -283,37 +280,37 @@ mod tests {
 
     #[test]
     fn parse_error_missing_brace() {
-        let result = parse_stylesheet("* llm_model: test; }");
+        let result = parse_stylesheet("* model: test; }");
         assert!(result.is_err());
     }
 
     #[test]
     fn parse_error_missing_selector() {
-        let result = parse_stylesheet("{ llm_model: test; }");
+        let result = parse_stylesheet("{ model: test; }");
         assert!(result.is_err());
     }
 
     #[test]
     fn apply_universal_to_all_nodes() {
-        let ss = parse_stylesheet("* { llm_model: sonnet; }").unwrap();
+        let ss = parse_stylesheet("* { model: sonnet; }").unwrap();
         let mut graph = Graph::new("test");
         graph.nodes.insert("a".into(), Node::new("a"));
         graph.nodes.insert("b".into(), Node::new("b"));
         apply_stylesheet(&ss, &mut graph);
 
         assert_eq!(
-            graph.nodes["a"].attrs.get("llm_model"),
+            graph.nodes["a"].attrs.get("model"),
             Some(&AttrValue::String("sonnet".into()))
         );
         assert_eq!(
-            graph.nodes["b"].attrs.get("llm_model"),
+            graph.nodes["b"].attrs.get("model"),
             Some(&AttrValue::String("sonnet".into()))
         );
     }
 
     #[test]
     fn apply_class_overrides_universal() {
-        let ss = parse_stylesheet("* { llm_model: sonnet; } .code { llm_model: opus; }").unwrap();
+        let ss = parse_stylesheet("* { model: sonnet; } .code { model: opus; }").unwrap();
         let mut graph = Graph::new("test");
 
         let mut code_node = Node::new("impl");
@@ -326,19 +323,18 @@ mod tests {
         apply_stylesheet(&ss, &mut graph);
 
         assert_eq!(
-            graph.nodes["impl"].attrs.get("llm_model"),
+            graph.nodes["impl"].attrs.get("model"),
             Some(&AttrValue::String("opus".into()))
         );
         assert_eq!(
-            graph.nodes["plan"].attrs.get("llm_model"),
+            graph.nodes["plan"].attrs.get("model"),
             Some(&AttrValue::String("sonnet".into()))
         );
     }
 
     #[test]
     fn apply_id_overrides_class() {
-        let ss =
-            parse_stylesheet(".code { llm_model: opus; } #special { llm_model: gpt; }").unwrap();
+        let ss = parse_stylesheet(".code { model: opus; } #special { model: gpt; }").unwrap();
         let mut graph = Graph::new("test");
 
         let mut node = Node::new("special");
@@ -348,25 +344,25 @@ mod tests {
         apply_stylesheet(&ss, &mut graph);
 
         assert_eq!(
-            graph.nodes["special"].attrs.get("llm_model"),
+            graph.nodes["special"].attrs.get("model"),
             Some(&AttrValue::String("gpt".into()))
         );
     }
 
     #[test]
     fn explicit_attrs_not_overridden() {
-        let ss = parse_stylesheet("* { llm_model: sonnet; }").unwrap();
+        let ss = parse_stylesheet("* { model: sonnet; }").unwrap();
         let mut graph = Graph::new("test");
 
         let mut node = Node::new("a");
         node.attrs
-            .insert("llm_model".into(), AttrValue::String("explicit".into()));
+            .insert("model".into(), AttrValue::String("explicit".into()));
         graph.nodes.insert("a".into(), node);
 
         apply_stylesheet(&ss, &mut graph);
 
         assert_eq!(
-            graph.nodes["a"].attrs.get("llm_model"),
+            graph.nodes["a"].attrs.get("model"),
             Some(&AttrValue::String("explicit".into()))
         );
     }
@@ -382,9 +378,9 @@ mod tests {
     #[test]
     fn spec_section_86_example() {
         let input = r"
-            * { llm_model: claude-sonnet-4-5; llm_provider: anthropic; }
-            .code { llm_model: claude-opus-4-6; llm_provider: anthropic; }
-            #critical_review { llm_model: gpt-5.2; llm_provider: openai; reasoning_effort: high; }
+            * { model: claude-sonnet-4-5; provider: anthropic; }
+            .code { model: claude-opus-4-6; provider: anthropic; }
+            #critical_review { model: gpt-5.2; provider: openai; reasoning_effort: high; }
         ";
         let ss = parse_stylesheet(input).unwrap();
         let mut graph = Graph::new("test");
@@ -404,21 +400,21 @@ mod tests {
         apply_stylesheet(&ss, &mut graph);
 
         assert_eq!(
-            graph.nodes["plan"].attrs.get("llm_model"),
+            graph.nodes["plan"].attrs.get("model"),
             Some(&AttrValue::String("claude-sonnet-4-5".into()))
         );
 
         assert_eq!(
-            graph.nodes["implement"].attrs.get("llm_model"),
+            graph.nodes["implement"].attrs.get("model"),
             Some(&AttrValue::String("claude-opus-4-6".into()))
         );
 
         assert_eq!(
-            graph.nodes["critical_review"].attrs.get("llm_model"),
+            graph.nodes["critical_review"].attrs.get("model"),
             Some(&AttrValue::String("gpt-5.2".into()))
         );
         assert_eq!(
-            graph.nodes["critical_review"].attrs.get("llm_provider"),
+            graph.nodes["critical_review"].attrs.get("provider"),
             Some(&AttrValue::String("openai".into()))
         );
         assert_eq!(
@@ -429,7 +425,7 @@ mod tests {
 
     #[test]
     fn parse_shape_selector() {
-        let ss = parse_stylesheet("box { llm_model: opus; }").unwrap();
+        let ss = parse_stylesheet("box { model: opus; }").unwrap();
         assert_eq!(ss.rules.len(), 1);
         assert_eq!(ss.rules[0].selector, Selector::Shape("box".into()));
         assert_eq!(ss.rules[0].declarations[0].value, "opus");
@@ -437,7 +433,7 @@ mod tests {
 
     #[test]
     fn apply_shape_selector_to_matching_nodes() {
-        let ss = parse_stylesheet("box { llm_model: opus; }").unwrap();
+        let ss = parse_stylesheet("box { model: opus; }").unwrap();
         let mut graph = Graph::new("test");
 
         // Default shape is "box"
@@ -453,42 +449,42 @@ mod tests {
         apply_stylesheet(&ss, &mut graph);
 
         assert_eq!(
-            graph.nodes["a"].attrs.get("llm_model"),
+            graph.nodes["a"].attrs.get("model"),
             Some(&AttrValue::String("opus".into()))
         );
         // Mdiamond node should NOT get the box rule
-        assert_eq!(graph.nodes["b"].attrs.get("llm_model"), None);
+        assert_eq!(graph.nodes["b"].attrs.get("model"), None);
     }
 
     #[test]
     fn shape_overrides_universal_specificity() {
-        let ss = parse_stylesheet("* { llm_model: sonnet; } box { llm_model: opus; }").unwrap();
+        let ss = parse_stylesheet("* { model: sonnet; } box { model: opus; }").unwrap();
         let mut graph = Graph::new("test");
         graph.nodes.insert("a".into(), Node::new("a")); // default shape = box
         apply_stylesheet(&ss, &mut graph);
         assert_eq!(
-            graph.nodes["a"].attrs.get("llm_model"),
+            graph.nodes["a"].attrs.get("model"),
             Some(&AttrValue::String("opus".into()))
         );
     }
 
     #[test]
     fn class_overrides_shape_specificity() {
-        let ss = parse_stylesheet("box { llm_model: opus; } .fast { llm_model: flash; }").unwrap();
+        let ss = parse_stylesheet("box { model: opus; } .fast { model: flash; }").unwrap();
         let mut graph = Graph::new("test");
         let mut node = Node::new("a");
         node.classes.push("fast".into());
         graph.nodes.insert("a".into(), node);
         apply_stylesheet(&ss, &mut graph);
         assert_eq!(
-            graph.nodes["a"].attrs.get("llm_model"),
+            graph.nodes["a"].attrs.get("model"),
             Some(&AttrValue::String("flash".into()))
         );
     }
 
     #[test]
     fn class_overrides_universal_specificity() {
-        let ss = parse_stylesheet("* { llm_model: sonnet; } .special { llm_model: gpt; }").unwrap();
+        let ss = parse_stylesheet("* { model: sonnet; } .special { model: gpt; }").unwrap();
         let mut graph = Graph::new("test");
 
         let mut node_a = Node::new("a");
@@ -502,12 +498,12 @@ mod tests {
 
         // .special (specificity 1) overrides * (specificity 0)
         assert_eq!(
-            graph.nodes["a"].attrs.get("llm_model"),
+            graph.nodes["a"].attrs.get("model"),
             Some(&AttrValue::String("gpt".into()))
         );
         // No class, gets universal
         assert_eq!(
-            graph.nodes["b"].attrs.get("llm_model"),
+            graph.nodes["b"].attrs.get("model"),
             Some(&AttrValue::String("sonnet".into()))
         );
     }

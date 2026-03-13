@@ -65,7 +65,7 @@ Set workflow-level configuration:
 
 ```dot
 // Block syntax
-graph [goal="Build a feature", model_stylesheet="* { llm_model: claude-haiku-4-5; }"]
+graph [goal="Build a feature", model_stylesheet="* { model: claude-haiku-4-5; }"]
 
 // Declaration syntax
 rankdir=LR
@@ -199,8 +199,8 @@ Start nodes can also be identified by ID (`start` or `Start`). Exit nodes can be
 | `max_tokens` | Integer | Maximum output tokens |
 | `fidelity` | String | How much prior context is passed: `compact`, `full`, `summary:high`, `summary:medium`, `summary:low`, `truncate` |
 | `thread_id` | String | Groups nodes into a shared conversation thread |
-| `llm_model` | String | Explicit model ID (overrides stylesheet) |
-| `llm_provider` | String | Explicit provider name (overrides stylesheet) |
+| `model` | String | Explicit model ID (overrides stylesheet) |
+| `provider` | String | Explicit provider name (overrides stylesheet) |
 | `project_memory` | Boolean | When `true` (default), prompt nodes discover and include project docs (`AGENTS.md`, `CLAUDE.md`, etc.) as a system prompt. Set to `false` to disable. |
 | `backend` | String | Agent execution backend. `api` (default): Fabro calls the LLM API directly and runs its own tool loop. `cli`: Fabro delegates to an external CLI tool (`claude`, `codex`, or `gemini` based on provider). See [Agents — Backends](/core-concepts/agents#backends). |
 
@@ -350,9 +350,9 @@ digraph ImplementFeature {
     graph [
         goal="Implement a feature with tests and code review",
         model_stylesheet="
-            *        { llm_model: claude-haiku-4-5; llm_provider: anthropic; reasoning_effort: low; }
-            .coding  { llm_model: claude-sonnet-4-5; llm_provider: anthropic; reasoning_effort: high; }
-            #review  { llm_model: claude-sonnet-4-5; llm_provider: anthropic; reasoning_effort: high; }
+            *        { model: claude-haiku-4-5;reasoning_effort: low; }
+            .coding  { model: claude-sonnet-4-5;reasoning_effort: high; }
+            #review  { model: claude-sonnet-4-5;reasoning_effort: high; }
         "
     ]
     rankdir=LR

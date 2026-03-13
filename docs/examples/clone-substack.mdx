@@ -47,11 +47,11 @@ GitHub to Railway validated by code review only — no live deployment execution
         retry_target="plan_fanout",
         fallback_retry_target="plan_fanout",
         model_stylesheet="
-            *          { llm_model: claude-opus-4-6;       llm_provider: anthropic; }
-            .hard      { llm_model: gpt-5.3-codex;        llm_provider: openai;    }
-            .verify    { llm_model: claude-opus-4-6;       llm_provider: anthropic; }
-            .branch-a  { llm_model: claude-opus-4-6;       llm_provider: anthropic; }
-            .branch-b  { llm_model: gemini-3-flash-preview; llm_provider: gemini;   }
+            *          { model: claude-opus-4-6;      }
+            .hard      { model: gpt-5.3-codex;       }
+            .verify    { model: claude-opus-4-6;      }
+            .branch-a  { model: claude-opus-4-6;      }
+            .branch-b  { model: gemini-3-flash-preview;}
         "
     ]
 
@@ -693,11 +693,11 @@ check_toolchain -> postmortem       [condition="outcome=fail && context.failure_
 The stylesheet assigns models based on task difficulty:
 
 ```
-*          { llm_model: claude-opus-4-6; }        // Default: spec expansion, debate, postmortem
-.hard      { llm_model: gpt-5.3-codex; }         // Implementation: optimized for code generation
-.verify    { llm_model: claude-opus-4-6; }        // Fidelity verification: careful analysis
-.branch-a  { llm_model: claude-opus-4-6; }        // Plan A, Review A: Anthropic perspective
-.branch-b  { llm_model: gemini-3-flash-preview; } // Plan B, Review B: Google perspective
+*          { model: claude-opus-4-6; }        // Default: spec expansion, debate, postmortem
+.hard      { model: gpt-5.3-codex; }         // Implementation: optimized for code generation
+.verify    { model: claude-opus-4-6; }        // Fidelity verification: careful analysis
+.branch-a  { model: claude-opus-4-6; }        // Plan A, Review A: Anthropic perspective
+.branch-b  { model: gemini-3-flash-preview; } // Plan B, Review B: Google perspective
 ```
 
 The `.branch-b` class uses a different provider for both planning and review. This ensures the second opinion is genuinely independent — not just a second run of the same model. The `.hard` class routes implementation to OpenAI's Codex, which is optimized for high-throughput code generation.

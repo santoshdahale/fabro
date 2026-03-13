@@ -1,7 +1,7 @@
 digraph GoldenGate {
     graph [
         goal="Create a hyperrealistic interactive 3D Golden Gate Bridge flight experience",
-        model_stylesheet="* { llm_model: gpt-5.4; llm_provider: openai }"
+        model_stylesheet="* { model: gpt-5.4;}"
     ]
     rankdir=LR
 

@@ -2,9 +2,9 @@ digraph Example {
     graph [
         goal="Build and review a utility function",
         model_stylesheet="
-            *        { llm_model: claude-haiku-4-5; llm_provider: anthropic; }
-            .coding  { llm_model: claude-sonnet-4-5; reasoning_effort: high; }
-            #review  { llm_model: gemini-3.1-pro-preview; llm_provider: gemini; }
+            *        { model: claude-haiku-4-5;}
+            .coding  { model: claude-sonnet-4-5; reasoning_effort: high; }
+            #review  { model: gemini-3.1-pro-preview;}
         "
     ]
 

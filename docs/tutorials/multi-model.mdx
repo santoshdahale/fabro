@@ -16,9 +16,9 @@ digraph MultiModel {
     graph [
         goal="Build and review a utility function using multiple models",
         model_stylesheet="
-            * { llm_model: claude-haiku-4-5; llm_provider: anthropic; reasoning_effort: low; }
-            .coding { llm_model: claude-sonnet-4-5; llm_provider: anthropic; reasoning_effort: high; }
-            #review { llm_model: claude-sonnet-4-5; llm_provider: anthropic; reasoning_effort: high; }
+            * { model: claude-haiku-4-5;reasoning_effort: low; }
+            .coding { model: claude-sonnet-4-5;reasoning_effort: high; }
+            #review { model: claude-sonnet-4-5;reasoning_effort: high; }
         "
     ]
     rankdir=LR
@@ -44,9 +44,9 @@ fabro run files-internal/demo/08-multi-model.dot
 The `model_stylesheet` graph attribute contains CSS-like rules that assign models to nodes:
 
 ```
-* { llm_model: claude-haiku-4-5; llm_provider: anthropic; reasoning_effort: low; }
-.coding { llm_model: claude-sonnet-4-5; llm_provider: anthropic; reasoning_effort: high; }
-#review { llm_model: claude-sonnet-4-5; llm_provider: anthropic; reasoning_effort: high; }
+* { model: claude-haiku-4-5;reasoning_effort: low; }
+.coding { model: claude-sonnet-4-5;reasoning_effort: high; }
+#review { model: claude-sonnet-4-5;reasoning_effort: high; }
 ```
 
 ### Selectors
@@ -85,8 +85,8 @@ Stylesheets support four properties:
 
 | Property | Description |
 |---|---|
-| `llm_model` | Model ID or alias (e.g. `claude-sonnet-4-5`, `opus`, `gemini-pro`) |
-| `llm_provider` | Provider name (`anthropic`, `openai`, `gemini`, etc.) |
+| `model` | Model ID or alias (e.g. `claude-sonnet-4-5`, `opus`, `gemini-pro`) |
+| `provider` | Provider name (`anthropic`, `openai`, `gemini`, etc.) |
 | `reasoning_effort` | `low`, `medium`, or `high` |
 | `backend` | `api` (default) or `cli` |
 
@@ -105,7 +105,7 @@ Model routing lets you optimize cost and latency without changing the workflow s
 A model set directly on a node attribute always beats the stylesheet:
 
 ```dot
-implement [label="Implement", class="coding", llm_model="claude-opus-4-6"]
+implement [label="Implement", class="coding", model="claude-opus-4-6"]
 ```
 
 This node uses Opus regardless of what `.coding` says.

@@ -54,7 +54,7 @@ impl Handler for PromptHandler {
         let system_prompt = if node.project_memory() {
             let working_dir = services.sandbox.working_directory();
             let provider = node
-                .llm_provider()
+                .provider()
                 .and_then(|s| s.parse::<Provider>().ok())
                 .unwrap_or(Provider::Anthropic);
             let docs = fabro_agent::discover_project_docs(

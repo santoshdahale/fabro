@@ -37,7 +37,7 @@ fn parse_attractor_batch_clean() {
 
 #[test]
 fn parse_attractor_batch_has_errors() {
-    // This file is intentionally missing llm_provider on the work node.
+    // This file is intentionally missing provider on the work node.
     // It should still parse successfully — validation is separate from parsing.
     let graph = parse_attractor_dot("batch_has_errors.dot").unwrap();
     assert_eq!(graph.nodes.len(), 3);

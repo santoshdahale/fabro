@@ -4,9 +4,9 @@ digraph SemanticPort {
         rankdir=LR,
         default_max_retry=3,
         model_stylesheet="
-            *        { llm_model: claude-sonnet-4-5; llm_provider: anthropic; }
-            .hard    { llm_model: claude-opus-4-6;   llm_provider: anthropic; }
-            .analyze { llm_model: gemini-3.1-pro-preview; llm_provider: gemini; }
+            *        { model: claude-sonnet-4-5;}
+            .hard    { model: claude-opus-4-6;  }
+            .analyze { model: gemini-3.1-pro-preview;}
         "
     ]
 

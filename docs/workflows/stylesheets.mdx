@@ -14,9 +14,9 @@ digraph Example {
     graph [
         goal="Build and review a utility function",
         model_stylesheet="
-            *        { llm_model: claude-haiku-4-5; llm_provider: anthropic; }
-            .coding  { llm_model: claude-sonnet-4-5; reasoning_effort: high; }
-            #review  { llm_model: gemini-3.1-pro-preview; llm_provider: gemini; }
+            *        { model: claude-haiku-4-5;}
+            .coding  { model: claude-sonnet-4-5; reasoning_effort: high; }
+            #review  { model: gemini-3.1-pro-preview;}
         "
     ]
 
@@ -64,8 +64,8 @@ Stylesheets support four properties:
 
 | Property | Description | Example |
 |---|---|---|
-| `llm_model` | Model ID or alias | `claude-sonnet-4-5`, `opus`, `gemini-pro` |
-| `llm_provider` | Provider name | `anthropic`, `openai`, `gemini` |
+| `model` | Model ID or alias | `claude-sonnet-4-5`, `opus`, `gemini-pro` |
+| `provider` | Provider name | `anthropic`, `openai`, `gemini` |
 | `reasoning_effort` | Reasoning effort level | `low`, `medium`, `high` |
 | `backend` | Agent execution backend — `api` (default) runs Fabro's own tool loop, `cli` delegates to an external CLI tool. See [Backends](/core-concepts/agents#backends). | `cli`, `api` |
 
@@ -82,9 +82,9 @@ When multiple rules match the same node, the rule with the **highest specificity
 For example:
 
 ```
-*       { llm_model: claude-haiku-4-5; }
-.coding { llm_model: claude-sonnet-4-5; }
-#review { llm_model: gpt-5.2; }
+*       { model: claude-haiku-4-5; }
+.coding { model: claude-sonnet-4-5; }
+#review { model: gpt-5.2; }
 ```
 
 A node with `id="review"` and `class="coding"` gets `gpt-5.2` because `#id` (specificity 3) beats `.class` (specificity 2).
@@ -96,10 +96,10 @@ If two rules have the same specificity, the **last one** in the stylesheet wins.
 A model set directly on a node attribute always takes precedence over stylesheets, regardless of specificity:
 
 ```dot
-implement [label="Implement", class="coding", llm_model="claude-opus-4-6"]
+implement [label="Implement", class="coding", model="claude-opus-4-6"]
 ```
 
-Even if `.coding` sets `llm_model: claude-sonnet-4-5`, this node uses Opus because the explicit attribute wins.
+Even if `.coding` sets `model: claude-sonnet-4-5`, this node uses Opus because the explicit attribute wins.
 
 ## Syntax reference
 
@@ -118,12 +118,12 @@ selector { property: value; property: value; }
 ### Full example
 
 ```
-*            { llm_model: claude-haiku-4-5; llm_provider: anthropic; reasoning_effort: low; }
+*            { model: claude-haiku-4-5;reasoning_effort: low; }
 box          { reasoning_effort: high; }
 tab          { reasoning_effort: low; }
-.coding      { llm_model: claude-sonnet-4-5; llm_provider: anthropic; reasoning_effort: high; }
-.review      { llm_model: gemini-3.1-pro-preview; llm_provider: gemini; }
-#final_check { llm_model: claude-opus-4-6; llm_provider: anthropic; reasoning_effort: high; }
+.coding      { model: claude-sonnet-4-5;reasoning_effort: high; }
+.review      { model: gemini-3.1-pro-preview;}
+#final_check { model: claude-opus-4-6;reasoning_effort: high; }
 ```
 
 This stylesheet:

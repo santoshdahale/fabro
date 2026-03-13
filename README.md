@@ -58,8 +58,8 @@ digraph PlanImplement {
     graph [
         goal="Plan, approve, implement, and simplify a change"
         model_stylesheet="
-            *        { llm_model: claude-haiku-4-5; reasoning_effort: low; }
-            .coding  { llm_model: claude-sonnet-4-5; reasoning_effort: high; }
+            *        { model: claude-haiku-4-5; reasoning_effort: low; }
+            .coding  { model: claude-sonnet-4-5; reasoning_effort: high; }
         "
     ]
 

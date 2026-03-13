@@ -1,7 +1,7 @@
 digraph VNCDemo {
     graph [
         goal="Browse the web with Playwright while user watches via VNC",
-        model_stylesheet="* { llm_model: claude-sonnet-4-6; llm_provider: anthropic }"
+        model_stylesheet="* { model: claude-sonnet-4-6;}"
     ]
     rankdir=LR
 

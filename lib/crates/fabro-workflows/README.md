@@ -124,9 +124,9 @@ digraph Styled {
     graph [
         goal="Build feature",
         model_stylesheet="
-            * { llm_model: claude-sonnet-4-5; llm_provider: anthropic; }
-            .code { llm_model: claude-opus-4-6; }
-            #critical_review { llm_model: gpt-5.2; llm_provider: openai; }
+            * { model: claude-sonnet-4-5;}
+            .code { model: claude-opus-4-6; }
+            #critical_review { model: gpt-5.2;}
         "
     ]
     // ...

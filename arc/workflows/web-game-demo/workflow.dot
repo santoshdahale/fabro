@@ -1,7 +1,7 @@
 digraph WebGameDemo {
     graph [
         goal="Verify develop-web-game skill setup with asset files",
-        model_stylesheet="* { llm_model: claude-sonnet-4-6; llm_provider: anthropic }"
+        model_stylesheet="* { model: claude-sonnet-4-6;}"
     ]
     rankdir=LR
 

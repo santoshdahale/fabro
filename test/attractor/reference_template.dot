@@ -7,12 +7,12 @@ digraph reference_template {
         fallback_retry_target="debate_consolidate",
         provenance_version="1",
         model_stylesheet="
-            * { llm_model: DEFAULT_MODEL; llm_provider: DEFAULT_PROVIDER; }
-            .hard { llm_model: HARD_MODEL; llm_provider: HARD_PROVIDER; }
-            .verify { llm_model: VERIFY_MODEL; llm_provider: VERIFY_PROVIDER; }
-            .branch-a { llm_model: BRANCH_A_MODEL; llm_provider: BRANCH_A_PROVIDER; }
-            .branch-b { llm_model: BRANCH_B_MODEL; llm_provider: BRANCH_B_PROVIDER; }
-            .branch-c { llm_model: BRANCH_C_MODEL; llm_provider: BRANCH_C_PROVIDER; }
+            * { model: DEFAULT_MODEL; provider: DEFAULT_PROVIDER; }
+            .hard { model: HARD_MODEL; provider: HARD_PROVIDER; }
+            .verify { model: VERIFY_MODEL; provider: VERIFY_PROVIDER; }
+            .branch-a { model: BRANCH_A_MODEL; provider: BRANCH_A_PROVIDER; }
+            .branch-b { model: BRANCH_B_MODEL; provider: BRANCH_B_PROVIDER; }
+            .branch-c { model: BRANCH_C_MODEL; provider: BRANCH_C_PROVIDER; }
         "
     ]
 

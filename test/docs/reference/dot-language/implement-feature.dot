@@ -2,9 +2,9 @@ digraph ImplementFeature {
     graph [
         goal="Implement a feature with tests and code review",
         model_stylesheet="
-            *        { llm_model: claude-haiku-4-5; llm_provider: anthropic; reasoning_effort: low; }
-            .coding  { llm_model: claude-sonnet-4-5; llm_provider: anthropic; reasoning_effort: high; }
-            #review  { llm_model: claude-sonnet-4-5; llm_provider: anthropic; reasoning_effort: high; }
+            *        { model: claude-haiku-4-5;reasoning_effort: low; }
+            .coding  { model: claude-sonnet-4-5;reasoning_effort: high; }
+            #review  { model: claude-sonnet-4-5;reasoning_effort: high; }
         "
     ]
     rankdir=LR

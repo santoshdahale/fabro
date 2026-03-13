@@ -191,13 +191,13 @@ impl Node {
     }
 
     #[must_use]
-    pub fn llm_model(&self) -> Option<&str> {
-        self.str_attr("llm_model")
+    pub fn model(&self) -> Option<&str> {
+        self.str_attr("model")
     }
 
     #[must_use]
-    pub fn llm_provider(&self) -> Option<&str> {
-        self.str_attr("llm_provider")
+    pub fn provider(&self) -> Option<&str> {
+        self.str_attr("provider")
     }
 
     #[must_use]
@@ -526,8 +526,8 @@ mod tests {
         assert_eq!(node.thread_id(), None);
         assert_eq!(node.class(), None);
         assert_eq!(node.timeout(), None);
-        assert_eq!(node.llm_model(), None);
-        assert_eq!(node.llm_provider(), None);
+        assert_eq!(node.model(), None);
+        assert_eq!(node.provider(), None);
         assert_eq!(node.reasoning_effort(), "high");
         assert!(!node.auto_status());
         assert!(!node.allow_partial());

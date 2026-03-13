@@ -463,9 +463,9 @@ impl CodergenBackend for AgentCliBackend {
             .map_err(|e| FabroError::handler(format!("Failed to write prompt file: {e}")))?;
 
         // 3. Build CLI command
-        let model = node.llm_model().unwrap_or(&self.model);
+        let model = node.model().unwrap_or(&self.model);
         let provider = node
-            .llm_provider()
+            .provider()
             .and_then(|s| s.parse::<Provider>().ok())
             .unwrap_or(self.provider);
 
@@ -733,7 +733,7 @@ impl BackendRouter {
         }
 
         // CLI-only model on the node
-        if let Some(model) = node.llm_model() {
+        if let Some(model) = node.model() {
             if is_cli_only_model(model) {
                 return true;
             }
@@ -1164,7 +1164,7 @@ mod tests {
     fn router_uses_api_for_non_cli_model() {
         let mut node = Node::new("test");
         node.attrs.insert(
-            "llm_model".to_string(),
+            "model".to_string(),
             AttrValue::String("claude-opus-4-6".to_string()),
         );
 
