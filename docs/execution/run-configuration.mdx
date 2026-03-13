@@ -37,7 +37,6 @@ directory = "/tmp/workdir"
 
 [llm]
 model = "claude-sonnet-4-5"
-provider = "anthropic"
 
 [llm.fallbacks]
 anthropic = ["gemini", "openai"]
@@ -108,13 +107,12 @@ Override the default model and provider for all nodes that don't have an explici
 ```toml title="run.toml"
 [llm]
 model = "claude-sonnet-4-5"
-provider = "anthropic"
 ```
 
 | Field | Description |
 |---|---|
 | `model` | Model ID or alias (e.g. `claude-sonnet-4-5`, `opus`, `gemini-pro`). See [Models](/core-concepts/models). |
-| `provider` | Provider name: `anthropic`, `openai`, `gemini`, `kimi`, `zai`, `minimax`, `inception`. |
+| `provider` | Provider name (optional — auto-inferred from the model catalog). Only needed for models not in the catalog or to force a specific provider. |
 
 #### `[llm.fallbacks]`
 

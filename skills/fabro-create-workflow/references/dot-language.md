@@ -164,7 +164,7 @@ graph [model_stylesheet="
 
 Selectors by specificity (low to high): `*` (universal, 0), shape name (1), `.class` (2), `#nodeid` (3). Higher specificity wins. Same specificity: last rule wins. Explicit node attributes override stylesheets.
 
-Properties: `model`, `provider`, `reasoning_effort`, `backend`.
+Properties: `model`, `provider` (optional — auto-inferred from the model catalog), `reasoning_effort`, `backend`.
 
 **Critical:** Use semicolons between properties (e.g. `model: foo; provider: bar;`).
 

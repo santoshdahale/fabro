@@ -65,7 +65,7 @@ Stylesheets support four properties:
 | Property | Description | Example |
 |---|---|---|
 | `model` | Model ID or alias | `claude-sonnet-4-5`, `opus`, `gemini-pro` |
-| `provider` | Provider name | `anthropic`, `openai`, `gemini` |
+| `provider` | Provider name (optional — auto-inferred from the model catalog when omitted) | `anthropic`, `openai`, `gemini` |
 | `reasoning_effort` | Reasoning effort level | `low`, `medium`, `high` |
 | `backend` | Agent execution backend — `api` (default) runs Fabro's own tool loop, `cli` delegates to an external CLI tool. See [Backends](/core-concepts/agents#backends). | `cli`, `api` |
 

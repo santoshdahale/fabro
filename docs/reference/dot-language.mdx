@@ -200,7 +200,7 @@ Start nodes can also be identified by ID (`start` or `Start`). Exit nodes can be
 | `fidelity` | String | How much prior context is passed: `compact`, `full`, `summary:high`, `summary:medium`, `summary:low`, `truncate` |
 | `thread_id` | String | Groups nodes into a shared conversation thread |
 | `model` | String | Explicit model ID (overrides stylesheet) |
-| `provider` | String | Explicit provider name (overrides stylesheet) |
+| `provider` | String | Explicit provider name (overrides stylesheet). Auto-inferred from the model catalog when omitted. |
 | `project_memory` | Boolean | When `true` (default), prompt nodes discover and include project docs (`AGENTS.md`, `CLAUDE.md`, etc.) as a system prompt. Set to `false` to disable. |
 | `backend` | String | Agent execution backend. `api` (default): Fabro calls the LLM API directly and runs its own tool loop. `cli`: Fabro delegates to an external CLI tool (`claude`, `codex`, or `gemini` based on provider). See [Agents — Backends](/core-concepts/agents#backends). |
 
