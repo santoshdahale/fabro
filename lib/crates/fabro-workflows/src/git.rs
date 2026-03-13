@@ -18,8 +18,8 @@ pub struct GitAuthor {
 impl Default for GitAuthor {
     fn default() -> Self {
         Self {
-            name: "fabro".into(),
-            email: "fabro@local".into(),
+            name: "Fabro".into(),
+            email: "noreply@fabro.sh".into(),
         }
     }
 }
@@ -31,6 +31,25 @@ impl GitAuthor {
         Self {
             name: name.unwrap_or(defaults.name),
             email: email.unwrap_or(defaults.email),
+        }
+    }
+
+    /// Returns true when this identity matches the default Fabro identity.
+    pub fn is_default(&self) -> bool {
+        let defaults = Self::default();
+        self.name == defaults.name && self.email == defaults.email
+    }
+
+    /// Append the Fabro footer (and Co-Authored-By when the author is not the
+    /// default identity) to a commit message.
+    pub fn append_footer(&self, message: &mut String) {
+        message.push_str("\n\u{2692}\u{fe0f} Generated with [Fabro](https://fabro.sh)\n");
+        if !self.is_default() {
+            let defaults = Self::default();
+            message.push_str(&format!(
+                "\nCo-Authored-By: {} <{}>\n",
+                defaults.name, defaults.email
+            ));
         }
     }
 }
@@ -340,6 +359,13 @@ impl MetadataStore {
         format!("refs/fabro/{run_id}")
     }
 
+    /// Format a commit message with the standard Fabro footer appended.
+    fn commit_message(&self, subject: &str) -> String {
+        let mut msg = format!("{subject}\n");
+        self.author.append_footer(&mut msg);
+        msg
+    }
+
     fn open_store(&self) -> Result<(Store, Signature<'static>)> {
         let repo = Repository::discover(&self.repo_path)
             .map_err(|e| git_error(format!("failed to open repo: {e}")))?;
@@ -365,7 +391,8 @@ impl MetadataStore {
         let mut entries: Vec<(&str, &[u8])> =
             vec![("manifest.json", manifest_json), ("graph.dot", graph_dot)];
         entries.extend_from_slice(extra_files);
-        bs.write_entries(&entries, "init run")
+        let msg = self.commit_message("init run");
+        bs.write_entries(&entries, &msg)
             .map_err(|e| git_error(format!("write_entries failed: {e}")))?;
         Ok(())
     }
@@ -380,7 +407,8 @@ impl MetadataStore {
         let (store, sig) = self.open_store()?;
         let branch = Self::branch_name(run_id);
         let bs = BranchStore::new(&store, &branch, &sig);
-        bs.write_entries(entries, message)
+        let msg = self.commit_message(message);
+        bs.write_entries(entries, &msg)
             .map_err(|e| git_error(format!("write_entries failed: {e}")))?;
         Ok(())
     }
@@ -398,8 +426,9 @@ impl MetadataStore {
         let bs = BranchStore::new(&store, &branch, &sig);
         let mut entries: Vec<(&str, &[u8])> = vec![("checkpoint.json", checkpoint_json)];
         entries.extend_from_slice(artifacts);
+        let msg = self.commit_message("checkpoint");
         let oid = bs
-            .write_entries(&entries, "checkpoint")
+            .write_entries(&entries, &msg)
             .map_err(|e| git_error(format!("write_entries failed: {e}")))?;
         Ok(oid.to_string())
     }
@@ -411,7 +440,7 @@ impl MetadataStore {
             Err(_) => return Ok(None),
         };
         let store = Store::new(repo);
-        let sig = Signature::now("fabro", "fabro@local")
+        let sig = Signature::now("Fabro", "noreply@fabro.sh")
             .map_err(|e| git_error(format!("failed to create signature: {e}")))?;
         let branch = Self::branch_name(run_id);
         let bs = BranchStore::new(&store, &branch, &sig);

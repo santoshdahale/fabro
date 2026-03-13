@@ -590,7 +590,8 @@ pub async fn git_checkpoint(
             value: shadow_sha_ref,
         });
     }
-    let message = trailerlink::format_message(&subject, "", &trailers);
+    let mut message = trailerlink::format_message(&subject, "", &trailers);
+    author.append_footer(&mut message);
 
     // Write message to a unique temp file to avoid races between concurrent local runs
     let msg_path = format!("/tmp/fabro-commit-msg-{run_id}-{node_id}");

@@ -256,6 +256,9 @@ fn assemble_pr_body(
         parts.push(arc_details_section.to_string());
     }
 
+    parts.push(String::new());
+    parts.push("\u{2692}\u{fe0f} Generated with [Fabro](https://fabro.sh)".to_string());
+
     parts.join("\n")
 }
 
