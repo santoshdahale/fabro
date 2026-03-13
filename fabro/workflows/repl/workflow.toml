@@ -1,0 +1,8 @@
+version = 1
+graph = "workflow.dot"
+
+[sandbox]
+provider = "local"
+
+[sandbox.local]
+worktree_mode = "never"
