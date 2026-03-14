@@ -306,11 +306,15 @@ pub fn resolve_run(base: &Path, identifier: &str) -> Result<RunInfo> {
         _ => {}
     }
 
-    // Step 2: try workflow name substring match, return most recent (runs are sorted newest-first)
-    let wf_match = runs
-        .iter()
-        .filter(|r| !r.is_orphan)
-        .find(|r| r.workflow_name.contains(identifier));
+    // Step 2: try workflow name match, return most recent (runs are sorted newest-first).
+    // Supports both display names ("LegacyTool") and slugs ("legacy-tool") by comparing
+    // case-insensitively first, then with separators stripped (hyphens/underscores removed).
+    let id_lower = identifier.to_lowercase();
+    let id_collapsed = collapse_separators(&id_lower);
+    let wf_match = runs.iter().filter(|r| !r.is_orphan).find(|r| {
+        let name_lower = r.workflow_name.to_lowercase();
+        name_lower.contains(&id_lower) || collapse_separators(&name_lower).contains(&id_collapsed)
+    });
 
     match wf_match {
         Some(run) => {
@@ -322,6 +326,12 @@ pub fn resolve_run(base: &Path, identifier: &str) -> Result<RunInfo> {
             bail!("No run found matching '{identifier}' (tried run ID prefix and workflow name)")
         }
     }
+}
+
+/// Strip hyphens and underscores so "legacy-tool" collapses to "legacytool",
+/// matching PascalCase "LegacyTool" after lowercasing.
+fn collapse_separators(s: &str) -> String {
+    s.chars().filter(|c| *c != '-' && *c != '_').collect()
 }
 
 pub fn list_command(args: &RunsListArgs) -> Result<()> {
@@ -1394,6 +1404,51 @@ mod tests {
             result.unwrap_err().to_string().contains("Ambiguous"),
             "Should mention ambiguity"
         );
+    }
+
+    #[test]
+    fn resolve_run_matches_slug_to_pascal_case_workflow_name() {
+        let dir = tempfile::tempdir().unwrap();
+        make_run_dir(
+            dir.path(),
+            "20260101-AAA111",
+            Some(serde_json::json!({
+                "run_id": "aaa111-full",
+                "workflow_name": "LegacyTool",
+                "goal": "",
+                "start_time": "2026-01-01T12:00:00Z",
+                "node_count": 1,
+                "edge_count": 0
+            })),
+            None,
+            false,
+        );
+
+        // Slug-style input should match PascalCase workflow name
+        let info = resolve_run(dir.path(), "legacy-tool").unwrap();
+        assert_eq!(info.run_id, "aaa111-full");
+    }
+
+    #[test]
+    fn resolve_run_matches_case_insensitive() {
+        let dir = tempfile::tempdir().unwrap();
+        make_run_dir(
+            dir.path(),
+            "20260101-AAA111",
+            Some(serde_json::json!({
+                "run_id": "aaa111-full",
+                "workflow_name": "Smoke",
+                "goal": "",
+                "start_time": "2026-01-01T12:00:00Z",
+                "node_count": 1,
+                "edge_count": 0
+            })),
+            None,
+            false,
+        );
+
+        let info = resolve_run(dir.path(), "smoke").unwrap();
+        assert_eq!(info.run_id, "aaa111-full");
     }
 
     // === Step 1: end_time tests ===
