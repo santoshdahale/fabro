@@ -3,3 +3,4 @@ args = ["doctor", "--dry-run"]
 
 [env]
 inherit = false
+ANTHROPIC_API_KEY = "sk-test-dummy"

@@ -2,6 +2,9 @@ bin.name = "fabro"
 args = ["validate", "../../../test/invalid.fabro"]
 status = "failed"
 
+[env]
+inherit = false
+
 [fs]
 sandbox = false
 cwd = "../../.."
