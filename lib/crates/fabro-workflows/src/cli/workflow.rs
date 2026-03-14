@@ -1,14 +1,20 @@
 use anyhow::bail;
 use clap::Args;
+use fabro_util::terminal::Styles;
 
 use super::project_config::{
-    discover_project_config, list_available_workflows, resolve_fabro_root,
+    discover_project_config, list_workflows_detailed, resolve_fabro_root, WorkflowInfo,
+    WorkflowSource,
 };
+use super::relative_path;
+
+const GOAL_MAX_LEN: usize = 60;
 
 #[derive(Args)]
 pub struct WorkflowListArgs {}
 
 pub fn workflow_list_command(_args: &WorkflowListArgs) -> anyhow::Result<()> {
+    let styles = Styles::detect_stderr();
     let cwd = std::env::current_dir()?;
 
     let (config_path, config) = match discover_project_config(&cwd)? {
@@ -23,15 +29,113 @@ pub fn workflow_list_command(_args: &WorkflowListArgs) -> anyhow::Result<()> {
     let project_wf_dir = fabro_root.join("workflows");
     let user_wf_dir = dirs::home_dir().map(|h| h.join(".fabro").join("workflows"));
 
-    let workflows = list_available_workflows(Some(&project_wf_dir), user_wf_dir.as_deref());
+    let workflows = list_workflows_detailed(Some(&project_wf_dir), user_wf_dir.as_deref());
 
-    if workflows.is_empty() {
-        eprintln!("No workflows found");
-    } else {
-        for name in &workflows {
-            println!("{name}");
-        }
-    }
+    let project: Vec<_> = workflows
+        .iter()
+        .filter(|w| w.source == WorkflowSource::Project)
+        .collect();
+    let user: Vec<_> = workflows
+        .iter()
+        .filter(|w| w.source == WorkflowSource::User)
+        .collect();
+
+    let name_width = workflows.iter().map(|w| w.name.len()).max().unwrap_or(0);
+
+    eprintln!(
+        "{} workflow(s) found\n",
+        styles.bold.apply_to(workflows.len())
+    );
+
+    let user_path = user_wf_dir
+        .as_deref()
+        .map(relative_path)
+        .unwrap_or_else(|| "~/.fabro/workflows".to_string());
+    print_section("User Workflows", &user_path, &user, name_width, &styles);
+
+    eprintln!();
+
+    print_section(
+        "Project Workflows",
+        &relative_path(&project_wf_dir),
+        &project,
+        name_width,
+        &styles,
+    );
 
     Ok(())
+}
+
+fn print_section(
+    title: &str,
+    path: &str,
+    workflows: &[&WorkflowInfo],
+    name_width: usize,
+    styles: &Styles,
+) {
+    eprintln!(
+        "{} {}",
+        styles.bold.apply_to(title),
+        styles.dim.apply_to(format!("({path})")),
+    );
+    if workflows.is_empty() {
+        eprintln!("  {}", styles.dim.apply_to("(none)"));
+        return;
+    }
+    eprintln!();
+    eprintln!(
+        "  {:<name_width$}  {}",
+        styles.bold_dim.apply_to("NAME"),
+        styles.bold_dim.apply_to("DESCRIPTION"),
+    );
+    for w in workflows {
+        let goal_str = w
+            .goal
+            .as_deref()
+            .map(|g| truncate_str(g, GOAL_MAX_LEN))
+            .unwrap_or_default();
+        eprintln!(
+            "  {:<name_width$}  {}",
+            styles.cyan.apply_to(&w.name),
+            styles.dim.apply_to(goal_str),
+        );
+    }
+}
+
+fn truncate_str(s: &str, max: usize) -> String {
+    let first_line = s.lines().next().unwrap_or(s);
+    if first_line.len() <= max {
+        first_line.to_string()
+    } else {
+        format!("{}...", &first_line[..max - 3])
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn truncate_str_short() {
+        assert_eq!(truncate_str("hello", 60), "hello");
+    }
+
+    #[test]
+    fn truncate_str_exact_limit() {
+        let s = "a".repeat(60);
+        assert_eq!(truncate_str(&s, 60), s);
+    }
+
+    #[test]
+    fn truncate_str_over_limit() {
+        let s = "a".repeat(70);
+        let result = truncate_str(&s, 60);
+        assert_eq!(result.len(), 60);
+        assert!(result.ends_with("..."));
+    }
+
+    #[test]
+    fn truncate_str_multiline_uses_first_line() {
+        assert_eq!(truncate_str("first\nsecond\nthird", 60), "first");
+    }
 }

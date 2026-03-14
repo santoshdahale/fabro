@@ -168,6 +168,20 @@ fn user_workflows_dir() -> Option<PathBuf> {
     dirs::home_dir().map(|h| h.join(".fabro").join("workflows"))
 }
 
+/// Metadata about a discovered workflow.
+pub struct WorkflowInfo {
+    pub name: String,
+    pub goal: Option<String>,
+    pub source: WorkflowSource,
+}
+
+/// Where a workflow was discovered.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum WorkflowSource {
+    Project,
+    User,
+}
+
 /// List workflow names in a single directory by scanning for subdirs containing `workflow.toml`.
 fn list_workflows_in(workflows_dir: &Path) -> Vec<String> {
     let Ok(entries) = std::fs::read_dir(workflows_dir) else {
@@ -184,6 +198,50 @@ fn list_workflows_in(workflows_dir: &Path) -> Vec<String> {
             }
         })
         .collect()
+}
+
+/// Read the `goal` field from a `workflow.toml` without full config validation.
+fn read_workflow_goal(workflow_toml: &Path) -> Option<String> {
+    let content = std::fs::read_to_string(workflow_toml).ok()?;
+    let table: toml::Table = content.parse().ok()?;
+    table.get("goal")?.as_str().map(String::from)
+}
+
+/// List workflows with metadata by scanning project and user workflow directories.
+pub fn list_workflows_detailed(
+    project_workflows_dir: Option<&Path>,
+    user_workflows_dir: Option<&Path>,
+) -> Vec<WorkflowInfo> {
+    let mut infos: Vec<WorkflowInfo> = Vec::new();
+    let mut seen: Vec<String> = Vec::new();
+
+    if let Some(dir) = project_workflows_dir {
+        for name in list_workflows_in(dir) {
+            let goal = read_workflow_goal(&dir.join(&name).join("workflow.toml"));
+            seen.push(name.clone());
+            infos.push(WorkflowInfo {
+                name,
+                goal,
+                source: WorkflowSource::Project,
+            });
+        }
+    }
+    if let Some(dir) = user_workflows_dir {
+        for name in list_workflows_in(dir) {
+            if !seen.contains(&name) {
+                let goal = read_workflow_goal(&dir.join(&name).join("workflow.toml"));
+                seen.push(name.clone());
+                infos.push(WorkflowInfo {
+                    name,
+                    goal,
+                    source: WorkflowSource::User,
+                });
+            }
+        }
+    }
+
+    infos.sort_by(|a, b| a.name.cmp(&b.name));
+    infos
 }
 
 /// List workflow names by scanning project and user workflow directories.
@@ -632,5 +690,115 @@ mod tests {
         let msg = err.to_string();
         assert!(msg.contains("proj-wf"), "expected proj-wf in: {msg}");
         assert!(msg.contains("user-wf"), "expected user-wf in: {msg}");
+    }
+
+    fn create_workflow_with_goal(base: &Path, name: &str, goal: &str) {
+        let wf_dir = base.join("workflows").join(name);
+        fs::create_dir_all(&wf_dir).unwrap();
+        fs::write(
+            wf_dir.join("workflow.toml"),
+            format!("version = 1\ngoal = \"{goal}\"\ngraph = \"workflow.fabro\"\n"),
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn list_workflows_detailed_project_only() {
+        let tmp = TempDir::new().unwrap();
+        create_workflow_in(tmp.path(), "alpha");
+        create_workflow_with_goal(tmp.path(), "beta", "Run tests");
+
+        let wf_dir = tmp.path().join("workflows");
+        let infos = list_workflows_detailed(Some(&wf_dir), None);
+
+        assert_eq!(infos.len(), 2);
+        assert_eq!(infos[0].name, "alpha");
+        assert_eq!(infos[0].goal, None);
+        assert_eq!(infos[0].source, WorkflowSource::Project);
+        assert_eq!(infos[1].name, "beta");
+        assert_eq!(infos[1].goal.as_deref(), Some("Run tests"));
+        assert_eq!(infos[1].source, WorkflowSource::Project);
+    }
+
+    #[test]
+    fn list_workflows_detailed_user_only() {
+        let user = TempDir::new().unwrap();
+        create_workflow_with_goal(user.path(), "my-wf", "Deploy app");
+
+        let user_wf_dir = user.path().join("workflows");
+        let infos = list_workflows_detailed(None, Some(&user_wf_dir));
+
+        assert_eq!(infos.len(), 1);
+        assert_eq!(infos[0].name, "my-wf");
+        assert_eq!(infos[0].goal.as_deref(), Some("Deploy app"));
+        assert_eq!(infos[0].source, WorkflowSource::User);
+    }
+
+    #[test]
+    fn list_workflows_detailed_deduplicates_user() {
+        let project = TempDir::new().unwrap();
+        create_workflow_with_goal(project.path(), "shared", "Project version");
+
+        let user = TempDir::new().unwrap();
+        create_workflow_with_goal(user.path(), "shared", "User version");
+        create_workflow_in(user.path(), "user-only");
+
+        let project_wf_dir = project.path().join("workflows");
+        let user_wf_dir = user.path().join("workflows");
+        let infos = list_workflows_detailed(Some(&project_wf_dir), Some(&user_wf_dir));
+
+        assert_eq!(infos.len(), 2);
+        let shared = infos.iter().find(|w| w.name == "shared").unwrap();
+        assert_eq!(shared.source, WorkflowSource::Project);
+        assert_eq!(shared.goal.as_deref(), Some("Project version"));
+        let user_only = infos.iter().find(|w| w.name == "user-only").unwrap();
+        assert_eq!(user_only.source, WorkflowSource::User);
+    }
+
+    #[test]
+    fn list_workflows_detailed_sorted() {
+        let tmp = TempDir::new().unwrap();
+        create_workflow_in(tmp.path(), "zebra");
+        create_workflow_in(tmp.path(), "alpha");
+        create_workflow_in(tmp.path(), "middle");
+
+        let wf_dir = tmp.path().join("workflows");
+        let infos = list_workflows_detailed(Some(&wf_dir), None);
+        let names: Vec<_> = infos.iter().map(|w| w.name.as_str()).collect();
+        assert_eq!(names, vec!["alpha", "middle", "zebra"]);
+    }
+
+    #[test]
+    fn list_workflows_detailed_empty_dirs() {
+        let infos = list_workflows_detailed(None, None);
+        assert!(infos.is_empty());
+    }
+
+    #[test]
+    fn read_workflow_goal_extracts_goal() {
+        let tmp = TempDir::new().unwrap();
+        let path = tmp.path().join("workflow.toml");
+        fs::write(
+            &path,
+            "version = 1\ngoal = \"Hello world\"\ngraph = \"w.fabro\"\n",
+        )
+        .unwrap();
+        assert_eq!(read_workflow_goal(&path).as_deref(), Some("Hello world"));
+    }
+
+    #[test]
+    fn read_workflow_goal_missing_field() {
+        let tmp = TempDir::new().unwrap();
+        let path = tmp.path().join("workflow.toml");
+        fs::write(&path, "version = 1\ngraph = \"w.fabro\"\n").unwrap();
+        assert_eq!(read_workflow_goal(&path), None);
+    }
+
+    #[test]
+    fn read_workflow_goal_missing_file() {
+        assert_eq!(
+            read_workflow_goal(Path::new("/nonexistent/workflow.toml")),
+            None
+        );
     }
 }
