@@ -168,6 +168,8 @@ enum SkillCommand {
 enum WorkflowCommand {
     /// List available workflows
     List(fabro_workflows::cli::workflow::WorkflowListArgs),
+    /// Create a new workflow
+    Create(fabro_workflows::cli::workflow::WorkflowCreateArgs),
 }
 
 #[derive(Subcommand)]
@@ -316,6 +318,7 @@ async fn main_inner() -> (String, Result<()>) {
         Command::Rewind(_) => "rewind",
         Command::Workflow { command } => match command {
             WorkflowCommand::List(_) => "workflow list",
+            WorkflowCommand::Create(_) => "workflow create",
         },
         Command::Skill { command } => match command {
             SkillCommand::Install(_) => "skill install",
@@ -618,6 +621,9 @@ async fn main_inner() -> (String, Result<()>) {
             Command::Workflow { command } => match command {
                 WorkflowCommand::List(args) => {
                     fabro_workflows::cli::workflow::workflow_list_command(&args)?;
+                }
+                WorkflowCommand::Create(args) => {
+                    fabro_workflows::cli::workflow::workflow_create_command(&args)?;
                 }
             },
             Command::Skill { command } => match command {

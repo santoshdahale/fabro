@@ -22,6 +22,10 @@ fn default_true() -> bool {
     true
 }
 
+fn default_graph() -> String {
+    "workflow.fabro".to_string()
+}
+
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]
 pub struct PullRequestConfig {
     #[serde(default)]
@@ -41,6 +45,7 @@ pub struct AssetsConfig {
 pub struct WorkflowRunConfig {
     pub version: u32,
     pub goal: Option<String>,
+    #[serde(default = "default_graph")]
     pub graph: String,
     #[serde(alias = "directory")]
     pub work_dir: Option<String>,
@@ -895,12 +900,13 @@ graph = "p.fabro"
     }
 
     #[test]
-    fn graph_is_required() {
+    fn graph_defaults_when_omitted() {
         let no_graph = r#"
 version = 1
 goal = "x"
 "#;
-        assert!(parse_run_config(no_graph).is_err());
+        let config = parse_run_config(no_graph).unwrap();
+        assert_eq!(config.graph, "workflow.fabro");
     }
 
     #[test]
@@ -2412,5 +2418,12 @@ command = "echo from-workflow"
         cfg.apply_defaults(&defaults);
         assert_eq!(cfg.hooks.len(), 1);
         assert_eq!(cfg.hooks[0].event, crate::hook::HookEvent::RunComplete);
+    }
+
+    #[test]
+    fn graph_defaults_to_workflow_fabro() {
+        let toml = "version = 1\n";
+        let config = parse_run_config(toml).unwrap();
+        assert_eq!(config.graph, "workflow.fabro");
     }
 }
