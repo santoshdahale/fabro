@@ -12,7 +12,7 @@ At the core of both modes is the `WorkflowRunEngine`. It parses the DOT graph, w
 ## CLI mode
 
 ```bash
-fabro run workflow.dot --goal "Implement the login feature"
+fabro run workflow.fabro --goal "Implement the login feature"
 ```
 
 The CLI parses the workflow, creates the engine with a `ConsoleInterviewer`, and executes synchronously. Events are printed to stderr, progress is shown with terminal indicators, and human-in-the-loop questions are answered via interactive terminal prompts. When the run finishes, the process exits.

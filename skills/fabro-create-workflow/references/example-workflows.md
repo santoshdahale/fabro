@@ -255,7 +255,7 @@ Paired TOML:
 
 ```toml
 version = 1
-graph = "workflow.dot"
+graph = "workflow.fabro"
 
 [sandbox]
 provider = "local"

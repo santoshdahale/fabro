@@ -1,11 +1,11 @@
 ---
 name: fabro-create-workflow
-description: Create Fabro workflow DOT graphs and TOML run configurations from natural language requirements. Use when the user wants to create a new workflow, build a pipeline, design a multi-step agent process, or write a .dot or .toml file for Fabro. Covers topology selection, node types, model assignment, edge routing, and run configuration.
+description: Create Fabro workflow DOT graphs and TOML run configurations from natural language requirements. Use when the user wants to create a new workflow, build a pipeline, design a multi-step agent process, or write a .fabro or .toml file for Fabro. Covers topology selection, node types, model assignment, edge routing, and run configuration.
 ---
 
 # Fabro Create Workflow
 
-Turn requirements into a runnable Fabro workflow: a `.dot` graph file defining the pipeline structure and an optional `.toml` run configuration.
+Turn requirements into a runnable Fabro workflow: a `.fabro` graph file defining the pipeline structure and an optional `.toml` run configuration.
 
 ## Workflow
 
@@ -103,7 +103,7 @@ graph [model_stylesheet="
 
 See `references/run-configuration.md` for the full reference.
 
-A TOML file is optional for simple workflows (you can run `fabro run workflow.dot` directly). Create one when you need:
+A TOML file is optional for simple workflows (you can run `fabro run workflow.fabro` directly). Create one when you need:
 - Sandbox configuration (provider, environment variables)
 - Setup commands (install dependencies)
 - Variable definitions
@@ -115,7 +115,7 @@ Minimal TOML:
 
 ```toml
 version = 1
-graph = "workflow.dot"
+graph = "workflow.fabro"
 ```
 
 Common additions:
@@ -133,7 +133,7 @@ NODE_ENV = "test"
 
 ### Step 7: Validate
 
-Run `fabro run --preflight workflow.toml` (or `fabro run --preflight workflow.dot`) to validate without executing.
+Run `fabro run --preflight workflow.toml` (or `fabro run --preflight workflow.fabro`) to validate without executing.
 
 If validation fails, fix the reported errors and re-validate.
 
@@ -156,7 +156,7 @@ Place workflow files together in a directory:
 
 ```
 my-workflow/
-  workflow.dot          # the graph
+  workflow.fabro        # the graph
   workflow.toml         # run configuration (optional)
   prompts/              # external prompt files (optional)
     implement.md
@@ -166,14 +166,14 @@ my-workflow/
 ## Running Workflows
 
 ```bash
-fabro run workflow.dot                    # run DOT directly
+fabro run workflow.fabro                  # run graph directly
 fabro run workflow.toml                   # run with TOML config
 fabro run workflow.toml --dry-run         # simulated LLM backend
 fabro run workflow.toml --no-retro        # skip retro (faster for testing)
 fabro run workflow.toml --auto-approve    # auto-approve human gates
 fabro run workflow.toml --model claude-opus-4-6  # override model
 fabro run workflow.toml --sandbox local   # override sandbox
-fabro validate workflow.dot              # validate only
+fabro validate workflow.fabro            # validate only
 ```
 
 ## References

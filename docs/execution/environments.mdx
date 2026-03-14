@@ -22,11 +22,11 @@ Set the sandbox provider via CLI flag, [run config TOML](/execution/run-configur
 
 ```bash
 # CLI flag
-fabro run workflow.dot --sandbox local
-fabro run workflow.dot --sandbox docker
-fabro run workflow.dot --sandbox daytona
-fabro run workflow.dot --sandbox ssh
-fabro run workflow.dot --sandbox exe
+fabro run workflow.fabro --sandbox local
+fabro run workflow.fabro --sandbox docker
+fabro run workflow.fabro --sandbox daytona
+fabro run workflow.fabro --sandbox ssh
+fabro run workflow.fabro --sandbox exe
 ```
 
 ```toml title="run.toml"
@@ -93,7 +93,7 @@ The Docker sandbox is configured through the `DockerSandboxConfig`:
 By default, the container is destroyed when the run finishes. To keep it alive for debugging:
 
 ```bash
-fabro run workflow.dot --sandbox docker --preserve-sandbox
+fabro run workflow.fabro --sandbox docker --preserve-sandbox
 ```
 
 Or in the run config:
@@ -170,7 +170,7 @@ When using server defaults, labels are merged — run config labels override def
 Connect to a running Daytona sandbox via SSH for live debugging:
 
 ```bash
-fabro run workflow.dot --sandbox daytona --ssh
+fabro run workflow.fabro --sandbox daytona --ssh
 ```
 
 This creates temporary SSH credentials (valid for 60 minutes) and prints the connection command.
@@ -180,7 +180,7 @@ This creates temporary SSH credentials (valid for 60 minutes) and prints the con
 Like Docker, Daytona sandboxes are destroyed on cleanup by default. Use `--preserve-sandbox` to keep them alive:
 
 ```bash
-fabro run workflow.dot --sandbox daytona --preserve-sandbox
+fabro run workflow.fabro --sandbox daytona --preserve-sandbox
 ```
 
 Fabro prints the sandbox name so you can find it in the [Daytona dashboard](https://app.daytona.io/dashboard/sandboxes).
@@ -306,7 +306,7 @@ image = "my-custom-image:latest"
 Connect to a running exe.dev sandbox via SSH for live debugging:
 
 ```bash
-fabro run workflow.dot --sandbox exe --ssh
+fabro run workflow.fabro --sandbox exe --ssh
 ```
 
 This prints the SSH connection command so you can connect to the VM while the workflow runs.

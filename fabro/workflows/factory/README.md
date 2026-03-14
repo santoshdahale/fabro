@@ -50,7 +50,7 @@ Bootstrap product context from raw inputs. Run once per product.
 
 ![Seed pipeline](seed.png)
 
-[seed.dot](seed.dot) | Prompts: [ingest](prompts/seed/ingest.md), [draft](prompts/seed/draft.md)
+[seed.fabro](seed.fabro) | Prompts: [ingest](prompts/seed/ingest.md), [draft](prompts/seed/draft.md)
 
 ---
 
@@ -63,7 +63,7 @@ Define what a feature does in implementation-agnostic terms. Run once per featur
 
 ![Specify pipeline](specify.png)
 
-[specify.dot](specify.dot) | Prompts: [clarify](prompts/specify/clarify.md), [require](prompts/specify/require.md)
+[specify.fabro](specify.fabro) | Prompts: [clarify](prompts/specify/clarify.md), [require](prompts/specify/require.md)
 
 ---
 
@@ -76,7 +76,7 @@ Translate approved requirements into a technical blueprint. Run once per feature
 
 ![Architect pipeline](architect.png)
 
-[architect.dot](architect.dot) | Prompts: [blueprint](prompts/architect/blueprint.md), [diagram](prompts/architect/diagram.md)
+[architect.fabro](architect.fabro) | Prompts: [blueprint](prompts/architect/blueprint.md), [diagram](prompts/architect/diagram.md)
 
 ---
 
@@ -89,7 +89,7 @@ Generate working code from a feature blueprint. Run once per feature, after Arch
 
 ![Implement pipeline](implement.png)
 
-[implement.dot](implement.dot) | Prompts: [plan](prompts/implement/plan.md), [implement](prompts/implement/implement.md), [validate](prompts/implement/validate.md), [fix](prompts/implement/fix.md)
+[implement.fabro](implement.fabro) | Prompts: [plan](prompts/implement/plan.md), [implement](prompts/implement/implement.md), [validate](prompts/implement/validate.md), [fix](prompts/implement/fix.md)
 
 All nodes share `fidelity="full"` with `thread_id="impl"` so the agent maintains full context across the loop. `goal_gate=true` on Validate ensures the pipeline cannot exit until all acceptance criteria pass.
 
@@ -104,7 +104,7 @@ Detect and resolve drift between the three layers. Run continuously (after merge
 
 ![Sync pipeline](sync.png)
 
-[sync.dot](sync.dot) | Prompts: [detect](prompts/sync/detect.md), [propose](prompts/sync/propose.md), [apply](prompts/sync/apply.md)
+[sync.fabro](sync.fabro) | Prompts: [detect](prompts/sync/detect.md), [propose](prompts/sync/propose.md), [apply](prompts/sync/apply.md)
 
 Short-circuits to Exit when no drift is detected, avoiding unnecessary human interaction.
 
@@ -119,7 +119,7 @@ Evolve the product by adding, modifying, or removing features. Run as needed.
 
 ![Expand pipeline](expand.png)
 
-[expand.dot](expand.dot) | Prompts: [propose](prompts/expand/propose.md), [execute](prompts/expand/execute.md)
+[expand.fabro](expand.fabro) | Prompts: [propose](prompts/expand/propose.md), [execute](prompts/expand/execute.md)
 
 ---
 

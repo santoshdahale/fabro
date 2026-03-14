@@ -9,7 +9,7 @@ Fabro workflows are written in a subset of the [Graphviz DOT language](https://g
 
 Every workflow is a `digraph` (directed graph) with a name and a body of statements:
 
-```dot title="my-workflow.dot"
+```dot title="my-workflow.fabro"
 digraph MyWorkflow {
     graph [goal="Describe the project"]
     rankdir=LR
@@ -345,7 +345,7 @@ Fabro validates workflows at parse time and reports diagnostics. Key rules:
 
 ## Complete example
 
-```dot title="implement-feature.dot"
+```dot title="implement-feature.fabro"
 digraph ImplementFeature {
     graph [
         goal="Implement a feature with tests and code review",

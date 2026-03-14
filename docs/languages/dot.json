@@ -1,7 +1,7 @@
 {
   "name": "dot",
   "scopeName": "source.dot",
-  "fileTypes": ["dot", "DOT", "gv"],
+  "fileTypes": ["dot", "DOT", "gv", "fabro"],
   "firstLineMatch": "digraph.*",
   "patterns": [
     {

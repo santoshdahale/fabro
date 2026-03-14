@@ -11,7 +11,7 @@ This tutorial combines parallel execution with multi-model routing to get indepe
   <img src="/images/tutorial-ensemble.svg" alt="Ensemble workflow: Start → Fan Out → Opus, Gemini, Codex, Mercury → Merge → Synthesize → Exit" />
 </Frame>
 
-```dot title="ensemble.dot"
+```dot title="ensemble.fabro"
 digraph Ensemble {
     graph [
         goal="Get independent opinions from multiple providers, then synthesize",
@@ -52,7 +52,7 @@ digraph Ensemble {
 ```
 
 ```bash
-fabro run files-internal/demo/11-ensemble.dot
+fabro run files-internal/demo/11-ensemble.fabro
 ```
 
 <Note>

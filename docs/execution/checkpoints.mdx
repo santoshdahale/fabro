@@ -44,7 +44,7 @@ The `Fabro-Checkpoint` trailer links each run branch commit to its metadata bran
 The metadata branch (`refs/fabro/{run_id}`) is an orphan branch that stores structured run data using Git's object storage directly (via `git2`). It is initialized at run start with:
 
 - **`manifest.json`** — Run metadata: run ID, graph name, node/edge counts, base SHA, and branch name
-- **`graph.dot`** — The workflow DOT source as it was parsed
+- **`graph.fabro`** — The workflow DOT source as it was parsed
 
 After each node, the metadata branch is updated with:
 
@@ -98,7 +98,7 @@ There are two ways to resume an interrupted run:
 Resume from a `checkpoint.json` saved in the run directory:
 
 ```bash
-fabro run workflow.dot --resume path/to/logs/checkpoint.json
+fabro run workflow.fabro --resume path/to/logs/checkpoint.json
 ```
 
 Fabro loads the checkpoint, restores the context and execution state, and continues from the next node after the checkpoint.
@@ -115,7 +115,7 @@ This reads the checkpoint, manifest, and graph DOT from the metadata branch (`re
 
 <Accordion title="What happens during resume">
 1. Fabro reads `checkpoint.json` from the metadata branch
-2. Reads `manifest.json` and `graph.dot` to reconstruct the workflow
+2. Reads `manifest.json` and `graph.fabro` to reconstruct the workflow
 3. Creates a fresh worktree attached to the existing run branch
 4. Restores the full context, completed node list, retry counts, and failure signatures
 5. If the checkpointed node used `full` fidelity, downgrades the first resumed node to `summary:high` (since the original conversation thread no longer exists in memory)

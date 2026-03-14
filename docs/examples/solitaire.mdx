@@ -13,7 +13,7 @@ This pattern is useful when you want an agent to build something non-trivial fro
   <img src="/images/example-solitaire.svg" alt="Build Solitaire workflow: Start → Spec → Setup → OK? → Data → OK? → Logic → OK? → UI → OK? → Integrate → OK? → Review → OK? → Exit, with Retry arcs from each gate back to its phase, and a Fix arc from the review gate back to UI" />
 </Frame>
 
-```dot title="build-solitaire.dot"
+```dot title="build-solitaire.fabro"
 digraph BuildSolitaire {
     graph [
         goal="Build a terminal-based solitaire (Klondike) game in Python",
@@ -257,7 +257,7 @@ Pair the workflow with a run config for repeatable execution:
 ```toml title="run.toml"
 version = 1
 goal = "Build a terminal-based solitaire (Klondike) game in Python"
-graph = "build-solitaire.dot"
+graph = "build-solitaire.fabro"
 
 [llm]
 model = "claude-sonnet-4-5"

@@ -15,7 +15,7 @@ A run config requires two fields:
 
 ```toml title="run.toml"
 version = 1
-graph = "workflow.dot"
+graph = "workflow.fabro"
 goal = "Implement the login feature"
 ```
 
@@ -32,7 +32,7 @@ Goal precedence: CLI `--goal` > TOML `goal` > DOT graph attribute.
 ```toml title="run.toml"
 version = 1
 goal = "Run the CI pipeline for $repo_name"
-graph = "fabro/workflows/ci.dot"
+graph = "fabro/workflows/ci.fabro"
 directory = "/tmp/workdir"
 
 [llm]
@@ -286,7 +286,7 @@ language = "rust"
 
 Variables can be used anywhere in the DOT file with `$name` syntax:
 
-```dot title="c-i.dot"
+```dot title="c-i.fabro"
 digraph CI {
     graph [goal="Run tests for $repo_name"]
     clone [shape=parallelogram, script="git clone $repo_url repo"]
@@ -394,8 +394,8 @@ The `graph` path is resolved relative to the TOML file's parent directory, not t
 ```
 project/
   runs/
-    ci.toml       # graph = "ci.dot"
-    ci.dot
+    ci.toml       # graph = "ci.fabro"
+    ci.fabro
 ```
 
 Absolute paths are used as-is.

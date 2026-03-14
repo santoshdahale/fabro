@@ -36,7 +36,7 @@ CLI flags always override `cli.toml` values, which override hardcoded defaults.
 
 ## `fabro run`
 
-Launch a workflow from a `.dot` workflow file or `.toml` task config.
+Launch a workflow from a `.fabro` workflow file or `.toml` task config.
 
 ```bash
 fabro run <WORKFLOW>
@@ -46,7 +46,7 @@ fabro run --run-branch arc/run/abc123
 
 | Argument / Flag | Description |
 |---|---|
-| `<WORKFLOW>` | Path to a `.dot` workflow file or `.toml` task config. Not required when using `--run-branch`. |
+| `<WORKFLOW>` | Path to a `.fabro` workflow file or `.toml` task config. Not required when using `--run-branch`. |
 | `--run-dir <DIR>` | Run output directory |
 | `--dry-run` | Execute with a simulated LLM backend |
 | `--preflight` | Validate run configuration without executing |
@@ -343,14 +343,14 @@ fabro system df -v
 Render a workflow DOT graph as SVG or PNG. Requires [Graphviz](https://graphviz.org) (`dot`) to be installed.
 
 ```bash
-fabro graph workflow.dot
-fabro graph workflow.dot --format png -o diagram.png
+fabro graph workflow.fabro
+fabro graph workflow.fabro --format png -o diagram.png
 fabro graph run.toml --format svg
 ```
 
 | Argument / Flag | Description |
 |---|---|
-| `<WORKFLOW>` | Path to a `.dot` workflow file or `.toml` run config (required) |
+| `<WORKFLOW>` | Path to a `.fabro` workflow file or `.toml` run config (required) |
 | `--format <FORMAT>` | Output format: `svg` (default) or `png` |
 | `-o, --output <FILE>` | Output file path. Defaults to stdout. |
 
@@ -374,28 +374,28 @@ fabro skill install --for user --dir claude
 
 ## `fabro validate`
 
-Validate a workflow file without executing it. Reports errors and warnings. Accepts both `.dot` workflow files and `.toml` run configs.
+Validate a workflow file without executing it. Reports errors and warnings. Accepts both `.fabro` workflow files and `.toml` run configs.
 
 ```bash
-fabro validate workflow.dot
+fabro validate workflow.fabro
 fabro validate run.toml
 ```
 
 | Argument | Description |
 |---|---|
-| `<WORKFLOW>` | Path to a `.dot` workflow file or `.toml` run config (required) |
+| `<WORKFLOW>` | Path to a `.fabro` workflow file or `.toml` run config (required) |
 
 ## `fabro parse`
 
 Parse a DOT file and print its AST as JSON. Useful for debugging workflow definitions.
 
 ```bash
-fabro parse workflow.dot
+fabro parse workflow.fabro
 ```
 
 | Argument | Description |
 |---|---|
-| `<WORKFLOW>` | Path to the `.dot` workflow file (required) |
+| `<WORKFLOW>` | Path to the `.fabro` workflow file (required) |
 
 ---
 
@@ -409,7 +409,7 @@ fabro init
 
 The command must be run inside a git repository. It creates:
 - `fabro.toml` — project configuration with comments and a link to docs
-- `fabro/workflows/hello/workflow.dot` — a simple greeting workflow
+- `fabro/workflows/hello/workflow.fabro` — a simple greeting workflow
 - `fabro/workflows/hello/workflow.toml` — run config for the hello workflow
 
 ## `fabro diff`

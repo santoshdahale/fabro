@@ -11,7 +11,7 @@ This tutorial builds a plan-approve-implement workflow where a human reviews the
   <img src="/images/tutorial-plan-implement.svg" alt="Plan-Implement workflow: Start → Plan → Approve Plan → Implement → Simplify → Exit, with Revise loop back to Plan" />
 </Frame>
 
-```dot title="plan-implement.dot"
+```dot title="plan-implement.fabro"
 digraph PlanImplement {
     graph [goal="Plan, approve, implement, and simplify a change"]
     rankdir=LR
@@ -32,7 +32,7 @@ digraph PlanImplement {
 ```
 
 ```bash
-fabro run files-internal/demo/10-plan-implement.dot
+fabro run files-internal/demo/10-plan-implement.fabro
 ```
 
 ## Human gates

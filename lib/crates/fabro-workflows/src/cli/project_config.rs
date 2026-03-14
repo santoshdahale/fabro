@@ -90,6 +90,14 @@ pub fn resolve_workflow_arg(arg: &Path) -> anyhow::Result<PathBuf> {
 }
 
 fn resolve_workflow_arg_from(arg: &Path, start_dir: &Path) -> anyhow::Result<PathBuf> {
+    resolve_workflow_arg_impl(arg, start_dir, user_workflows_dir().as_deref())
+}
+
+fn resolve_workflow_arg_impl(
+    arg: &Path,
+    start_dir: &Path,
+    user_workflows: Option<&Path>,
+) -> anyhow::Result<PathBuf> {
     if arg.extension().is_some() {
         tracing::debug!(arg = %arg.display(), "Workflow arg has extension, returning as-is");
         return Ok(arg.to_path_buf());
@@ -99,32 +107,48 @@ fn resolve_workflow_arg_from(arg: &Path, start_dir: &Path) -> anyhow::Result<Pat
     match discover_project_config(start_dir) {
         Ok(Some((config_path, config))) => {
             let fabro_root = resolve_fabro_root(&config_path, &config);
-            let candidate = fabro_root
+            let project_candidate = fabro_root
                 .join("workflows")
                 .join(&*name)
                 .join("workflow.toml");
-            if candidate.is_file() {
-                tracing::debug!(arg = %arg.display(), resolved = %candidate.display(), "Resolved workflow name via project config");
-                Ok(candidate)
-            } else {
-                let available = list_available_workflows(&fabro_root);
-                if available.is_empty() {
-                    bail!(
-                        "Unknown workflow '{name}'\n\nNo workflows found in {}",
-                        fabro_root.join("workflows").display()
-                    );
-                }
-                let mut msg = format!(
-                    "Unknown workflow '{name}'\n\nAvailable workflows: {}",
-                    available.join(", ")
-                );
-                if let Some(suggestion) = find_closest_match(&name, &available) {
-                    msg.push_str(&format!("\n\nDid you mean '{suggestion}'?"));
-                }
-                bail!("{msg}");
+            if project_candidate.is_file() {
+                tracing::debug!(arg = %arg.display(), resolved = %project_candidate.display(), "Resolved workflow name via project config");
+                return Ok(project_candidate);
             }
+
+            if let Some(user_wf) = user_workflows {
+                let user_candidate = user_wf.join(&*name).join("workflow.toml");
+                if user_candidate.is_file() {
+                    tracing::debug!(arg = %arg.display(), resolved = %user_candidate.display(), "Resolved workflow name via user workflows");
+                    return Ok(user_candidate);
+                }
+            }
+
+            let project_wf_dir = fabro_root.join("workflows");
+            let available = list_available_workflows(Some(&project_wf_dir), user_workflows);
+            if available.is_empty() {
+                bail!(
+                    "Unknown workflow '{name}'\n\nNo workflows found in {}",
+                    project_wf_dir.display()
+                );
+            }
+            let mut msg = format!(
+                "Unknown workflow '{name}'\n\nAvailable workflows: {}",
+                available.join(", ")
+            );
+            if let Some(suggestion) = find_closest_match(&name, &available) {
+                msg.push_str(&format!("\n\nDid you mean '{suggestion}'?"));
+            }
+            bail!("{msg}");
         }
         Ok(None) => {
+            if let Some(user_wf) = user_workflows {
+                let user_candidate = user_wf.join(&*name).join("workflow.toml");
+                if user_candidate.is_file() {
+                    tracing::debug!(arg = %arg.display(), resolved = %user_candidate.display(), "Resolved workflow name via user workflows (no project config)");
+                    return Ok(user_candidate);
+                }
+            }
             tracing::debug!(arg = %arg.display(), "No project config found, returning literal");
             Ok(arg.to_path_buf())
         }
@@ -135,13 +159,17 @@ fn resolve_workflow_arg_from(arg: &Path, start_dir: &Path) -> anyhow::Result<Pat
     }
 }
 
-/// List workflow names by scanning `{fabro_root}/workflows/` for dirs containing `workflow.toml`.
-fn list_available_workflows(fabro_root: &Path) -> Vec<String> {
-    let workflows_dir = fabro_root.join("workflows");
-    let Ok(entries) = std::fs::read_dir(&workflows_dir) else {
+/// Return the user-level workflows directory (`~/.fabro/workflows/`).
+fn user_workflows_dir() -> Option<PathBuf> {
+    dirs::home_dir().map(|h| h.join(".fabro").join("workflows"))
+}
+
+/// List workflow names in a single directory by scanning for subdirs containing `workflow.toml`.
+fn list_workflows_in(workflows_dir: &Path) -> Vec<String> {
+    let Ok(entries) = std::fs::read_dir(workflows_dir) else {
         return Vec::new();
     };
-    let mut names: Vec<String> = entries
+    entries
         .filter_map(|entry| {
             let entry = entry.ok()?;
             let path = entry.path();
@@ -151,7 +179,28 @@ fn list_available_workflows(fabro_root: &Path) -> Vec<String> {
                 None
             }
         })
-        .collect();
+        .collect()
+}
+
+/// List workflow names by scanning project and user workflow directories.
+/// Project workflows appear first; user workflows are deduplicated.
+fn list_available_workflows(
+    project_workflows_dir: Option<&Path>,
+    user_workflows_dir: Option<&Path>,
+) -> Vec<String> {
+    let mut names: Vec<String> = Vec::new();
+
+    if let Some(dir) = project_workflows_dir {
+        names.extend(list_workflows_in(dir));
+    }
+    if let Some(dir) = user_workflows_dir {
+        for name in list_workflows_in(dir) {
+            if !names.contains(&name) {
+                names.push(name);
+            }
+        }
+    }
+
     names.sort();
     names
 }
@@ -488,5 +537,104 @@ mod tests {
         let (dot_path, cfg) = resolve_workflow_from(&expected_dot, tmp.path()).unwrap();
         assert_eq!(dot_path, expected_dot);
         assert!(cfg.is_none(), "expected None for .fabro path");
+    }
+
+    /// Helper: create a workflow dir with workflow.toml + workflow.fabro inside `base/workflows/{name}/`
+    fn create_workflow_in(base: &Path, name: &str) {
+        let wf_dir = base.join("workflows").join(name);
+        fs::create_dir_all(&wf_dir).unwrap();
+        fs::write(
+            wf_dir.join("workflow.toml"),
+            "version = 1\ngraph = \"workflow.fabro\"\n",
+        )
+        .unwrap();
+        fs::write(
+            wf_dir.join("workflow.fabro"),
+            "digraph G { start [shape=Mdiamond]; exit [shape=Msquare]; start -> exit }",
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn resolve_workflow_arg_user_workflow_found() {
+        let project_dir = TempDir::new().unwrap();
+        // No fabro.toml in project_dir
+        let user_dir = TempDir::new().unwrap();
+        create_workflow_in(user_dir.path(), "my-wf");
+
+        let result = resolve_workflow_arg_impl(
+            Path::new("my-wf"),
+            project_dir.path(),
+            Some(user_dir.path().join("workflows").as_path()),
+        )
+        .unwrap();
+        assert_eq!(
+            result,
+            user_dir.path().join("workflows/my-wf/workflow.toml")
+        );
+    }
+
+    #[test]
+    fn resolve_workflow_arg_project_takes_precedence() {
+        let project_dir = TempDir::new().unwrap();
+        fs::write(project_dir.path().join("fabro.toml"), "version = 1\n").unwrap();
+        create_workflow_in(project_dir.path(), "shared");
+
+        let user_dir = TempDir::new().unwrap();
+        create_workflow_in(user_dir.path(), "shared");
+
+        let result = resolve_workflow_arg_impl(
+            Path::new("shared"),
+            project_dir.path(),
+            Some(user_dir.path().join("workflows").as_path()),
+        )
+        .unwrap();
+        // Should resolve to project, not user
+        assert_eq!(
+            result,
+            project_dir.path().join("workflows/shared/workflow.toml")
+        );
+    }
+
+    #[test]
+    fn resolve_workflow_arg_user_fallback_when_project_missing() {
+        let project_dir = TempDir::new().unwrap();
+        fs::write(project_dir.path().join("fabro.toml"), "version = 1\n").unwrap();
+        // Project has a different workflow
+        create_workflow_in(project_dir.path(), "other");
+
+        let user_dir = TempDir::new().unwrap();
+        create_workflow_in(user_dir.path(), "my-wf");
+
+        let result = resolve_workflow_arg_impl(
+            Path::new("my-wf"),
+            project_dir.path(),
+            Some(user_dir.path().join("workflows").as_path()),
+        )
+        .unwrap();
+        assert_eq!(
+            result,
+            user_dir.path().join("workflows/my-wf/workflow.toml")
+        );
+    }
+
+    #[test]
+    fn resolve_workflow_arg_user_workflow_listed_in_error() {
+        let project_dir = TempDir::new().unwrap();
+        fs::write(project_dir.path().join("fabro.toml"), "version = 1\n").unwrap();
+        create_workflow_in(project_dir.path(), "proj-wf");
+
+        let user_dir = TempDir::new().unwrap();
+        create_workflow_in(user_dir.path(), "user-wf");
+
+        let err = resolve_workflow_arg_impl(
+            Path::new("nonexistent"),
+            project_dir.path(),
+            Some(user_dir.path().join("workflows").as_path()),
+        )
+        .unwrap_err();
+        let msg = err.to_string();
+        assert!(msg.contains("proj-wf"), "expected proj-wf in: {msg}");
+        assert!(msg.contains("user-wf"), "expected user-wf in: {msg}");
     }
 }

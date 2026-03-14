@@ -11,7 +11,7 @@ This tutorial builds an implement-test-fix loop — the agent writes code, runs 
   <img src="/images/tutorial-branch-loop.svg" alt="Branch-Loop workflow: Start → Plan → Implement → Validate → Tests passing? → Pass to Exit or Fix back to Implement" />
 </Frame>
 
-```dot title="branch-loop.dot"
+```dot title="branch-loop.fabro"
 digraph BranchLoop {
     graph [goal="Create a Python script that passes its test suite"]
     rankdir=LR
@@ -31,7 +31,7 @@ digraph BranchLoop {
 ```
 
 ```bash
-fabro run files-internal/demo/05-branch-loop.dot
+fabro run files-internal/demo/05-branch-loop.fabro
 ```
 
 ## Command nodes

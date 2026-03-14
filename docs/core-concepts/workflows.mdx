@@ -13,7 +13,7 @@ Every workflow is a `digraph` with a `goal`, a `start` node, an `exit` node, and
   <img src="/images/anatomy-workflow.svg" alt="Simple workflow: Start → Scan Files → Analyze → Exit" />
 </Frame>
 
-```dot title="my-workflow.dot"
+```dot title="my-workflow.fabro"
 digraph MyWorkflow {
     graph [goal="Describe the project"]
     rankdir=LR
@@ -112,7 +112,7 @@ validate [label="Validate", prompt="Run the test suite and verify all tests pass
 From the CLI:
 
 ```bash
-fabro run workflow.dot
+fabro run workflow.fabro
 ```
 
 Or from a [run config TOML](/execution/run-configuration) for repeatable, parameterized runs:

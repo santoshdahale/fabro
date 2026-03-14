@@ -132,7 +132,7 @@ Fabro has two independent mechanisms for detecting stuck loops: **node visit lim
 
 The `max_node_visits` graph attribute sets the maximum number of times any single node can execute before the run is terminated:
 
-```dot title="example.dot"
+```dot title="example.fabro"
 digraph Example {
     graph [max_node_visits="20"]
     // ...
@@ -155,7 +155,7 @@ node "verify" visited 20 times (graph limit 20); run is stuck in a cycle
 
 You can set `max_visits` on individual nodes to override the graph-level limit for that node:
 
-```dot title="example.dot"
+```dot title="example.fabro"
 digraph Example {
     graph [max_node_visits="20"]
     fix [max_visits=3]
@@ -231,7 +231,7 @@ When a goal gate is unsatisfied at the exit node, Fabro looks for a **retry targ
 3. Graph-level `retry_target` attribute
 4. Graph-level `fallback_retry_target` attribute
 
-```dot title="example.dot"
+```dot title="example.fabro"
 digraph Example {
     graph [retry_target="plan"]
     verify [shape=box, goal_gate="true", retry_target="implement"]
@@ -255,7 +255,7 @@ Fabro runs a background watchdog that monitors event activity. If no events are 
 | `stall_timeout` | 1800 seconds (30 minutes) |
 | Set to `0` | Disables the watchdog |
 
-```dot title="example.dot"
+```dot title="example.fabro"
 digraph Example {
     graph [stall_timeout="300"]  // 5 minutes
 }

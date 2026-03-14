@@ -19,12 +19,12 @@ export const workflowData: Record<string, WorkflowEntry> = {
   fix_build: {
     name: "Fix Build",
     slug: "fix_build",
-    filename: "fix_build.dot",
+    filename: "fix_build.fabro",
     description: "Automatically diagnoses and fixes CI build failures by analyzing error logs, identifying root causes, and applying targeted code changes.",
     config: {
       version: 1,
       goal: "Diagnose and fix CI build failures",
-      graph: "fix_build.dot",
+      graph: "fix_build.fabro",
       llm: { model: "claude-sonnet" },
       vars: { repo_url: "https://github.com/org/service", branch: "main" },
       sandbox: {
@@ -60,12 +60,12 @@ export const workflowData: Record<string, WorkflowEntry> = {
   implement: {
     name: "Implement Feature",
     slug: "implement",
-    filename: "implement.dot",
+    filename: "implement.fabro",
     description: "Generates production-ready code from a technical blueprint, including tests, documentation, and a pull request ready for review.",
     config: {
       version: 1,
       goal: "Implement feature from technical blueprint",
-      graph: "implement.dot",
+      graph: "implement.fabro",
       llm: { model: "claude-sonnet" },
       vars: { spec_path: "specs/feature.md", test_framework: "vitest" },
       setup: { commands: ["bun install", "bun run typecheck"], timeout_ms: 120000 },
@@ -116,12 +116,12 @@ export const workflowData: Record<string, WorkflowEntry> = {
   sync_drift: {
     name: "Sync Drift",
     slug: "sync_drift",
-    filename: "sync_drift.dot",
+    filename: "sync_drift.fabro",
     description: "Detects configuration and code drift between environments, then generates reconciliation patches to bring everything back in sync.",
     config: {
       version: 1,
       goal: "Detect and reconcile configuration drift across environments",
-      graph: "sync_drift.dot",
+      graph: "sync_drift.fabro",
       llm: { model: "claude-sonnet" },
       vars: { source_env: "production", target_env: "staging", drift_threshold: "warn" },
       sandbox: {
@@ -161,12 +161,12 @@ export const workflowData: Record<string, WorkflowEntry> = {
   expand: {
     name: "Expand Product",
     slug: "expand",
-    filename: "expand.dot",
+    filename: "expand.fabro",
     description: "Evolves the product by analyzing usage patterns and specifications to propose and implement incremental improvements.",
     config: {
       version: 1,
       goal: "Propose and implement incremental product improvements",
-      graph: "expand.dot",
+      graph: "expand.fabro",
       llm: { model: "claude-sonnet" },
       vars: { analytics_window: "30d", min_confidence: "0.8" },
       sandbox: {

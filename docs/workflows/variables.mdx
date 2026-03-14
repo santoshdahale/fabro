@@ -12,7 +12,7 @@ Define variables in the `[vars]` section of a run config TOML file:
 ```toml title="run.toml"
 version = 1
 goal = "Run tests for $repo_name"
-graph = "check.dot"
+graph = "check.fabro"
 
 [vars]
 repo_name = "fabro"
@@ -22,7 +22,7 @@ language = "rust"
 
 These variables are expanded into the DOT source **before** the graph is parsed. You can use `$variable` anywhere in the DOT file — goals, prompts, labels, scripts, or any other attribute:
 
-```dot title="check.dot"
+```dot title="check.fabro"
 digraph Check {
     graph [goal="Run tests for $repo_name"]
 
@@ -56,7 +56,7 @@ This produces `The env var is $HOME` without treating `$HOME` as a variable refe
 
 Inside agent and prompt node prompts, Fabro automatically expands `$goal` to the workflow's `goal` attribute. This happens at runtime, after graph parsing:
 
-```dot title="example.dot"
+```dot title="example.fabro"
 digraph Example {
     graph [goal="Implement the login feature"]
 

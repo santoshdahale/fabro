@@ -3,7 +3,7 @@ import type { LanguageRegistration } from "@pierre/diffs";
 export const dotLanguage: LanguageRegistration = {
   name: "dot",
   scopeName: "source.dot",
-  fileTypes: ["dot", "DOT", "gv"],
+  fileTypes: ["fabro", "dot", "DOT", "gv"],
   firstLineMatch: "digraph.*",
   patterns: [
     {

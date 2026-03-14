@@ -5,7 +5,7 @@ description: "Build an entire application from a detailed specification using de
 
 The Clone Substack workflow takes a detailed specification document and autonomously builds a complete, working application — in this case, a Substack-like newsletter creation tool. It uses ensemble planning (two independent plans debated into one), a multi-stage verification chain, parallel code review with consensus, and a postmortem repair loop that feeds failures back into the next iteration.
 
-This pattern is adapted from [Kilroy](https://github.com/danshapiro/kilroy)'s `substack-spec-v01.dot`, which builds a full React application from a natural language spec with acceptance criteria.
+This pattern is adapted from [Kilroy](https://github.com/danshapiro/kilroy)'s `substack-spec-v01.fabro`, which builds a full React application from a natural language spec with acceptance criteria.
 
 ## When to use this
 
@@ -20,7 +20,7 @@ This pattern is adapted from [Kilroy](https://github.com/danshapiro/kilroy)'s `s
   <img src="/images/example-clone-substack.svg" alt="Clone Substack workflow: Start → Bootstrap → Plan Fan-Out → Plan A and Plan B → Debate → Implement → Verify Chain → Review Fan-Out → Review A and Review B → Consensus → Exit, with Fix loop from Verify back to Implement, Rejected path from Consensus to Postmortem, and Replan loop from Postmortem back to Plan Fan-Out" />
 </Frame>
 
-```dot title="clone-substack.dot"
+```dot title="clone-substack.fabro"
 digraph CloneSubstack {
     graph [
         goal="Build the Substack Creator Newsletter Engine — a pure React frontend \

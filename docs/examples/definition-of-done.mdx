@@ -22,7 +22,7 @@ This pattern is useful when you have detailed specs with acceptance criteria (De
 
 The simpler variant uses one model throughout, with sequential audits across multiple specs:
 
-```dot title="spec-dod.dot"
+```dot title="spec-dod.fabro"
 digraph SpecDoD {
     graph [
         goal="Satisfy every Definition of Done checkbox across both specs (unified-llm-spec.md, coding-agent-loop-spec.md). The implementation is in Rust under crates/. Do NOT modify the spec files. Only modify implementation code.",
@@ -278,7 +278,7 @@ Otherwise set preferred_next_label to \"more_work_needed\"."
 
 The multi-model variant applies the same audit-triage-fix-verify structure but uses independent assessments from two models (Claude Opus and GPT-5.2) at each phase, with cross-critique and consensus merging. This catches blind spots that a single model might miss.
 
-```dot title="spec-dod-multimodel.dot"
+```dot title="spec-dod-multimodel.fabro"
 digraph SpecDoDMultiModel {
     graph [
         goal="Satisfy every Definition of Done checkbox across both specs (unified-llm-spec.md, coding-agent-loop-spec.md). The implementation is in Rust under crates/. Do NOT modify the spec files. Only modify implementation code. Uses multi-model consensus: Opus 4.6 and GPT-5.2 compete on audits and planning, GPT-5.2-codex and Opus 4.6 alternate on implementation.",

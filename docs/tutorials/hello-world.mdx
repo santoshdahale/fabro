@@ -17,7 +17,7 @@ The simplest possible workflow has one node that sends a prompt to an LLM and ex
   <img src="/images/tutorial-hello.svg" alt="Hello World workflow: Start → Compose → Exit" />
 </Frame>
 
-```dot title="hello.dot"
+```dot title="hello.fabro"
 digraph Hello {
     graph [goal="Write a haiku about software workflows"]
     rankdir=LR
@@ -34,7 +34,7 @@ digraph Hello {
 Run it:
 
 ```bash
-fabro run files-internal/demo/01-hello.dot
+fabro run files-internal/demo/01-hello.fabro
 ```
 
 ### What's happening
@@ -53,7 +53,7 @@ An **agent node** (the default `box` shape) runs an LLM in a loop with access to
   <img src="/images/tutorial-tool-use.svg" alt="Tool Use workflow: Start → Explore → Exit" />
 </Frame>
 
-```dot title="tool-use.dot"
+```dot title="tool-use.fabro"
 digraph ToolUse {
     graph [goal="Explore the current directory using shell tools"]
     rankdir=LR
@@ -68,7 +68,7 @@ digraph ToolUse {
 ```
 
 ```bash
-fabro run files-internal/demo/02-tool-use.dot
+fabro run files-internal/demo/02-tool-use.fabro
 ```
 
 ### What's happening
@@ -93,7 +93,7 @@ An agent can spawn **sub-agents** to delegate work. Sub-agents run in their own 
   <img src="/images/tutorial-subagent.svg" alt="Sub-agent workflow: Start → Research → Exit" />
 </Frame>
 
-```dot title="sub-agent.dot"
+```dot title="sub-agent.fabro"
 digraph SubAgent {
     graph [goal="Research and summarize using a sub-agent"]
     rankdir=LR
@@ -108,7 +108,7 @@ digraph SubAgent {
 ```
 
 ```bash
-fabro run files-internal/demo/03-subagent.dot
+fabro run files-internal/demo/03-subagent.fabro
 ```
 
 ### What's happening

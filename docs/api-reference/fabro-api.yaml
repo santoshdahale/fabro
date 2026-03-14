@@ -2924,7 +2924,7 @@ components:
         filename:
           type: string
           description: DOT graph filename.
-          example: fix_build.dot
+          example: fix_build.fabro
         last_run:
           $ref: "#/components/schemas/WorkflowLastRun"
         schedule:
@@ -2952,7 +2952,7 @@ components:
         filename:
           type: string
           description: DOT graph filename.
-          example: fix_build.dot
+          example: fix_build.fabro
         description:
           type: string
           description: Prose description of what the workflow does.
@@ -4007,7 +4007,7 @@ components:
         graph:
           type: string
           description: DOT graph filename.
-          example: fix_build.dot
+          example: fix_build.fabro
         directory:
           type: string
           description: Working directory for the run.

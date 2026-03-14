@@ -47,7 +47,7 @@ The `@` prefix tells the engine to read the file contents and use them as the pr
 
 Prompts support `$variable` placeholders that expand at runtime. Currently the only built-in variable is `$goal`, which resolves to the graph-level `goal` attribute:
 
-```dot title="pipeline.dot"
+```dot title="pipeline.fabro"
 digraph Pipeline {
     graph [goal="Add a /health endpoint to the API server"]
 

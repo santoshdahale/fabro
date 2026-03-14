@@ -11,7 +11,7 @@ This tutorial runs three code review perspectives in parallel — security, arch
   <img src="/images/tutorial-parallel-review.svg" alt="Parallel Review workflow: Start → Fan Out → Security Audit, Architecture Review, Code Quality → Merge → Final Report → Exit" />
 </Frame>
 
-```dot title="parallel.dot"
+```dot title="parallel.fabro"
 digraph Parallel {
     graph [goal="Perform a multi-perspective code review"]
     rankdir=LR
@@ -40,7 +40,7 @@ digraph Parallel {
 ```
 
 ```bash
-fabro run files-internal/demo/06-parallel.dot
+fabro run files-internal/demo/06-parallel.fabro
 ```
 
 ## Fan-out with the fork node

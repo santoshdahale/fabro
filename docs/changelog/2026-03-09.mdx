@@ -35,7 +35,7 @@ image = "my-custom-image:latest"
 ```
 
 ```bash
-fabro run --ssh my-workflow.dot
+fabro run --ssh my-workflow.fabro
 ```
 
 ## `fabro cp` — copy files to and from sandboxes
@@ -68,7 +68,7 @@ fabro system df
 <Accordion title="CLI">
 - PRs are now created as drafts by default; opt out with `draft = false` in `[pull_request]` config
 - Added `[sandbox.local] worktree_mode` config (`always`/`clean`/`dirty`/`never`) for controlling when git worktrees are created
-- Added `[pull_request]` config section in `cli.toml` so auto-PR works with `.dot` files
+- Added `[pull_request]` config section in `cli.toml` so auto-PR works with `.fabro` files
 - Added version info (semver, git SHA, build date) to `fabro --version`
 - Run summary now shows Run ID, logs path, base commit, branch, and PR URL
 - Workflow run output now shows local time instead of UTC

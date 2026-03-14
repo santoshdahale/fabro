@@ -6,7 +6,7 @@ The TOML file configures how a workflow is executed. It is separate from the DOT
 
 ```toml
 version = 1
-graph = "workflow.dot"
+graph = "workflow.fabro"
 goal = "Implement the login feature"
 ```
 

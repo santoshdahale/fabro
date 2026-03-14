@@ -38,7 +38,7 @@
 <polyline fill="none" stroke="#357f9e" points="71.5,-380 71.5,-374"/>
 <polyline fill="none" stroke="#357f9e" points="77.5,-374 71.5,-374"/>
 <text xml:space="preserve" text-anchor="middle" x="47" y="-363.55" font-family="Helvetica,sans-Serif" font-size="11.00" fill="#1a1a1a">Workflow</text>
-<text xml:space="preserve" text-anchor="middle" x="47" y="-351.55" font-family="Helvetica,sans-Serif" font-size="11.00" fill="#1a1a1a">(.dot)</text>
+<text xml:space="preserve" text-anchor="middle" x="47" y="-351.55" font-family="Helvetica,sans-Serif" font-size="11.00" fill="#1a1a1a">(.fabro)</text>
 </g>
 <!-- parse -->
 <g id="node4" class="node">

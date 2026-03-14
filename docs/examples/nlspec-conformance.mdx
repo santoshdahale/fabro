@@ -17,7 +17,7 @@ The NLSpec Conformance pattern gives an agent a detailed specification document,
   <img src="/images/nlspec-conformance.svg" alt="NLSpec Conformance workflow: Start → Plan → Implement → Quick Tests → Quick passing? → Full Tests → All passing? → Exit, with Fix Failures loop" />
 </Frame>
 
-```dot title="n-l-spec-conformance.dot"
+```dot title="n-l-spec-conformance.fabro"
 digraph NLSpecConformance {
     graph [
         goal="Implement a conformant system from a natural language specification",
@@ -67,7 +67,7 @@ digraph NLSpecConformance {
 ```
 
 ```bash
-fabro run workflows/nlspec-conformance.dot
+fabro run workflows/nlspec-conformance.fabro
 ```
 
 ## How it works

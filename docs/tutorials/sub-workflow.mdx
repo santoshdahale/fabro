@@ -17,7 +17,7 @@ First, create a standalone implement-and-test workflow. This is a normal workflo
   <img src="/images/tutorial-sub-workflow-child.svg" alt="Child workflow: Start → Implement → Validate → Tests passing? → Pass to Exit or Fix back to Implement" />
 </Frame>
 
-```dot title="implement-and-test.dot"
+```dot title="implement-and-test.fabro"
 digraph ImplementAndTest {
     graph [goal="Implement the plan and make tests pass"]
     rankdir=LR
@@ -45,7 +45,7 @@ Now create a parent workflow that delegates to the child:
   <img src="/images/tutorial-sub-workflow.svg" alt="Sub-Workflow: Start → Plan (agent) → Implement & Test (house) → Review (agent) → Exit" />
 </Frame>
 
-```dot title="sub-workflow.dot"
+```dot title="sub-workflow.fabro"
 digraph SubWorkflow {
     graph [goal="Create a Python module (tempconv.py) that converts between Celsius, Fahrenheit, and Kelvin, with pytest tests"]
     rankdir=LR
@@ -54,7 +54,7 @@ digraph SubWorkflow {
     exit  [shape=Msquare, label="Exit"]
 
     plan   [label="Plan", prompt="Analyze the goal. List the functions needed, their signatures, and edge cases. Write the plan to plan.md."]
-    impl   [label="Implement & Test", shape=house, stack.child_dotfile="implement-and-test.dot", manager.max_cycles=50]
+    impl   [label="Implement & Test", shape=house, stack.child_workflow="implement-and-test.fabro", manager.max_cycles=50]
     review [label="Review", prompt="Read every file the child workflow created. Run the tests yourself with 'python3 -m pytest -v'. Verify the implementation matches plan.md and all tests pass. Write a short verdict to review.md."]
 
     start -> plan -> impl -> review -> exit
@@ -62,15 +62,15 @@ digraph SubWorkflow {
 ```
 
 ```bash
-fabro run files-internal/demo/12-sub-workflow.dot
+fabro run files-internal/demo/12-sub-workflow.fabro
 ```
 
 ## The house node
 
-The `impl` node has `shape=house`, which makes it a **sub-workflow node**. Instead of running an LLM or a script, it launches an entirely separate workflow engine to execute the child DOT file:
+The `impl` node has `shape=house`, which makes it a **sub-workflow node**. Instead of running an LLM or a script, it launches an entirely separate workflow engine to execute the child workflow file:
 
 ```dot
-impl [label="Implement & Test", shape=house, stack.child_dotfile="implement-and-test.dot", manager.max_cycles=50]
+impl [label="Implement & Test", shape=house, stack.child_workflow="implement-and-test.fabro", manager.max_cycles=50]
 ```
 
 The child workflow runs through its own start → implement → validate → gate → exit sequence. When it finishes, execution returns to the parent and continues to the `review` node.
@@ -79,13 +79,14 @@ The child workflow runs through its own start → implement → validate → gat
 
 | Attribute | Description |
 |---|---|
-| `stack.child_dotfile` | Path to the child DOT file (resolved relative to the parent) |
-| `stack.child_dot_source` | Inline child DOT source (alternative to `child_dotfile`) |
+| `stack.child_workflow` | Path to the child workflow file (resolved relative to the parent). Preferred. |
+| `stack.child_dotfile` | Backward-compatible alias for `stack.child_workflow`. |
+| `stack.child_dot_source` | Inline child DOT source (alternative to `child_workflow`) |
 | `manager.max_cycles` | Safety limit on poll cycles before the child is cancelled (default: 1000) |
 | `manager.poll_interval` | How often to check for completion or stop conditions (default: `45s`) |
 | `manager.stop_condition` | Condition expression that, when true, cancels the child early |
 
-Use `stack.child_dotfile` when you want to reuse the child workflow across multiple parents. Use `stack.child_dot_source` for one-off child workflows that are specific to the parent.
+Use `stack.child_workflow` when you want to reuse the child workflow across multiple parents. Use `stack.child_dot_source` for one-off child workflows that are specific to the parent.
 
 ## Context flow
 
@@ -102,7 +103,7 @@ For long-running child workflows, you can set a stop condition that cancels the 
 
 ```dot
 impl [shape=house,
-      stack.child_dotfile="implement-and-test.dot",
+      stack.child_workflow="implement-and-test.fabro",
       manager.stop_condition="context.deploy_ready=true",
       manager.max_cycles=100]
 ```
@@ -122,7 +123,7 @@ For simpler cases, just add more nodes to a single workflow. Sub-workflows add a
 ## What you've learned
 
 - **Sub-workflow nodes** (`shape=house`) run a child workflow inside a parent
-- **`stack.child_dotfile`** references an external DOT file for reuse
+- **`stack.child_workflow`** references an external workflow file for reuse (`stack.child_dotfile` is also supported for backward compatibility)
 - **Context flows** from parent to child and back via diff merging
 - **`manager.max_cycles`** prevents runaway child workflows
 - **`manager.stop_condition`** cancels the child when an external signal arrives

@@ -13,7 +13,7 @@ This pattern is useful when you maintain a downstream implementation (e.g., a Go
   <img src="/images/example-semantic-port.svg" alt="Semantic Port workflow: Start → Fetch → Analyze → Plan → Implement → Validate → Tests pass? → Finalize → loops back to Fetch, with Skip shortcut from Analyze back to Fetch, Fix loop from gate back to Validate, and Done exit from Fetch" />
 </Frame>
 
-```dot title="semantic-port.dot"
+```dot title="semantic-port.fabro"
 digraph SemanticPort {
     graph [
         goal="Port semantic changes from upstream Python repository to our Go implementation",
@@ -216,7 +216,7 @@ Pair the workflow with a run config TOML for repeatable execution:
 ```toml title="run.toml"
 version = 1
 goal = "Port semantic changes from upstream openai-agents-python to our Go SDK"
-graph = "semport.dot"
+graph = "semport.fabro"
 
 [llm]
 model = "claude-sonnet-4-5"

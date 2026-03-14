@@ -25,7 +25,7 @@ description: "Run Fabro workflows in sandboxed Daytona cloud environments"
 Set the sandbox provider in your run config TOML or via CLI flag:
 
 ```bash
-fabro run workflow.dot --sandbox daytona
+fabro run workflow.fabro --sandbox daytona
 ```
 
 ```toml title="run.toml"
@@ -114,7 +114,7 @@ for your organization.
 Connect to a running Daytona sandbox via SSH for live debugging:
 
 ```bash
-fabro run workflow.dot --sandbox daytona --ssh
+fabro run workflow.fabro --sandbox daytona --ssh
 ```
 
 This creates temporary SSH credentials (valid for 60 minutes) and prints the connection command:
@@ -136,7 +136,7 @@ Each sandbox gets a unique timestamped name (e.g. `fabro-20260307-143022-a3f2`) 
 To keep a sandbox alive for debugging:
 
 ```bash
-fabro run workflow.dot --sandbox daytona --preserve-sandbox
+fabro run workflow.fabro --sandbox daytona --preserve-sandbox
 ```
 
 Or in the run config:
