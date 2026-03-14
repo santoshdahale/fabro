@@ -99,9 +99,9 @@ enum Command {
         #[arg(long)]
         dry_run: bool,
     },
-    /// Initialize a new arc project
+    /// Initialize a new project
     Init,
-    /// Set up the Arc environment (LLMs, certs, GitHub)
+    /// Set up the Fabro environment (LLMs, certs, GitHub)
     Install,
     /// List workflow runs
     #[command(hide = true)]
@@ -457,7 +457,7 @@ async fn main_inner() -> (String, Result<()>) {
                                 vec![],
                             );
                             client.register_provider(adapter).await.map_err(|e| {
-                                anyhow::anyhow!("Failed to register arc server adapter: {e}")
+                                anyhow::anyhow!("Failed to register fabro server adapter: {e}")
                             })?;
                             fabro_agent::cli::run_with_args_and_client(
                                 args,

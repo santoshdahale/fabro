@@ -160,7 +160,7 @@ pub async fn serve_command(args: ServeArgs, styles: &'static Styles) -> anyhow::
     eprintln!(
         "{}",
         styles.bold.apply_to(format!(
-            "Arc server listening on {}",
+            "Fabro server listening on {}",
             styles.cyan.apply_to(&addr)
         )),
     );

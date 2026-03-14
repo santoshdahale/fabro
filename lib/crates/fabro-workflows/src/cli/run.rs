@@ -736,7 +736,7 @@ pub async fn run_command(
         None
     };
 
-    // Wrap emitter in Arc now so we can share it with exec env callbacks
+    // Wrap emitter in Fabro now so we can share it with exec env callbacks
     let emitter = Arc::new(emitter);
 
     let sandbox: Arc<dyn Sandbox> = match sandbox_provider {
@@ -830,7 +830,7 @@ pub async fn run_command(
         .expect("progress lock poisoned")
         .set_working_directory(sandbox.working_directory().to_string());
 
-    // Persist sandbox connection info for `arc cp`
+    // Persist sandbox connection info for `fabro cp`
     {
         let sandbox_info_opt = {
             let info = sandbox.sandbox_info();
@@ -1192,7 +1192,7 @@ pub async fn run_command(
     };
     let run_duration_ms = run_start.elapsed().as_millis() as u64;
 
-    // Restore cwd (worktree is kept for `arc cp` access; pruned separately)
+    // Restore cwd (worktree is kept for `fabro cp` access; pruned separately)
     let _ = std::env::set_current_dir(&original_cwd);
 
     {
@@ -1790,7 +1790,7 @@ async fn run_from_branch(
         .await;
     let run_duration_ms = run_start.elapsed().as_millis() as u64;
 
-    // Restore cwd (worktree is kept for `arc cp` access; pruned separately)
+    // Restore cwd (worktree is kept for `fabro cp` access; pruned separately)
     let _ = std::env::set_current_dir(&original_cwd);
     let _ = sandbox.cleanup().await;
 

@@ -153,7 +153,7 @@ impl ExeSandbox {
     }
 
     /// Create an `ExeSandbox` from a pre-connected data-plane SSH runner.
-    /// Used for reconnection (e.g. `arc cp`) when the VM already exists.
+    /// Used for reconnection (e.g. `fabro cp`) when the VM already exists.
     pub fn from_existing(data_ssh: Box<dyn SshRunner>) -> Self {
         let data_cell = tokio::sync::OnceCell::new();
         let _ = data_cell.set(data_ssh);

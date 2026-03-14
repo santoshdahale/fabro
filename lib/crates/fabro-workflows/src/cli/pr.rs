@@ -53,7 +53,7 @@ fn load_pr_record(base: &Path, run_id: &str) -> Result<(PullRequestRecord, PathB
     let content = std::fs::read_to_string(&pr_path).with_context(|| {
         format!(
             "No pull_request.json found in run directory. \
-             Create one first with: arc pr create {run_id}"
+             Create one first with: fabro pr create {run_id}"
         )
     })?;
     let record: PullRequestRecord =
@@ -495,7 +495,7 @@ mod tests {
         let err = load_pr_record(tmp.path(), "abc123").unwrap_err();
         let msg = err.to_string();
         assert!(msg.contains("pull_request.json"), "got: {msg}");
-        assert!(msg.contains("arc pr create"), "got: {msg}");
+        assert!(msg.contains("fabro pr create"), "got: {msg}");
     }
 
     #[test]

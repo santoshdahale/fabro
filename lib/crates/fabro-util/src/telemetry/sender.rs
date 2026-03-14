@@ -7,7 +7,7 @@ const SEGMENT_API_URL: &str = "https://api.segment.io/v1/track";
 const SEGMENT_WRITE_KEY: Option<&str> = option_env!("SEGMENT_WRITE_KEY");
 
 /// Serializes the track event to a temp file and spawns a detached subprocess
-/// (`arc __send_analytics <path>`) to deliver it. This ensures the event is
+/// (`fabro __send_analytics <path>`) to deliver it. This ensures the event is
 /// sent even if the parent CLI process exits immediately.
 ///
 /// No-ops if the SEGMENT_WRITE_KEY was not set at compile time.

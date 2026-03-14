@@ -578,7 +578,7 @@ provider = "daytona"
 auto_stop_interval = 60
 
 [sandbox.daytona.labels]
-project = "arc"
+project = "fabro"
 
 [sandbox.daytona.snapshot]
 name = "my-snapshot"
@@ -594,7 +594,7 @@ dockerfile = "FROM rust:1.85-slim-bookworm\nRUN apt-get update"
         let daytona = sandbox.daytona.unwrap();
         assert_eq!(daytona.auto_stop_interval, Some(60));
         let labels = daytona.labels.unwrap();
-        assert_eq!(labels["project"], "arc");
+        assert_eq!(labels["project"], "fabro");
 
         let snapshot = daytona.snapshot.unwrap();
         assert_eq!(snapshot.name, "my-snapshot");
@@ -1234,7 +1234,7 @@ goal = "test"
 graph = "w.dot"
 
 [sandbox.daytona.labels]
-project = "arc"
+project = "fabro"
 env = "from_task"
 "#,
         )
@@ -1261,7 +1261,7 @@ env = "from_task"
         };
         cfg.apply_defaults(&defaults);
         let labels = cfg.sandbox.unwrap().daytona.unwrap().labels.unwrap();
-        assert_eq!(labels["project"], "arc");
+        assert_eq!(labels["project"], "fabro");
         assert_eq!(labels["team"], "platform");
         assert_eq!(labels["env"], "from_task");
     }

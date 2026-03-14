@@ -116,7 +116,7 @@ fn generate_mtls_certs(dir: &Path) -> Result<()> {
             "-days",
             "3650",
             "-subj",
-            "/CN=Arc CA",
+            "/CN=Fabro CA",
         ],
         "generate CA cert",
     )?;
@@ -426,7 +426,7 @@ async fn setup_github_app(arc_dir: &Path, s: &Styles) -> Result<Vec<(String, Str
 <html>
 <head>
 <meta charset="utf-8">
-<title>Arc Setup</title>
+<title>Fabro Setup</title>
 <style>
   body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif; display: flex; justify-content: center; align-items: center; min-height: 100vh; margin: 0; background: #f6f8fa; color: #1f2328; }
   .card { text-align: center; background: #fff; border: 1px solid #d1d9e0; border-radius: 12px; padding: 48px; max-width: 420px; }
@@ -883,7 +883,7 @@ pub async fn run_install() -> Result<()> {
 
         eprintln!("  To start Arc, run these commands:");
         eprintln!();
-        eprintln!("    arc serve");
+        eprintln!("    fabro serve");
         eprintln!("    cd apps/fabro-web && npx react-router dev");
         eprintln!();
     }
@@ -891,7 +891,8 @@ pub async fn run_install() -> Result<()> {
     // Verify setup
     let env_path = arc_dir.join(".env");
     let run_doctor =
-        tokio::task::spawn_blocking(|| prompt_confirm("Run arc doctor to verify?", true)).await??;
+        tokio::task::spawn_blocking(|| prompt_confirm("Run fabro doctor to verify?", true))
+            .await??;
 
     if run_doctor {
         // Reload .env so doctor sees the values we just wrote
@@ -903,7 +904,7 @@ pub async fn run_install() -> Result<()> {
     eprintln!();
     eprintln!(
         "  Setup complete! Go to your project and run {} to get started.",
-        s.bold_cyan.apply_to("arc init")
+        s.bold_cyan.apply_to("fabro init")
     );
     Ok(())
 }

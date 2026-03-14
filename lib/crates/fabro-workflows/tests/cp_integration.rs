@@ -1,4 +1,4 @@
-//! E2E tests for `arc cp` against local and Docker sandbox backends.
+//! E2E tests for `fabro cp` against local and Docker sandbox backends.
 //!
 //! Local tests run without `#[ignore]` (no external dependencies).
 //! Docker tests require a Docker daemon and are marked `#[ignore]`.

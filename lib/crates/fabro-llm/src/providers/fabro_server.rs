@@ -4,7 +4,7 @@ use crate::providers::common::LineReader;
 use crate::types::{FinishReason, Message, Request, Response, StreamEvent, Usage};
 use tracing::{debug, error};
 
-/// Provider adapter that routes LLM requests through an arc server's
+/// Provider adapter that routes LLM requests through an fabro server's
 /// `/completions` endpoint, delegating to whatever real provider the server
 /// is configured with.
 pub struct Adapter {
@@ -91,12 +91,12 @@ async fn send_request(
     })?;
 
     let status = http_resp.status();
-    debug!(status = %status, "Arc server response received");
+    debug!(status = %status, "Fabro server response received");
 
     if !status.is_success() {
         let status_code = status.as_u16();
         let body = http_resp.text().await.unwrap_or_default();
-        error!(status = %status_code, body = %body, "Arc server request failed");
+        error!(status = %status_code, body = %body, "Fabro server request failed");
         return Err(error_from_status_code(
             status_code,
             body,
@@ -122,7 +122,7 @@ impl ProviderAdapter for Adapter {
 
     async fn complete(&self, request: &Request) -> Result<Response, SdkError> {
         let url = format!("{}/completions", self.base_url);
-        debug!(base_url = %url, provider = %self.provider_name, "Sending completion to arc server");
+        debug!(base_url = %url, provider = %self.provider_name, "Sending completion to fabro server");
 
         let body = build_body(request, false)?;
         let http_resp = send_request(&self.client, &url, &body, &self.provider_name).await?;
@@ -159,7 +159,7 @@ impl ProviderAdapter for Adapter {
 
     async fn stream(&self, request: &Request) -> Result<StreamEventStream, SdkError> {
         let url = format!("{}/completions", self.base_url);
-        debug!(base_url = %url, provider = %self.provider_name, "Sending completion to arc server");
+        debug!(base_url = %url, provider = %self.provider_name, "Sending completion to fabro server");
 
         let body = build_body(request, true)?;
         let http_resp = send_request(&self.client, &url, &body, &self.provider_name).await?;

@@ -63,13 +63,13 @@ root = \"fabro/\"
     std::fs::write(
         &dot_path,
         r#"digraph Hello {
-    graph [goal="Say hello and demonstrate a basic arc workflow"]
+    graph [goal="Say hello and demonstrate a basic Fabro workflow"]
     rankdir=LR
 
     start [shape=Mdiamond, label="Start"]
     exit  [shape=Msquare, label="Exit"]
 
-    greet [label="Greet", prompt="Say hello! Introduce yourself and explain that this is a test of the arc workflow engine."]
+    greet [label="Greet", prompt="Say hello! Introduce yourself and explain that this is a test of the Fabro workflow engine."]
 
     start -> greet -> exit
 }
@@ -101,7 +101,7 @@ root = \"fabro/\"
         console::Style::new()
             .cyan()
             .bold()
-            .apply_to("arc run hello")
+            .apply_to("fabro run hello")
     );
 
     check_github_app_installation().await;
@@ -126,7 +126,7 @@ async fn check_github_app_installation() {
             eprintln!(
                 "  {}",
                 dim.apply_to(
-                    "Run `git remote add origin <url>` then `arc install` to set up the GitHub App"
+                    "Run `git remote add origin <url>` then `fabro install` to set up the GitHub App"
                 )
             );
             return;
@@ -156,7 +156,10 @@ async fn check_github_app_installation() {
         None => {
             eprintln!(
                 "\n  Run {} to set up the GitHub App",
-                console::Style::new().cyan().bold().apply_to("arc install")
+                console::Style::new()
+                    .cyan()
+                    .bold()
+                    .apply_to("fabro install")
             );
             return;
         }

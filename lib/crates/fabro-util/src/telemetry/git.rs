@@ -84,7 +84,7 @@ mod tests {
 
     #[test]
     fn repository_identifier_returns_hash_in_arc_repo() {
-        // We're running inside the arc repo, so this should return a real hash
+        // We're running inside the fabro repo, so this should return a real hash
         let id = repository_identifier();
         assert_ne!(id, "no_repo");
         assert_ne!(id, "no_remote");

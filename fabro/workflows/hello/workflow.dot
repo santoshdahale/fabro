@@ -1,11 +1,11 @@
 digraph Hello {
-    graph [goal="Say hello and demonstrate a basic arc workflow"]
+    graph [goal="Say hello and demonstrate a basic Fabro workflow"]
     rankdir=LR
 
     start [shape=Mdiamond, label="Start"]
     exit  [shape=Msquare, label="Exit"]
 
-    greet [label="Greet", prompt="Say hello! Introduce yourself and explain that this is a test of the arc workflow engine."]
+    greet [label="Greet", prompt="Say hello! Introduce yourself and explain that this is a test of the fabro workflow engine."]
 
     start -> greet -> exit
 }

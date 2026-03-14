@@ -935,12 +935,12 @@ impl LintRule for StylesheetModelKnownRule {
                                 rule: self.name().to_string(),
                                 severity: Severity::Warning,
                                 message: format!(
-                                    "Unknown model '{}' in stylesheet rule '{label}'. Run `arc model list` to see available models",
+                                    "Unknown model '{}' in stylesheet rule '{label}'. Run `fabro model list` to see available models",
                                     decl.value
                                 ),
                                 node_id: None,
                                 edge: None,
-                                fix: Some("Use a model ID from `arc model list`".to_string()),
+                                fix: Some("Use a model ID from `fabro model list`".to_string()),
                             });
                         }
                     }

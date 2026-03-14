@@ -117,13 +117,13 @@ fn format_retro_section(retro: &Retro) -> String {
     parts.join("\n")
 }
 
-/// Format the Arc Details section of the PR body.
+/// Format the Fabro Details section of the PR body.
 ///
 /// Renders a cost/duration table in a collapsible `<details>` block, and
 /// optionally a DOT graph in another `<details>` block.
 fn format_arc_details_section(conclusion: &Conclusion, dot_source: Option<&str>) -> String {
     let mut parts = Vec::new();
-    parts.push("### Arc Details".to_string());
+    parts.push("### Fabro Details".to_string());
     parts.push(String::new());
 
     // Cost table
@@ -263,7 +263,7 @@ fn assemble_pr_body(
 }
 
 /// Build a complete PR body by combining LLM-generated narrative with
-/// programmatic sections (plan, retro, arc details).
+/// programmatic sections (plan, retro, fabro details).
 pub async fn build_pr_body(
     diff: &str,
     goal: &str,
@@ -569,7 +569,7 @@ mod tests {
         let conclusion = make_test_conclusion();
         let section = format_arc_details_section(&conclusion, None);
 
-        assert!(section.contains("### Arc Details"));
+        assert!(section.contains("### Fabro Details"));
         assert!(section.contains("Ran 3 stages in 2m 30s for $0.42"));
         assert!(section.contains("| plan | 45s | $0.12 | 0 |"));
         assert!(section.contains("| implement | 1m 30s | $0.25 | 0 |"));
@@ -652,7 +652,7 @@ mod tests {
             "This is the narrative.\n\n### Plan Summary\n\n* Step 1\n* Step 2",
             Some("Full plan text here"),
             "### Retro\n\n* 3 stages completed",
-            "### Arc Details\n\n<details>...</details>",
+            "### Fabro Details\n\n<details>...</details>",
         );
 
         assert!(body.contains("This is the narrative."));
@@ -660,7 +660,7 @@ mod tests {
         assert!(body.contains("<details>\n<summary>Full plan</summary>"));
         assert!(body.contains("````md\nFull plan text here\n````"));
         assert!(body.contains("### Retro"));
-        assert!(body.contains("### Arc Details"));
+        assert!(body.contains("### Fabro Details"));
     }
 
     #[test]
@@ -669,13 +669,13 @@ mod tests {
             "Narrative only.",
             None,
             "### Retro\n\n* stats",
-            "### Arc Details\n\n<details>...</details>",
+            "### Fabro Details\n\n<details>...</details>",
         );
 
         assert!(body.contains("Narrative only."));
         assert!(!body.contains("Full plan"));
         assert!(body.contains("### Retro"));
-        assert!(body.contains("### Arc Details"));
+        assert!(body.contains("### Fabro Details"));
     }
 
     #[test]
@@ -686,7 +686,7 @@ mod tests {
         assert!(body.contains("Full plan"));
         // Empty sections should not produce extra headers
         assert!(!body.contains("### Retro"));
-        assert!(!body.contains("### Arc Details"));
+        assert!(!body.contains("### Fabro Details"));
     }
 
     #[test]
@@ -705,7 +705,7 @@ mod tests {
         let arc_details = format_arc_details_section(&conclusion, None);
         let body = assemble_pr_body("Narrative.", None, "", &arc_details);
 
-        assert!(body.contains("### Arc Details"));
+        assert!(body.contains("### Fabro Details"));
         assert!(body.contains("Ran 3 stages"));
         assert!(!body.contains("### Retro"));
     }
@@ -719,7 +719,7 @@ mod tests {
         let body = assemble_pr_body("Narrative.", None, &retro_section, &arc_details);
 
         assert!(body.contains("### Retro"));
-        assert!(body.contains("### Arc Details"));
+        assert!(body.contains("### Fabro Details"));
     }
 
     // ── parse_dot_summary tests ─────────────────────────────────────────

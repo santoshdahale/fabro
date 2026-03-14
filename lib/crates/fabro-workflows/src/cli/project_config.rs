@@ -201,7 +201,7 @@ pub fn is_retro_enabled() -> bool {
     }
 }
 
-/// Resolve the arc root directory from a config file path and its config.
+/// Resolve the fabro root directory from a config file path and its config.
 /// The returned path is the directory containing `fabro.toml` joined with the `root` value.
 pub fn resolve_fabro_root(config_path: &Path, config: &ProjectConfig) -> PathBuf {
     let project_dir = config_path

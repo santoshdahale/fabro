@@ -106,7 +106,7 @@ impl SshSandbox {
     }
 
     /// Create an `SshSandbox` from a pre-connected SSH runner.
-    /// Used for reconnection (e.g. `arc cp`) when the host is already known.
+    /// Used for reconnection (e.g. `fabro cp`) when the host is already known.
     pub fn from_existing(ssh: Box<dyn SshRunner>, config: SshConfig) -> Self {
         let ssh_cell = tokio::sync::OnceCell::new();
         let _ = ssh_cell.set(ssh);

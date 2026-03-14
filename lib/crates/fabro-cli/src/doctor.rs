@@ -565,7 +565,7 @@ pub fn check_api(status: &ApiStatus, live_result: Option<&Result<(), String>>) -
     );
 
     CheckResult {
-        name: "Arc API".to_string(),
+        name: "Fabro API".to_string(),
         status: check_status,
         summary: status.base_url.clone(),
         details,
@@ -609,7 +609,7 @@ pub fn check_web(status: &WebStatus, live_result: Option<&Result<(), String>>) -
     );
 
     CheckResult {
-        name: "Arc Web".to_string(),
+        name: "Fabro Web".to_string(),
         status: check_status,
         summary: status.url.clone(),
         details,

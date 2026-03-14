@@ -1419,7 +1419,7 @@ async fn daytona_clone_private_repo_with_github_app_iat() {
         );
     }
 
-    // Verify this is actually the arc repo
+    // Verify this is actually the fabro repo
     let result = env
         .exec_command("git remote get-url origin", 10_000, None, None, None)
         .await
@@ -1441,7 +1441,7 @@ async fn daytona_clone_public_repo_gets_credentials() {
     let creds = load_github_app_credentials();
 
     // Directly test resolve_clone_credentials against a repo in an org where the app is installed
-    let (username, password) = fabro_github::resolve_clone_credentials(&creds, "brynary", "arc")
+    let (username, password) = fabro_github::resolve_clone_credentials(&creds, "fabro-sh", "fabro")
         .await
         .unwrap();
 
@@ -1749,7 +1749,7 @@ async fn daytona_toolbox_idle_diagnostic() {
     env.cleanup().await.unwrap();
 }
 
-/// E2E test for `arc cp` against a live Daytona sandbox.
+/// E2E test for `fabro cp` against a live Daytona sandbox.
 ///
 /// Creates a sandbox, saves a SandboxRecord, reconnects via `cp::reconnect`,
 /// uploads a file, downloads it back, and verifies the round-trip.
@@ -1769,7 +1769,7 @@ async fn daytona_cp_upload_download_round_trip() {
         "sandbox_info() should return the Daytona sandbox name"
     );
 
-    // 2. Build a SandboxRecord (same as `arc run` would persist)
+    // 2. Build a SandboxRecord (same as `fabro run` would persist)
     let record = SandboxRecord {
         provider: "daytona".to_string(),
         working_directory: env.working_directory().to_string(),
@@ -1791,7 +1791,7 @@ async fn daytona_cp_upload_download_round_trip() {
     let reconnected = reconnect(&loaded).await.expect("reconnect should succeed");
 
     // 5. Upload: write a local file, then upload it to the sandbox
-    let upload_content = b"hello from arc cp e2e test\n";
+    let upload_content = b"hello from fabro cp e2e test\n";
     let local_upload = tmp.path().join("upload.txt");
     std::fs::write(&local_upload, upload_content).unwrap();
 
@@ -1810,7 +1810,7 @@ async fn daytona_cp_upload_download_round_trip() {
         .await
         .unwrap();
     assert!(
-        remote_content.contains("hello from arc cp e2e test"),
+        remote_content.contains("hello from fabro cp e2e test"),
         "expected uploaded content in sandbox, got: {remote_content}"
     );
 
