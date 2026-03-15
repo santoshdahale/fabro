@@ -73,7 +73,7 @@ pub(crate) fn format_duration_short(d: Duration) -> String {
     }
 }
 
-fn format_duration_ms(ms: u64) -> String {
+pub(crate) fn format_duration_ms(ms: u64) -> String {
     format_duration_short(Duration::from_millis(ms))
 }
 
