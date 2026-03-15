@@ -1136,7 +1136,6 @@ pub async fn run_command(
     if dry_run_mode {
         engine.set_dry_run(true);
     }
-
     // Wire up hook runner from run config or run defaults
     {
         let hooks = run_cfg

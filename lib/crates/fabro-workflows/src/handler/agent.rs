@@ -346,22 +346,10 @@ mod tests {
     use super::*;
     use crate::event::EventEmitter;
     use crate::graph::AttrValue;
-    use crate::handler::start::StartHandler;
-    use crate::handler::HandlerRegistry;
     use tempfile::TempDir;
 
     fn make_services() -> EngineServices {
-        EngineServices {
-            registry: std::sync::Arc::new(HandlerRegistry::new(Box::new(StartHandler))),
-            emitter: std::sync::Arc::new(EventEmitter::new()),
-            sandbox: std::sync::Arc::new(fabro_agent::LocalSandbox::new(
-                std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from(".")),
-            )),
-            git_state: std::sync::RwLock::new(None),
-            hook_runner: None,
-            env: HashMap::new(),
-            dry_run: false,
-        }
+        EngineServices::test_default()
     }
 
     #[tokio::test]
@@ -489,17 +477,10 @@ mod tests {
         let graph = Graph::new("test");
         let tmp = TempDir::new().unwrap();
 
-        let services = EngineServices {
-            registry: std::sync::Arc::new(HandlerRegistry::new(Box::new(StartHandler))),
-            emitter: std::sync::Arc::new(EventEmitter::new()),
-            sandbox: std::sync::Arc::new(fabro_agent::LocalSandbox::new(
-                sandbox_dir.path().to_path_buf(),
-            )),
-            git_state: std::sync::RwLock::new(None),
-            hook_runner: None,
-            env: HashMap::new(),
-            dry_run: false,
-        };
+        let mut services = EngineServices::test_default();
+        services.sandbox = std::sync::Arc::new(fabro_agent::LocalSandbox::new(
+            sandbox_dir.path().to_path_buf(),
+        ));
 
         let outcome = handler
             .execute(&node, &context, &graph, tmp.path(), &services)
@@ -554,17 +535,10 @@ mod tests {
         let graph = Graph::new("test");
         let tmp = TempDir::new().unwrap();
 
-        let services = EngineServices {
-            registry: std::sync::Arc::new(HandlerRegistry::new(Box::new(StartHandler))),
-            emitter: std::sync::Arc::new(EventEmitter::new()),
-            sandbox: std::sync::Arc::new(fabro_agent::LocalSandbox::new(
-                sandbox_dir.path().to_path_buf(),
-            )),
-            git_state: std::sync::RwLock::new(None),
-            hook_runner: None,
-            env: HashMap::new(),
-            dry_run: false,
-        };
+        let mut services = EngineServices::test_default();
+        services.sandbox = std::sync::Arc::new(fabro_agent::LocalSandbox::new(
+            sandbox_dir.path().to_path_buf(),
+        ));
 
         let outcome = handler
             .execute(&node, &context, &graph, tmp.path(), &services)
@@ -620,17 +594,10 @@ mod tests {
         let graph = Graph::new("test");
         let tmp = TempDir::new().unwrap();
 
-        let services = EngineServices {
-            registry: std::sync::Arc::new(HandlerRegistry::new(Box::new(StartHandler))),
-            emitter: std::sync::Arc::new(EventEmitter::new()),
-            sandbox: std::sync::Arc::new(fabro_agent::LocalSandbox::new(
-                sandbox_dir.path().to_path_buf(),
-            )),
-            git_state: std::sync::RwLock::new(None),
-            hook_runner: None,
-            env: HashMap::new(),
-            dry_run: false,
-        };
+        let mut services = EngineServices::test_default();
+        services.sandbox = std::sync::Arc::new(fabro_agent::LocalSandbox::new(
+            sandbox_dir.path().to_path_buf(),
+        ));
 
         let outcome = handler
             .execute(&node, &context, &graph, tmp.path(), &services)

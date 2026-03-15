@@ -52,6 +52,22 @@ impl EngineServices {
     pub fn set_git_state(&self, state: Option<Arc<GitState>>) {
         *self.git_state.write().unwrap() = state;
     }
+
+    /// Test-only default: empty registry, no hooks, local sandbox at cwd.
+    #[cfg(test)]
+    pub fn test_default() -> Self {
+        Self {
+            registry: Arc::new(HandlerRegistry::new(Box::new(start::StartHandler))),
+            emitter: Arc::new(EventEmitter::new()),
+            sandbox: Arc::new(fabro_agent::LocalSandbox::new(
+                std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from(".")),
+            )),
+            git_state: std::sync::RwLock::new(None),
+            hook_runner: None,
+            env: HashMap::new(),
+            dry_run: false,
+        }
+    }
 }
 
 /// The handler interface for node execution.

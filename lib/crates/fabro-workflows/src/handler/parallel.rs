@@ -728,24 +728,10 @@ fn find_join_node(results: &[BranchResult], graph: &Graph) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::event::EventEmitter;
     use crate::graph::{AttrValue, Edge};
-    use crate::handler::start::StartHandler;
-    use crate::handler::HandlerRegistry;
 
     fn make_services() -> EngineServices {
-        let registry = HandlerRegistry::new(Box::new(StartHandler));
-        EngineServices {
-            registry: Arc::new(registry),
-            emitter: Arc::new(EventEmitter::new()),
-            sandbox: Arc::new(fabro_agent::LocalSandbox::new(
-                std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from(".")),
-            )),
-            git_state: std::sync::RwLock::new(None),
-            hook_runner: None,
-            env: std::collections::HashMap::new(),
-            dry_run: false,
-        }
+        EngineServices::test_default()
     }
 
     #[tokio::test]

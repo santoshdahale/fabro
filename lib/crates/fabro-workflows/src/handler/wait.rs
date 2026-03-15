@@ -42,23 +42,8 @@ mod tests {
     use std::time::Duration;
 
     use super::*;
-    use crate::event::EventEmitter;
-    use crate::handler::HandlerRegistry;
-
     fn make_services() -> EngineServices {
-        EngineServices {
-            registry: std::sync::Arc::new(HandlerRegistry::new(Box::new(
-                crate::handler::start::StartHandler,
-            ))),
-            emitter: std::sync::Arc::new(EventEmitter::new()),
-            sandbox: std::sync::Arc::new(fabro_agent::LocalSandbox::new(
-                std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from(".")),
-            )),
-            git_state: std::sync::RwLock::new(None),
-            hook_runner: None,
-            env: std::collections::HashMap::new(),
-            dry_run: false,
-        }
+        EngineServices::test_default()
     }
 
     #[tokio::test]

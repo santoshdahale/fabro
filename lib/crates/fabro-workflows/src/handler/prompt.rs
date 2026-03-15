@@ -147,25 +147,12 @@ impl Handler for PromptHandler {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::event::EventEmitter;
     use crate::graph::AttrValue;
-    use crate::handler::start::StartHandler;
-    use crate::handler::HandlerRegistry;
     use std::sync::Arc;
     use tempfile::TempDir;
 
     fn make_services() -> EngineServices {
-        EngineServices {
-            registry: Arc::new(HandlerRegistry::new(Box::new(StartHandler))),
-            emitter: Arc::new(EventEmitter::new()),
-            sandbox: Arc::new(fabro_agent::LocalSandbox::new(
-                std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from(".")),
-            )),
-            git_state: std::sync::RwLock::new(None),
-            hook_runner: None,
-            env: std::collections::HashMap::new(),
-            dry_run: false,
-        }
+        EngineServices::test_default()
     }
 
     #[tokio::test]

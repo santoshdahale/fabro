@@ -581,6 +581,9 @@ async fn execute_run(state: Arc<AppState>, run_id: String) {
         Arc::clone(&interviewer) as Arc<dyn Interviewer>,
         sandbox,
     );
+    if state.dry_run {
+        engine.set_dry_run(true);
+    }
 
     // Wire up hook runner from server config
     if !state.hooks.is_empty() {

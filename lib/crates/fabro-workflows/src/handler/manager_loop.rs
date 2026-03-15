@@ -255,27 +255,18 @@ impl Handler for SubWorkflowHandler {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::event::EventEmitter;
     use crate::graph::AttrValue;
     use crate::handler::exit::ExitHandler;
     use crate::handler::start::StartHandler;
     use crate::handler::HandlerRegistry;
 
     fn make_services() -> EngineServices {
+        let mut services = EngineServices::test_default();
         let mut registry = HandlerRegistry::new(Box::new(StartHandler));
         registry.register("start", Box::new(StartHandler));
         registry.register("exit", Box::new(ExitHandler));
-        EngineServices {
-            registry: std::sync::Arc::new(registry),
-            emitter: std::sync::Arc::new(EventEmitter::new()),
-            sandbox: std::sync::Arc::new(fabro_agent::LocalSandbox::new(
-                std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from(".")),
-            )),
-            git_state: std::sync::RwLock::new(None),
-            hook_runner: None,
-            env: HashMap::new(),
-            dry_run: false,
-        }
+        services.registry = std::sync::Arc::new(registry);
+        services
     }
 
     fn child_dot_succeeds() -> &'static str {
@@ -399,17 +390,8 @@ mod tests {
         let mut registry = HandlerRegistry::new(Box::new(ContextEchoHandler));
         registry.register("start", Box::new(StartHandler));
         registry.register("exit", Box::new(ExitHandler));
-        let services = EngineServices {
-            registry: std::sync::Arc::new(registry),
-            emitter: std::sync::Arc::new(EventEmitter::new()),
-            sandbox: std::sync::Arc::new(fabro_agent::LocalSandbox::new(
-                std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from(".")),
-            )),
-            git_state: std::sync::RwLock::new(None),
-            hook_runner: None,
-            env: HashMap::new(),
-            dry_run: false,
-        };
+        let mut services = EngineServices::test_default();
+        services.registry = std::sync::Arc::new(registry);
 
         let handler = SubWorkflowHandler;
         let mut node = Node::new("manager");
@@ -509,17 +491,8 @@ mod tests {
         let mut registry = HandlerRegistry::new(Box::new(SlowHandler));
         registry.register("start", Box::new(StartHandler));
         registry.register("exit", Box::new(ExitHandler));
-        let services = EngineServices {
-            registry: std::sync::Arc::new(registry),
-            emitter: std::sync::Arc::new(EventEmitter::new()),
-            sandbox: std::sync::Arc::new(fabro_agent::LocalSandbox::new(
-                std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from(".")),
-            )),
-            git_state: std::sync::RwLock::new(None),
-            hook_runner: None,
-            env: HashMap::new(),
-            dry_run: false,
-        };
+        let mut services = EngineServices::test_default();
+        services.registry = std::sync::Arc::new(registry);
 
         let handler = SubWorkflowHandler;
         let mut node = Node::new("manager");
@@ -571,17 +544,8 @@ mod tests {
         let mut registry = HandlerRegistry::new(Box::new(SlowHandler));
         registry.register("start", Box::new(StartHandler));
         registry.register("exit", Box::new(ExitHandler));
-        let services = EngineServices {
-            registry: std::sync::Arc::new(registry),
-            emitter: std::sync::Arc::new(EventEmitter::new()),
-            sandbox: std::sync::Arc::new(fabro_agent::LocalSandbox::new(
-                std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from(".")),
-            )),
-            git_state: std::sync::RwLock::new(None),
-            hook_runner: None,
-            env: HashMap::new(),
-            dry_run: false,
-        };
+        let mut services = EngineServices::test_default();
+        services.registry = std::sync::Arc::new(registry);
 
         let handler = SubWorkflowHandler;
         let mut node = Node::new("manager");
@@ -739,17 +703,8 @@ mod tests {
         let mut registry = HandlerRegistry::new(Box::new(ContextEchoHandler));
         registry.register("start", Box::new(StartHandler));
         registry.register("exit", Box::new(ExitHandler));
-        let services = EngineServices {
-            registry: std::sync::Arc::new(registry),
-            emitter: std::sync::Arc::new(EventEmitter::new()),
-            sandbox: std::sync::Arc::new(fabro_agent::LocalSandbox::new(
-                std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from(".")),
-            )),
-            git_state: std::sync::RwLock::new(None),
-            hook_runner: None,
-            env: HashMap::new(),
-            dry_run: false,
-        };
+        let mut services = EngineServices::test_default();
+        services.registry = std::sync::Arc::new(registry);
 
         let handler = SubWorkflowHandler;
         let mut node = Node::new("manager");
@@ -824,17 +779,8 @@ mod tests {
         let mut registry = HandlerRegistry::new(Box::new(PreambleEchoHandler));
         registry.register("start", Box::new(StartHandler));
         registry.register("exit", Box::new(ExitHandler));
-        let services = EngineServices {
-            registry: std::sync::Arc::new(registry),
-            emitter: std::sync::Arc::new(EventEmitter::new()),
-            sandbox: std::sync::Arc::new(fabro_agent::LocalSandbox::new(
-                std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from(".")),
-            )),
-            git_state: std::sync::RwLock::new(None),
-            hook_runner: None,
-            env: HashMap::new(),
-            dry_run: false,
-        };
+        let mut services = EngineServices::test_default();
+        services.registry = std::sync::Arc::new(registry);
 
         let handler = SubWorkflowHandler;
         let mut node = Node::new("manager");
