@@ -21,8 +21,8 @@ Events fall into several categories:
 
 | Event | Key fields | Description |
 |---|---|---|
-| `WorkflowRunStarted` | `name`, `run_id`, `base_sha`, `run_branch` | Run begins |
-| `WorkflowRunCompleted` | `duration_ms`, `artifact_count`, `total_cost` | Run finishes successfully |
+| `WorkflowRunStarted` | `name`, `run_id`, `base_sha`, `run_branch`, `goal` | Run begins |
+| `WorkflowRunCompleted` | `duration_ms`, `artifact_count`, `total_cost`, `status`, `usage` | Run finishes successfully |
 | `WorkflowRunFailed` | `error`, `duration_ms` | Run terminates with an error |
 
 **Stage lifecycle** — events for each node execution:
@@ -56,7 +56,7 @@ Events fall into several categories:
 
 | Event | Key fields | Description |
 |---|---|---|
-| `EdgeSelected` | `from_node`, `to_node`, `label`, `condition` | Transition between nodes |
+| `EdgeSelected` | `from_node`, `to_node`, `label`, `condition`, `reason`, `stage_status` | Transition between nodes |
 | `LoopRestart` | `from_node`, `to_node` | Loop restart edge taken |
 | `CheckpointCompleted` | `node_id`, `git_commit_sha` (optional) | Checkpoint saved (with git SHA when git is enabled) |
 | `GitCommit` | `node_id`, `sha` | Git commit created |
@@ -67,6 +67,9 @@ Events fall into several categories:
 | `GitFetch` | `branch`, `success` | Git fetch attempted |
 | `GitReset` | `sha` | Git reset executed |
 | `Failover` | `stage`, `from_provider`, `to_provider`, `error` | LLM provider failover |
+| `RetroStarted` | — | Retrospective generation begins |
+| `RetroCompleted` | `duration_ms` | Retrospective generation finished |
+| `RetroFailed` | `error`, `duration_ms` | Retrospective generation failed |
 
 **Parallel execution:**
 

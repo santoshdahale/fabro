@@ -43,6 +43,8 @@ review    [label="Review",              prompt="@prompts/implement/review.md"]
 
 The `@` prefix tells the engine to read the file contents and use them as the prompt text. This keeps DOT files concise and lets you version prompts as standalone Markdown.
 
+File references are resolved relative to the DOT file's directory first, then fall back to `~/.fabro/`. This lets you keep shared prompts in your user-level config and reference them from any project.
+
 ### Variable expansion
 
 Prompts support `$variable` placeholders that expand at runtime. Currently the only built-in variable is `$goal`, which resolves to the graph-level `goal` attribute:

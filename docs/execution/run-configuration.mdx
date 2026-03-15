@@ -352,6 +352,21 @@ draft = true
 | `enabled` | When `true`, Fabro creates a PR from the agent's working branch after a successful run. Default: `false`. |
 | `draft` | When `true`, the PR is created as a draft pull request. Default: `true`. |
 
+### `[github]`
+
+Request a scoped GitHub Installation Access Token and inject it into the sandbox as `GITHUB_TOKEN`. The token is minted from the configured [GitHub App](/integrations/github) with only the permissions you specify.
+
+```toml title="run.toml"
+[github]
+permissions = { contents = "write", pull_requests = "read" }
+```
+
+| Field | Description |
+|---|---|
+| `permissions` | Map of GitHub API permission names to access levels (`"read"` or `"write"`). Only the listed permissions are requested. |
+
+This requires a GitHub App to be configured. If the app is missing or the repository doesn't have an installation, the run logs a warning and continues without injecting the token.
+
 ### `[[hooks]]`
 
 Define hooks that run in response to lifecycle events. Each hook is a TOML array entry:
@@ -409,13 +424,36 @@ Settings can come from multiple sources. Fabro resolves them in this order (firs
 | Node-level [stylesheet](/workflows/stylesheets) | Highest |
 | Run config TOML | |
 | CLI flags (`--model`, `--provider`, `--sandbox`) | |
+| Project defaults (`fabro.toml`) | |
 | Server defaults (`~/.fabro/server.toml`) | |
 | DOT graph attributes (`default_model`, `default_provider`) | |
 | Built-in defaults | Lowest |
 
 <Note>
-For model and provider specifically, the precedence is: CLI flags > TOML config > server defaults > DOT graph attributes > built-in defaults. Stylesheet rules on individual nodes always take priority over all of these.
+For model and provider specifically, the precedence is: CLI flags > TOML config > project defaults > server defaults > DOT graph attributes > built-in defaults. Stylesheet rules on individual nodes always take priority over all of these.
 </Note>
+
+### Project defaults (`fabro.toml`)
+
+The `fabro.toml` project config can set default values for `[llm]`, `[setup]`, `[sandbox]`, `[vars]`, `[checkpoint]`, `[pull_request]`, `[github]`, `[assets]`, `[[hooks]]`, and `[mcp_servers]`. These defaults apply to all runs in the project unless the run config overrides them:
+
+```toml title="fabro.toml"
+version = 1
+
+[llm]
+model = "claude-sonnet-4-5"
+
+[sandbox]
+provider = "daytona"
+
+[sandbox.daytona.snapshot]
+name = "my-project-snapshot"
+
+[github]
+permissions = { contents = "write" }
+```
+
+Project defaults are merged with run config values using the same rules as server defaults — run config wins on key collisions.
 
 ### Server defaults
 

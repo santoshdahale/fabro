@@ -63,28 +63,48 @@ fabro run --run-branch fabro/run/abc123
 | `--no-retro` | Skip retro generation after the run |
 | `--ssh` | Create SSH access to the sandbox (Daytona or exe.dev) and print the connection command |
 | `--preserve-sandbox` | Keep the sandbox alive after the run finishes (for debugging) |
+| `-d, --detach` | Fork the workflow as a background process and print the run ID. Reconnect later with `fabro logs -f`. |
 
 <Note>
-`--preflight` conflicts with `--resume`, `--run-branch`, and `--dry-run`. `--run-branch` conflicts with `--resume`.
+`--preflight` conflicts with `--resume`, `--run-branch`, `--dry-run`, and `--detach`. `--run-branch` conflicts with `--resume`.
 </Note>
 
 ## `fabro ps`
 
-List workflow runs stored in `~/.fabro/runs`.
+List workflow runs. By default, shows only active (running) runs — similar to `docker ps`. Use `-a` to include completed runs.
 
 ```bash
-fabro ps
+fabro ps            # active runs only
+fabro ps -a         # all runs including completed
 fabro ps --workflow deploy --label env=prod
 fabro ps --json
 ```
 
+The table shows run ID, status, workflow name, goal, and timing.
+
 | Flag | Description |
 |---|---|
+| `-a, --all` | Show all runs, not just active ones |
 | `--before <DATE>` | Only show runs started before this date (YYYY-MM-DD prefix match) |
 | `--workflow <NAME>` | Filter by workflow name (substring match) |
 | `--label <KEY=VALUE>` | Filter by label (repeatable, AND semantics) |
 | `--orphans` | Include orphan directories (no `manifest.json`) |
 | `--json` | Output as JSON |
+
+## `fabro rm`
+
+Remove one or more workflow runs by ID or workflow name. Cleans up both the run directory and any associated sandbox.
+
+```bash
+fabro rm <RUN>...
+fabro rm abc123
+fabro rm my-workflow --force
+```
+
+| Argument / Flag | Description |
+|---|---|
+| `<RUN>...` | Run IDs or workflow names to remove (required, repeatable) |
+| `-f, --force` | Force removal of active runs |
 
 ## `fabro system prune`
 
@@ -404,6 +424,37 @@ fabro run --run-branch fabro/run/<RUN_ID>
 
 See [Checkpoints](/execution/checkpoints#rewinding-to-an-earlier-checkpoint) for background on how checkpointing works.
 
+## `fabro logs`
+
+View the event log of a workflow run. Runs can be referenced by ID prefix or workflow name (uses the most recent run).
+
+```bash
+fabro logs my-workflow
+fabro logs abc123 --pretty
+fabro logs -f my-workflow -p
+```
+
+| Argument / Flag | Description |
+|---|---|
+| `<RUN>` | Run ID prefix or workflow name (required) |
+| `-f, --follow` | Follow log output in real time |
+| `-p, --pretty` | Formatted colored output with rendered assistant messages and tool calls |
+| `--since <TIMESTAMP>` | Show logs since a timestamp or relative duration (e.g. `42m`, `2h`, `2026-01-02T13:00:00Z`) |
+| `-n, --tail <N>` | Show only the last N lines |
+
+## `fabro inspect`
+
+Show detailed JSON data for a workflow run, including its manifest, conclusion, checkpoint, and sandbox record.
+
+```bash
+fabro inspect <RUN>
+fabro inspect abc123
+```
+
+| Argument | Description |
+|---|---|
+| `<RUN>` | Run ID prefix or workflow name (required) |
+
 ## `fabro workflow list`
 
 List all available workflows in the current project. Shows workflows from both the project directory and user-level `~/.fabro/workflows/`, grouped by source with descriptions pulled from each workflow's goal.
@@ -411,6 +462,22 @@ List all available workflows in the current project. Shows workflows from both t
 ```bash
 fabro workflow list
 ```
+
+## `fabro workflow create`
+
+Scaffold a new workflow in the project's workflows directory. Creates a `workflow.fabro` graph file and a `workflow.toml` run config.
+
+```bash
+fabro workflow create my-workflow
+fabro workflow create my-workflow --goal "Run the CI pipeline"
+```
+
+| Argument / Flag | Description |
+|---|---|
+| `<NAME>` | Name of the workflow (required) |
+| `-g, --goal <GOAL>` | Goal description for the workflow |
+
+Requires a `fabro.toml` project config in the current directory or a parent.
 
 ---
 
