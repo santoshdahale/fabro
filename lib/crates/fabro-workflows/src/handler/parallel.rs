@@ -331,7 +331,7 @@ impl Handler for ParallelHandler {
                 }
                 services.emitter.emit(&WorkflowRunEvent::GitBranch {
                     branch: branch_name.clone(),
-                    sha: bsha.to_string(),
+                    sha: bsha.clone(),
                 });
                 if !crate::engine::git_replace_worktree(
                     &*services.sandbox,
@@ -358,9 +358,9 @@ impl Handler for ParallelHandler {
                         "failed to reset worktree {wt_path_str}"
                     )));
                 }
-                services.emitter.emit(&WorkflowRunEvent::GitReset {
-                    sha: bsha.to_string(),
-                });
+                services
+                    .emitter
+                    .emit(&WorkflowRunEvent::GitReset { sha: bsha.clone() });
 
                 branch_context.set(keys::INTERNAL_WORK_DIR, serde_json::json!(&wt_path_str));
 

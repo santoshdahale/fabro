@@ -1947,17 +1947,6 @@ impl WorkflowRunEngine {
                                 git_commit_sha: Some(sha.clone()),
                             });
 
-                        // CheckpointSaved hook (non-blocking)
-                        {
-                            let mut hook_ctx = HookContext::new(
-                                HookEvent::CheckpointSaved,
-                                run_id.clone(),
-                                graph.name.clone(),
-                            );
-                            hook_ctx.node_id = Some(node.id.clone());
-                            let _ = self.run_hooks(&hook_ctx, hook_work_dir.as_deref()).await;
-                        }
-
                         self.services.emitter.emit(&WorkflowRunEvent::GitCommit {
                             node_id: Some(node.id.clone()),
                             sha: sha.clone(),
@@ -2057,17 +2046,18 @@ impl WorkflowRunEngine {
                         status: outcome.status.to_string(),
                         git_commit_sha: None,
                     });
+            }
 
-                // CheckpointSaved hook (non-blocking)
-                {
-                    let mut hook_ctx = HookContext::new(
-                        HookEvent::CheckpointSaved,
-                        run_id.clone(),
-                        graph.name.clone(),
-                    );
-                    hook_ctx.node_id = Some(node.id.clone());
-                    let _ = self.run_hooks(&hook_ctx, hook_work_dir.as_deref()).await;
-                }
+            // CheckpointSaved hook (non-blocking) — fires for both git and non-git paths.
+            // The Err arm above returns early, so this only runs on success.
+            {
+                let mut hook_ctx = HookContext::new(
+                    HookEvent::CheckpointSaved,
+                    run_id.clone(),
+                    graph.name.clone(),
+                );
+                hook_ctx.node_id = Some(node.id.clone());
+                let _ = self.run_hooks(&hook_ctx, hook_work_dir.as_deref()).await;
             }
 
             // Step 7: Follow selected edge (or direct jump)
