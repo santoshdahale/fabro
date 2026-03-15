@@ -115,6 +115,7 @@ pub struct RunInfo {
     pub end_time: Option<DateTime<Utc>>,
     #[serde(skip)]
     pub path: PathBuf,
+    pub goal: String,
     #[serde(skip)]
     pub is_orphan: bool,
 }
@@ -147,6 +148,7 @@ pub fn scan_runs(base: &Path) -> Result<Vec<RunInfo>> {
             let workflow_name = manifest.workflow_name;
             let workflow_slug = manifest.workflow_slug;
             let host_repo_path = manifest.host_repo_path;
+            let goal = manifest.goal;
             let start_time_dt = manifest.start_time;
             let start_time = start_time_dt.to_rfc3339();
             let labels = manifest.labels;
@@ -167,6 +169,7 @@ pub fn scan_runs(base: &Path) -> Result<Vec<RunInfo>> {
                 start_time_dt: Some(start_time_dt),
                 end_time: si.end_time,
                 path,
+                goal,
                 is_orphan: false,
             });
         } else {
@@ -199,6 +202,7 @@ pub fn scan_runs(base: &Path) -> Result<Vec<RunInfo>> {
                     start_time_dt: mtime_dt,
                     end_time: None,
                     path,
+                    goal: String::new(),
                     is_orphan: true,
                 });
             } else {
@@ -217,6 +221,7 @@ pub fn scan_runs(base: &Path) -> Result<Vec<RunInfo>> {
                     start_time_dt: mtime_dt,
                     end_time: si.end_time,
                     path,
+                    goal: String::new(),
                     is_orphan: false,
                 });
             }
@@ -458,6 +463,15 @@ fn short_run_id(id: &str) -> &str {
     }
 }
 
+fn truncate_goal(goal: &str, max_len: usize) -> String {
+    let chars: Vec<char> = goal.chars().collect();
+    if chars.len() <= max_len {
+        return goal.to_string();
+    }
+    let truncated: String = chars[..max_len - 3].iter().collect();
+    format!("{truncated}...")
+}
+
 fn color_if(use_color: bool, color: Color) -> Option<Color> {
     if use_color {
         Some(color)
@@ -538,6 +552,7 @@ pub fn list_command(args: &RunsListArgs, styles: &Styles) -> Result<()> {
         "STATUS".cell().bold(true),
         "DIRECTORY".cell().bold(true),
         "DURATION".cell().bold(true),
+        "GOAL".cell().bold(true),
     ];
 
     let rows: Vec<Vec<CellStruct>> =
@@ -570,6 +585,9 @@ pub fn list_command(args: &RunsListArgs, styles: &Styles) -> Result<()> {
                     status_cell(&run.status, use_color),
                     dir_display.cell(),
                     duration_display.cell(),
+                    truncate_goal(&run.goal, 50)
+                        .cell()
+                        .foreground_color(color_if(use_color, Color::Ansi256(8))),
                 ]
             })
             .collect();
@@ -1042,6 +1060,7 @@ mod tests {
                 start_time_dt: None,
                 end_time: None,
                 path: PathBuf::from("/tmp/d1"),
+                goal: String::new(),
                 is_orphan: false,
             },
             RunInfo {
@@ -1058,6 +1077,7 @@ mod tests {
                 start_time_dt: None,
                 end_time: None,
                 path: PathBuf::from("/tmp/d2"),
+                goal: String::new(),
                 is_orphan: false,
             },
         ];
@@ -1090,6 +1110,7 @@ mod tests {
                 start_time_dt: None,
                 end_time: None,
                 path: PathBuf::from("/tmp/d1"),
+                goal: String::new(),
                 is_orphan: false,
             },
             RunInfo {
@@ -1106,6 +1127,7 @@ mod tests {
                 start_time_dt: None,
                 end_time: None,
                 path: PathBuf::from("/tmp/d2"),
+                goal: String::new(),
                 is_orphan: false,
             },
         ];
@@ -1131,6 +1153,7 @@ mod tests {
                 start_time_dt: None,
                 end_time: None,
                 path: PathBuf::from("/tmp/d1"),
+                goal: String::new(),
                 is_orphan: false,
             },
             RunInfo {
@@ -1147,6 +1170,7 @@ mod tests {
                 start_time_dt: None,
                 end_time: None,
                 path: PathBuf::from("/tmp/d2"),
+                goal: String::new(),
                 is_orphan: false,
             },
         ];
@@ -1178,6 +1202,7 @@ mod tests {
             start_time_dt: None,
             end_time: None,
             path: PathBuf::from("/tmp/d1"),
+            goal: String::new(),
             is_orphan: true,
         }];
         let filtered = filter_runs(&runs, None, None, &[], false, StatusFilter::All);
@@ -1204,6 +1229,7 @@ mod tests {
                 start_time_dt: None,
                 end_time: None,
                 path: PathBuf::from("/tmp/d1"),
+                goal: String::new(),
                 is_orphan: false,
             },
             RunInfo {
@@ -1220,6 +1246,7 @@ mod tests {
                 start_time_dt: None,
                 end_time: None,
                 path: PathBuf::from("/tmp/d2"),
+                goal: String::new(),
                 is_orphan: false,
             },
         ];
@@ -2288,11 +2315,34 @@ mod tests {
             start_time_dt: None,
             end_time: None,
             path: PathBuf::from("/tmp/d1"),
+            goal: String::new(),
             is_orphan: false,
         }];
 
         let filtered = filter_runs(&runs, None, None, &[], false, StatusFilter::RunningOnly);
         assert_eq!(filtered.len(), 1);
         assert_eq!(filtered[0].run_id, "starting-1");
+    }
+
+    #[test]
+    fn truncate_goal_short_string_unchanged() {
+        assert_eq!(truncate_goal("short", 50), "short");
+    }
+
+    #[test]
+    fn truncate_goal_long_string_truncated() {
+        let long = "a]".repeat(30); // 60 chars
+        let result = truncate_goal(&long, 50);
+        assert_eq!(result.chars().count(), 50);
+        assert!(result.ends_with("..."));
+    }
+
+    #[test]
+    fn truncate_goal_multibyte_safe() {
+        let emoji_str = "Hello \u{1F600} world \u{1F600} test \u{1F600} more text here padding";
+        // Should not panic
+        let result = truncate_goal(emoji_str, 15);
+        assert_eq!(result.chars().count(), 15);
+        assert!(result.ends_with("..."));
     }
 }
