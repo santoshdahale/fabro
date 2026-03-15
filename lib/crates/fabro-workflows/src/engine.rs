@@ -301,6 +301,10 @@ fn write_manifest(run_dir: &Path, graph: &Graph, config: &RunConfig) -> crate::m
         labels: config.labels.clone(),
         base_branch: config.base_branch.clone(),
         workflow_slug: config.workflow_slug.clone(),
+        host_repo_path: config
+            .host_repo_path
+            .as_ref()
+            .map(|p| p.to_string_lossy().to_string()),
     };
     let _ = std::fs::create_dir_all(run_dir);
     let _ = manifest.save(&run_dir.join("manifest.json"));

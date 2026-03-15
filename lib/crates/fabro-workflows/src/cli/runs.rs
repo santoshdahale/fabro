@@ -72,12 +72,8 @@ pub struct RunsListArgs {
     #[arg(long)]
     pub json: bool,
 
-    /// Maximum number of runs to display (default: 10)
-    #[arg(long, default_value = "10")]
-    pub limit: usize,
-
-    /// Show all runs (overrides --limit)
-    #[arg(long)]
+    /// Show all runs, not just running (like docker ps -a)
+    #[arg(short = 'a', long)]
     pub all: bool,
 }
 
@@ -109,6 +105,8 @@ pub struct RunInfo {
     pub duration_ms: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub total_cost: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub host_repo_path: Option<String>,
     #[serde(skip)]
     pub start_time_dt: Option<DateTime<Utc>>,
     #[serde(skip)]
@@ -146,6 +144,7 @@ pub fn scan_runs(base: &Path) -> Result<Vec<RunInfo>> {
             let run_id = manifest.run_id;
             let workflow_name = manifest.workflow_name;
             let workflow_slug = manifest.workflow_slug;
+            let host_repo_path = manifest.host_repo_path;
             let start_time_dt = manifest.start_time;
             let start_time = start_time_dt.to_rfc3339();
             let labels = manifest.labels;
@@ -162,6 +161,7 @@ pub fn scan_runs(base: &Path) -> Result<Vec<RunInfo>> {
                 labels,
                 duration_ms: si.duration_ms,
                 total_cost: si.total_cost,
+                host_repo_path,
                 start_time_dt: Some(start_time_dt),
                 end_time: si.end_time,
                 path,
@@ -190,6 +190,7 @@ pub fn scan_runs(base: &Path) -> Result<Vec<RunInfo>> {
                 labels: HashMap::new(),
                 duration_ms: None,
                 total_cost: None,
+                host_repo_path: None,
                 start_time_dt: mtime_dt,
                 end_time: None,
                 path,
@@ -235,6 +236,15 @@ fn read_status(run_dir: &Path) -> StatusInfo {
     }
 }
 
+/// Which run statuses to include in filtered results.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StatusFilter {
+    /// Only include runs that are currently running.
+    RunningOnly,
+    /// Include runs of any status.
+    All,
+}
+
 /// Filter runs by criteria. Orphans are excluded unless `include_orphans` is true.
 pub fn filter_runs(
     runs: &[RunInfo],
@@ -242,9 +252,13 @@ pub fn filter_runs(
     workflow: Option<&str>,
     labels: &[(String, String)],
     include_orphans: bool,
+    status_filter: StatusFilter,
 ) -> Vec<RunInfo> {
     runs.iter()
         .filter(|r| {
+            if status_filter == StatusFilter::RunningOnly && !r.status.is_running() {
+                return false;
+            }
             if r.is_orphan && !include_orphans {
                 return false;
             }
@@ -385,26 +399,6 @@ fn collapse_separators(s: &str) -> String {
     s.chars().filter(|c| *c != '-' && *c != '_').collect()
 }
 
-/// Format a `DateTime<Utc>` as a human-friendly relative string like "2m ago", "3h ago", "5d ago".
-fn format_relative_time(dt: &DateTime<Utc>) -> String {
-    let now = Utc::now();
-    let dur = now.signed_duration_since(*dt);
-    let secs = dur.num_seconds();
-    if secs < 60 {
-        return "just now".to_string();
-    }
-    let mins = dur.num_minutes();
-    if mins < 60 {
-        return format!("{mins}m ago");
-    }
-    let hours = dur.num_hours();
-    if hours < 24 {
-        return format!("{hours}h ago");
-    }
-    let days = dur.num_days();
-    format!("{days}d ago")
-}
-
 fn style_status(status: &RunStatus, styles: &Styles) -> String {
     let text = status.to_string();
     match status {
@@ -429,6 +423,11 @@ pub fn list_command(args: &RunsListArgs, styles: &Styles) -> Result<()> {
         args.filter.workflow.as_deref(),
         &label_filters,
         args.filter.orphans,
+        if args.all {
+            StatusFilter::All
+        } else {
+            StatusFilter::RunningOnly
+        },
     );
 
     if args.json {
@@ -437,68 +436,54 @@ pub fn list_command(args: &RunsListArgs, styles: &Styles) -> Result<()> {
     }
 
     if filtered.is_empty() {
-        eprintln!("No runs found.");
+        if args.all {
+            eprintln!("No runs found.");
+        } else {
+            eprintln!("No running processes found. Use -a to show all runs.");
+        }
         return Ok(());
     }
 
-    let total = filtered.len();
-    let limit = if args.all { total } else { args.limit };
-    let display_runs: Vec<_> = filtered.iter().take(limit).collect();
+    // Reverse to oldest-first for display (scan_runs returns newest-first)
+    let mut display_runs = filtered;
+    display_runs.reverse();
 
     // Print table header
     let header = format!(
-        "{:<30} {:<25} {:<17} {:<10} {:<10} {:<10} LABELS",
-        "RUN ID", "WORKFLOW", "STATUS", "STARTED", "DURATION", "COST"
+        "{:<17} {:<25} {:<17} {:<20} {:<10}",
+        "RUN ID", "WORKFLOW", "STATUS", "DIRECTORY", "DURATION"
     );
     println!("{}", styles.bold.apply_to(&header));
     println!("{}", styles.dim.apply_to("-".repeat(header.len())));
 
     for run in &display_runs {
-        let labels_str = run
-            .labels
-            .iter()
-            .map(|(k, v)| format!("{k}={v}"))
-            .collect::<Vec<_>>()
-            .join(", ");
-        let run_id_display = if run.run_id.len() > 28 {
-            format!("{}...", &run.run_id[..25])
+        let run_id_display = if run.run_id.len() > 12 {
+            run.run_id[..12].to_string()
         } else {
             run.run_id.clone()
         };
-        let start_display = run
-            .start_time_dt
-            .as_ref()
-            .map(format_relative_time)
-            .unwrap_or_else(|| "-".to_string());
         let duration_display = run
             .duration_ms
             .map(super::progress::format_duration_ms)
             .unwrap_or_else(|| "-".to_string());
-        let cost_display = run
-            .total_cost
-            .map(super::format_cost)
+        let dir_display = run
+            .host_repo_path
+            .as_deref()
+            .and_then(|p| Path::new(p).file_name())
+            .map(|n| n.to_string_lossy().to_string())
             .unwrap_or_else(|| "-".to_string());
         let status_display = style_status(&run.status, styles);
         println!(
-            "{:<30} {:<25} {:<17} {:<10} {:<10} {:<10} {}",
+            "{:<17} {:<25} {:<17} {:<20} {:<10}",
             styles.dim.apply_to(&run_id_display),
             run.workflow_name,
             status_display,
-            start_display,
+            dir_display,
             duration_display,
-            cost_display,
-            styles.dim.apply_to(&labels_str),
         );
     }
 
-    if total > limit {
-        eprintln!(
-            "\nShowing {} of {} run(s). Use --all to see all.",
-            limit, total
-        );
-    } else {
-        eprintln!("\n{} run(s) listed.", total);
-    }
+    eprintln!("\n{} run(s) listed.", display_runs.len());
     Ok(())
 }
 
@@ -666,8 +651,8 @@ pub fn df_from(args: &DfArgs, data_dir: &Path, runs_base: &Path, logs_base: &Pat
 
         let now = chrono::Utc::now();
         for detail in &run_details {
-            let run_id_display = if detail.run_id.len() > 28 {
-                format!("{}...", &detail.run_id[..25])
+            let run_id_display = if detail.run_id.len() > 12 {
+                detail.run_id[..12].to_string()
             } else {
                 detail.run_id.clone()
             };
@@ -741,6 +726,7 @@ pub fn prune_from(args: &RunsPruneArgs, base: &Path) -> Result<()> {
         args.filter.workflow.as_deref(),
         &label_filters,
         args.filter.orphans,
+        StatusFilter::All,
     );
 
     // Determine if the user passed any explicit filters
@@ -933,6 +919,7 @@ mod tests {
                 labels: HashMap::new(),
                 duration_ms: None,
                 total_cost: None,
+                host_repo_path: None,
                 start_time_dt: None,
                 end_time: None,
                 path: PathBuf::from("/tmp/d1"),
@@ -948,13 +935,21 @@ mod tests {
                 labels: HashMap::new(),
                 duration_ms: None,
                 total_cost: None,
+                host_repo_path: None,
                 start_time_dt: None,
                 end_time: None,
                 path: PathBuf::from("/tmp/d2"),
                 is_orphan: false,
             },
         ];
-        let filtered = filter_runs(&runs, Some("2026-01-01"), None, &[], false);
+        let filtered = filter_runs(
+            &runs,
+            Some("2026-01-01"),
+            None,
+            &[],
+            false,
+            StatusFilter::All,
+        );
         assert_eq!(filtered.len(), 1);
         assert_eq!(filtered[0].run_id, "old");
     }
@@ -972,6 +967,7 @@ mod tests {
                 labels: HashMap::new(),
                 duration_ms: None,
                 total_cost: None,
+                host_repo_path: None,
                 start_time_dt: None,
                 end_time: None,
                 path: PathBuf::from("/tmp/d1"),
@@ -987,13 +983,14 @@ mod tests {
                 labels: HashMap::new(),
                 duration_ms: None,
                 total_cost: None,
+                host_repo_path: None,
                 start_time_dt: None,
                 end_time: None,
                 path: PathBuf::from("/tmp/d2"),
                 is_orphan: false,
             },
         ];
-        let filtered = filter_runs(&runs, None, Some("deploy"), &[], false);
+        let filtered = filter_runs(&runs, None, Some("deploy"), &[], false, StatusFilter::All);
         assert_eq!(filtered.len(), 1);
         assert_eq!(filtered[0].run_id, "a");
     }
@@ -1011,6 +1008,7 @@ mod tests {
                 labels: HashMap::from([("env".into(), "prod".into())]),
                 duration_ms: None,
                 total_cost: None,
+                host_repo_path: None,
                 start_time_dt: None,
                 end_time: None,
                 path: PathBuf::from("/tmp/d1"),
@@ -1026,6 +1024,7 @@ mod tests {
                 labels: HashMap::from([("env".into(), "staging".into())]),
                 duration_ms: None,
                 total_cost: None,
+                host_repo_path: None,
                 start_time_dt: None,
                 end_time: None,
                 path: PathBuf::from("/tmp/d2"),
@@ -1038,6 +1037,7 @@ mod tests {
             None,
             &[("env".to_string(), "prod".to_string())],
             false,
+            StatusFilter::All,
         );
         assert_eq!(filtered.len(), 1);
         assert_eq!(filtered[0].run_id, "a");
@@ -1055,16 +1055,91 @@ mod tests {
             labels: HashMap::new(),
             duration_ms: None,
             total_cost: None,
+            host_repo_path: None,
             start_time_dt: None,
             end_time: None,
             path: PathBuf::from("/tmp/d1"),
             is_orphan: true,
         }];
-        let filtered = filter_runs(&runs, None, None, &[], false);
+        let filtered = filter_runs(&runs, None, None, &[], false, StatusFilter::All);
         assert!(filtered.is_empty());
 
-        let filtered = filter_runs(&runs, None, None, &[], true);
+        let filtered = filter_runs(&runs, None, None, &[], true, StatusFilter::All);
         assert_eq!(filtered.len(), 1);
+    }
+
+    #[test]
+    fn filter_runs_running_only() {
+        let runs = vec![
+            RunInfo {
+                run_id: "running-1".into(),
+                dir_name: "d1".into(),
+                workflow_name: "p".into(),
+                workflow_slug: None,
+                status: RunStatus::Running,
+                start_time: "2026-01-01T00:00:00Z".into(),
+                labels: HashMap::new(),
+                duration_ms: None,
+                total_cost: None,
+                host_repo_path: None,
+                start_time_dt: None,
+                end_time: None,
+                path: PathBuf::from("/tmp/d1"),
+                is_orphan: false,
+            },
+            RunInfo {
+                run_id: "done-1".into(),
+                dir_name: "d2".into(),
+                workflow_name: "p".into(),
+                workflow_slug: None,
+                status: RunStatus::Concluded(crate::outcome::StageStatus::Success),
+                start_time: "2026-01-01T00:00:00Z".into(),
+                labels: HashMap::new(),
+                duration_ms: None,
+                total_cost: None,
+                host_repo_path: None,
+                start_time_dt: None,
+                end_time: None,
+                path: PathBuf::from("/tmp/d2"),
+                is_orphan: false,
+            },
+        ];
+
+        let filtered = filter_runs(&runs, None, None, &[], false, StatusFilter::RunningOnly);
+        assert_eq!(filtered.len(), 1);
+        assert_eq!(filtered[0].run_id, "running-1");
+
+        let filtered = filter_runs(&runs, None, None, &[], false, StatusFilter::All);
+        assert_eq!(filtered.len(), 2);
+    }
+
+    #[test]
+    fn scan_runs_extracts_host_repo_path() {
+        let tmp = tempfile::tempdir().unwrap();
+        let base = tmp.path();
+
+        make_run_dir(
+            base,
+            "20260101-ABC123",
+            Some(serde_json::json!({
+                "run_id": "abc123",
+                "workflow_name": "my-pipeline",
+                "goal": "test goal",
+                "start_time": "2026-01-01T12:00:00Z",
+                "node_count": 2,
+                "edge_count": 1,
+                "host_repo_path": "/home/user/myproject"
+            })),
+            None,
+            true,
+        );
+
+        let runs = scan_runs(base).unwrap();
+        assert_eq!(runs.len(), 1);
+        assert_eq!(
+            runs[0].host_repo_path.as_deref(),
+            Some("/home/user/myproject")
+        );
     }
 
     #[test]

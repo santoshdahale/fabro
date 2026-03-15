@@ -93,6 +93,7 @@ mod tests {
             labels: Default::default(),
             base_branch: None,
             workflow_slug: None,
+            host_repo_path: None,
         };
         manifest.save(&run_dir.join("manifest.json")).unwrap();
 
@@ -167,6 +168,7 @@ mod tests {
             labels: Default::default(),
             base_branch: None,
             workflow_slug: None,
+            host_repo_path: None,
         };
         manifest.save(&run_dir.join("manifest.json")).unwrap();
 
