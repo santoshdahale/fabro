@@ -587,7 +587,7 @@ pub async fn run_command(
         );
     }
 
-    if should_create_worktree {
+    if should_create_worktree && !args.dry_run {
         if let Some(ref branch) = detected_base_branch {
             let check_repo = original_cwd.clone();
             let check_branch = branch.clone();
@@ -1302,10 +1302,10 @@ pub async fn run_command(
     // Write finalize commit with retro.json + final node files (captures last diff.patch)
     write_finalize_commit(&config, &run_dir).await;
 
-    // Auto-create PR on successful completion
+    // Auto-create PR on successful completion (skip in dry-run mode)
     let mut pushed_branch: Option<String> = None;
     let mut pr_url: Option<String> = None;
-    if config.pull_request_enabled {
+    if config.pull_request_enabled && !dry_run_mode {
         if let Ok(ref outcome) = engine_result {
             if matches!(
                 outcome.status,

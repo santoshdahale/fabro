@@ -1956,41 +1956,43 @@ impl WorkflowRunEngine {
                                 git_commit_sha: sha.clone(),
                             });
 
-                        // Push run branch
-                        if let Some(ref branch) = config.run_branch {
-                            if self.services.sandbox.is_remote() {
-                                git_push_remote(&*self.services.sandbox, branch).await;
-                            } else if let Some(ref repo_path) = config.host_repo_path {
-                                let refspec = format!("refs/heads/{branch}");
+                        // Push run branch (skip in dry-run mode)
+                        if !config.dry_run {
+                            if let Some(ref branch) = config.run_branch {
+                                if self.services.sandbox.is_remote() {
+                                    git_push_remote(&*self.services.sandbox, branch).await;
+                                } else if let Some(ref repo_path) = config.host_repo_path {
+                                    let refspec = format!("refs/heads/{branch}");
+                                    git_push_host(
+                                        repo_path,
+                                        &refspec,
+                                        &config.github_app,
+                                        "run branch",
+                                    )
+                                    .await;
+                                }
+                            }
+                            // Push metadata branch (always from host)
+                            if let (Some(ref meta_branch), Some(ref repo_path)) =
+                                (&config.meta_branch, &config.host_repo_path)
+                            {
+                                // The metadata branch is stored locally as a custom ref
+                                // (e.g. refs/fabro/{run_id}). Push it to a normal branch on
+                                // the remote since GitHub rejects branch names starting
+                                // with "refs/".
+                                let run_id_part = meta_branch
+                                    .strip_prefix("refs/fabro/")
+                                    .unwrap_or(meta_branch);
+                                let refspec =
+                                    format!("{meta_branch}:refs/heads/fabro/meta/{run_id_part}");
                                 git_push_host(
                                     repo_path,
                                     &refspec,
                                     &config.github_app,
-                                    "run branch",
+                                    "metadata branch",
                                 )
                                 .await;
                             }
-                        }
-                        // Push metadata branch (always from host)
-                        if let (Some(ref meta_branch), Some(ref repo_path)) =
-                            (&config.meta_branch, &config.host_repo_path)
-                        {
-                            // The metadata branch is stored locally as a custom ref
-                            // (e.g. refs/fabro/{run_id}). Push it to a normal branch on
-                            // the remote since GitHub rejects branch names starting
-                            // with "refs/".
-                            let run_id_part = meta_branch
-                                .strip_prefix("refs/fabro/")
-                                .unwrap_or(meta_branch);
-                            let refspec =
-                                format!("{meta_branch}:refs/heads/fabro/meta/{run_id_part}");
-                            git_push_host(
-                                repo_path,
-                                &refspec,
-                                &config.github_app,
-                                "metadata branch",
-                            )
-                            .await;
                         }
 
                         // Save diff.patch for this stage
