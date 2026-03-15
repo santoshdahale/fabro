@@ -182,9 +182,27 @@ pub fn scan_runs(base: &Path) -> Result<Vec<RunInfo>> {
                 .map(|s| s.trim().to_string())
                 .unwrap_or_else(|_| dir_name.clone());
 
-            if read_status_file(&path).is_some() {
+            let si = read_status(&path);
+            if matches!(si.status, RunStatus::Unknown) {
+                // True orphan — no manifest, no status.txt
+                runs.push(RunInfo {
+                    run_id,
+                    dir_name,
+                    workflow_name: "[no manifest]".to_string(),
+                    workflow_slug: None,
+                    status: si.status,
+                    start_time: mtime,
+                    labels: HashMap::new(),
+                    duration_ms: None,
+                    total_cost: None,
+                    host_repo_path: None,
+                    start_time_dt: mtime_dt,
+                    end_time: None,
+                    path,
+                    is_orphan: true,
+                });
+            } else {
                 // Has status.txt → run is initializing, not an orphan
-                let si = read_status(&path);
                 runs.push(RunInfo {
                     run_id,
                     dir_name,
@@ -201,24 +219,6 @@ pub fn scan_runs(base: &Path) -> Result<Vec<RunInfo>> {
                     path,
                     is_orphan: false,
                 });
-            } else {
-                // True orphan — no manifest, no status.txt
-                runs.push(RunInfo {
-                    run_id,
-                    dir_name,
-                    workflow_name: "[no manifest]".to_string(),
-                    workflow_slug: None,
-                    status: RunStatus::Unknown,
-                    start_time: mtime,
-                    labels: HashMap::new(),
-                    duration_ms: None,
-                    total_cost: None,
-                    host_repo_path: None,
-                    start_time_dt: mtime_dt,
-                    end_time: None,
-                    path,
-                    is_orphan: true,
-                });
             }
         }
     }
@@ -233,6 +233,17 @@ struct StatusInfo {
     end_time: Option<DateTime<Utc>>,
     duration_ms: Option<u64>,
     total_cost: Option<f64>,
+}
+
+impl StatusInfo {
+    fn simple(status: RunStatus) -> Self {
+        Self {
+            status,
+            end_time: None,
+            duration_ms: None,
+            total_cost: None,
+        }
+    }
 }
 
 /// Write the run lifecycle status to `status.txt` (best-effort).
@@ -260,42 +271,19 @@ fn read_status(run_dir: &Path) -> StatusInfo {
     // 2. status.txt — explicit lifecycle tracking
     if let Some(status_str) = read_status_file(run_dir) {
         return match status_str.as_str() {
-            "starting" | "running" => StatusInfo {
-                status: RunStatus::Running,
-                end_time: None,
-                duration_ms: None,
-                total_cost: None,
-            },
+            "starting" | "running" => StatusInfo::simple(RunStatus::Running),
             // concluded without conclusion.json → treat as failed
-            "concluded" => StatusInfo {
-                status: RunStatus::Concluded(crate::outcome::StageStatus::Fail),
-                end_time: None,
-                duration_ms: None,
-                total_cost: None,
-            },
-            _ => StatusInfo {
-                status: RunStatus::Unknown,
-                end_time: None,
-                duration_ms: None,
-                total_cost: None,
-            },
+            "concluded" => {
+                StatusInfo::simple(RunStatus::Concluded(crate::outcome::StageStatus::Fail))
+            }
+            _ => StatusInfo::simple(RunStatus::Unknown),
         };
     }
     // 3. Legacy fallback: run.pid exists → Running
     if run_dir.join("run.pid").exists() {
-        return StatusInfo {
-            status: RunStatus::Running,
-            end_time: None,
-            duration_ms: None,
-            total_cost: None,
-        };
+        return StatusInfo::simple(RunStatus::Running);
     }
-    StatusInfo {
-        status: RunStatus::Unknown,
-        end_time: None,
-        duration_ms: None,
-        total_cost: None,
-    }
+    StatusInfo::simple(RunStatus::Unknown)
 }
 
 /// Which run statuses to include in filtered results.
