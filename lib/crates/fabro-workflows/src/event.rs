@@ -115,15 +115,42 @@ pub enum WorkflowRunEvent {
     CheckpointSaved {
         node_id: String,
     },
-    GitCheckpoint {
+    CheckpointCompleted {
         run_id: String,
         node_id: String,
         status: String,
         git_commit_sha: String,
     },
-    GitCheckpointFailed {
+    CheckpointFailed {
         node_id: String,
         error: String,
+    },
+    GitCommit {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        node_id: Option<String>,
+        sha: String,
+    },
+    GitPush {
+        branch: String,
+        success: bool,
+    },
+    GitBranch {
+        branch: String,
+        sha: String,
+    },
+    GitWorktreeAdd {
+        path: String,
+        branch: String,
+    },
+    GitWorktreeRemove {
+        path: String,
+    },
+    GitFetch {
+        branch: String,
+        success: bool,
+    },
+    GitReset {
+        sha: String,
     },
     EdgeSelected {
         from_node: String,
@@ -447,16 +474,48 @@ impl WorkflowRunEvent {
             Self::CheckpointSaved { node_id } => {
                 debug!(node_id, "Checkpoint saved");
             }
-            Self::GitCheckpoint {
+            Self::CheckpointCompleted {
                 run_id,
                 node_id,
                 status,
                 ..
             } => {
-                debug!(run_id, node_id, status, "Git checkpoint");
+                debug!(run_id, node_id, status, "Checkpoint completed");
             }
-            Self::GitCheckpointFailed { node_id, error } => {
-                error!(node_id, error, "Git checkpoint commit failed");
+            Self::CheckpointFailed { node_id, error } => {
+                error!(node_id, error, "Checkpoint failed");
+            }
+            Self::GitCommit { node_id, sha } => {
+                debug!(
+                    node_id = node_id.as_deref().unwrap_or(""),
+                    sha, "Git commit"
+                );
+            }
+            Self::GitPush { branch, success } => {
+                if *success {
+                    debug!(branch, "Git push succeeded");
+                } else {
+                    warn!(branch, "Git push failed");
+                }
+            }
+            Self::GitBranch { branch, sha } => {
+                debug!(branch, sha, "Git branch created");
+            }
+            Self::GitWorktreeAdd { path, branch } => {
+                debug!(path, branch, "Git worktree added");
+            }
+            Self::GitWorktreeRemove { path } => {
+                debug!(path, "Git worktree removed");
+            }
+            Self::GitFetch { branch, success } => {
+                if *success {
+                    debug!(branch, "Git fetch succeeded");
+                } else {
+                    warn!(branch, "Git fetch failed");
+                }
+            }
+            Self::GitReset { sha } => {
+                debug!(sha, "Git reset");
             }
             Self::EdgeSelected {
                 from_node,
@@ -931,10 +990,14 @@ fn rename_fields(event_name: &str, fields: &mut serde_json::Map<String, serde_js
         rename(fields, "start_node", "start_node_id");
     } else if event_name == "SubgraphCompleted"
         || event_name == "CheckpointSaved"
-        || event_name == "GitCheckpoint"
-        || event_name == "GitCheckpointFailed"
+        || event_name == "CheckpointCompleted"
+        || event_name == "CheckpointFailed"
     {
         default_node_label(fields);
+    } else if event_name == "GitCommit" {
+        if fields.contains_key("node_id") {
+            default_node_label(fields);
+        }
     } else if event_name.starts_with("DevcontainerLifecycleCommand")
         || event_name == "DevcontainerLifecycleFailed"
     {
@@ -1868,19 +1931,163 @@ mod tests {
     }
 
     #[test]
-    fn rename_fields_git_checkpoint_failed() {
-        let event = WorkflowRunEvent::GitCheckpointFailed {
+    fn rename_fields_checkpoint_completed() {
+        let event = WorkflowRunEvent::CheckpointCompleted {
+            run_id: "r1".to_string(),
+            node_id: "work".to_string(),
+            status: "success".to_string(),
+            git_commit_sha: "abc123".to_string(),
+        };
+        let (name, fields) = flatten_event(&event);
+        assert_eq!(name, "CheckpointCompleted");
+        assert_eq!(fields["node_id"], "work");
+        assert_eq!(fields["node_label"], "work");
+    }
+
+    #[test]
+    fn rename_fields_checkpoint_failed() {
+        let event = WorkflowRunEvent::CheckpointFailed {
             node_id: "fix_lints".to_string(),
             error: "git add failed (exit 1): fatal: not a git repository".to_string(),
         };
         let (name, fields) = flatten_event(&event);
-        assert_eq!(name, "GitCheckpointFailed");
+        assert_eq!(name, "CheckpointFailed");
         assert_eq!(fields["node_id"], "fix_lints");
         assert_eq!(fields["node_label"], "fix_lints");
         assert_eq!(
             fields["error"],
             "git add failed (exit 1): fatal: not a git repository"
         );
+    }
+
+    #[test]
+    fn rename_fields_git_commit_with_node_id() {
+        let event = WorkflowRunEvent::GitCommit {
+            node_id: Some("work".to_string()),
+            sha: "abc123".to_string(),
+        };
+        let (name, fields) = flatten_event(&event);
+        assert_eq!(name, "GitCommit");
+        assert_eq!(fields["node_id"], "work");
+        assert_eq!(fields["node_label"], "work");
+        assert_eq!(fields["sha"], "abc123");
+    }
+
+    #[test]
+    fn rename_fields_git_commit_without_node_id() {
+        let event = WorkflowRunEvent::GitCommit {
+            node_id: None,
+            sha: "abc123".to_string(),
+        };
+        let (name, fields) = flatten_event(&event);
+        assert_eq!(name, "GitCommit");
+        assert!(!fields.contains_key("node_label"));
+        assert_eq!(fields["sha"], "abc123");
+    }
+
+    #[test]
+    fn git_commit_serialization() {
+        let event = WorkflowRunEvent::GitCommit {
+            node_id: Some("work".to_string()),
+            sha: "abc123".to_string(),
+        };
+        let json = serde_json::to_string(&event).unwrap();
+        assert!(json.contains("GitCommit"));
+        assert!(json.contains("\"sha\":\"abc123\""));
+        let deserialized: WorkflowRunEvent = serde_json::from_str(&json).unwrap();
+        assert!(matches!(deserialized, WorkflowRunEvent::GitCommit { sha, .. } if sha == "abc123"));
+
+        // node_id None is omitted
+        let event_none = WorkflowRunEvent::GitCommit {
+            node_id: None,
+            sha: "def456".to_string(),
+        };
+        let json_none = serde_json::to_string(&event_none).unwrap();
+        assert!(!json_none.contains("node_id"));
+    }
+
+    #[test]
+    fn git_push_serialization() {
+        let event = WorkflowRunEvent::GitPush {
+            branch: "fabro/run/123".to_string(),
+            success: true,
+        };
+        let json = serde_json::to_string(&event).unwrap();
+        assert!(json.contains("GitPush"));
+        assert!(json.contains("\"success\":true"));
+        let deserialized: WorkflowRunEvent = serde_json::from_str(&json).unwrap();
+        assert!(matches!(
+            deserialized,
+            WorkflowRunEvent::GitPush { success: true, .. }
+        ));
+    }
+
+    #[test]
+    fn git_branch_serialization() {
+        let event = WorkflowRunEvent::GitBranch {
+            branch: "fabro/run/123/work".to_string(),
+            sha: "abc123".to_string(),
+        };
+        let json = serde_json::to_string(&event).unwrap();
+        assert!(json.contains("GitBranch"));
+        let deserialized: WorkflowRunEvent = serde_json::from_str(&json).unwrap();
+        assert!(
+            matches!(deserialized, WorkflowRunEvent::GitBranch { branch, .. } if branch == "fabro/run/123/work")
+        );
+    }
+
+    #[test]
+    fn git_worktree_add_serialization() {
+        let event = WorkflowRunEvent::GitWorktreeAdd {
+            path: "/tmp/wt".to_string(),
+            branch: "work".to_string(),
+        };
+        let json = serde_json::to_string(&event).unwrap();
+        assert!(json.contains("GitWorktreeAdd"));
+        let deserialized: WorkflowRunEvent = serde_json::from_str(&json).unwrap();
+        assert!(
+            matches!(deserialized, WorkflowRunEvent::GitWorktreeAdd { path, .. } if path == "/tmp/wt")
+        );
+    }
+
+    #[test]
+    fn git_worktree_remove_serialization() {
+        let event = WorkflowRunEvent::GitWorktreeRemove {
+            path: "/tmp/wt".to_string(),
+        };
+        let json = serde_json::to_string(&event).unwrap();
+        assert!(json.contains("GitWorktreeRemove"));
+        let deserialized: WorkflowRunEvent = serde_json::from_str(&json).unwrap();
+        assert!(
+            matches!(deserialized, WorkflowRunEvent::GitWorktreeRemove { path } if path == "/tmp/wt")
+        );
+    }
+
+    #[test]
+    fn git_fetch_serialization() {
+        let event = WorkflowRunEvent::GitFetch {
+            branch: "main".to_string(),
+            success: false,
+        };
+        let json = serde_json::to_string(&event).unwrap();
+        assert!(json.contains("GitFetch"));
+        assert!(json.contains("\"success\":false"));
+        let deserialized: WorkflowRunEvent = serde_json::from_str(&json).unwrap();
+        assert!(matches!(
+            deserialized,
+            WorkflowRunEvent::GitFetch { success: false, .. }
+        ));
+    }
+
+    #[test]
+    fn git_reset_serialization() {
+        let event = WorkflowRunEvent::GitReset {
+            sha: "abc123".to_string(),
+        };
+        let json = serde_json::to_string(&event).unwrap();
+        assert!(json.contains("GitReset"));
+        let deserialized: WorkflowRunEvent = serde_json::from_str(&json).unwrap();
+        assert!(matches!(deserialized, WorkflowRunEvent::GitReset { sha } if sha == "abc123"));
     }
 
     #[test]

@@ -568,7 +568,15 @@ pub fn format_event_pretty(line: &str, styles: &fabro_util::terminal::Styles) ->
         | "SetupCommandStarted"
         | "SetupCommandCompleted"
         | "CheckpointSaved"
-        | "GitCheckpoint"
+        | "CheckpointCompleted"
+        | "CheckpointFailed"
+        | "GitCommit"
+        | "GitPush"
+        | "GitBranch"
+        | "GitWorktreeAdd"
+        | "GitWorktreeRemove"
+        | "GitFetch"
+        | "GitReset"
         | "AssetsCaptured" => None,
 
         _ => None,

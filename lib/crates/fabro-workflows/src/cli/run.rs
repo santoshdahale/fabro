@@ -486,12 +486,14 @@ pub async fn run_command(
     // 3. Build event emitter
     let mut emitter = EventEmitter::new();
 
-    // Track the last git commit SHA from GitCheckpoint events
+    // Track the last git commit SHA from CheckpointCompleted events
     let last_git_sha: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
     {
         let sha_clone = Arc::clone(&last_git_sha);
         emitter.on_event(move |event| {
-            if let crate::event::WorkflowRunEvent::GitCheckpoint { git_commit_sha, .. } = event {
+            if let crate::event::WorkflowRunEvent::CheckpointCompleted { git_commit_sha, .. } =
+                event
+            {
                 *sha_clone.lock().unwrap() = Some(git_commit_sha.clone());
             }
         });

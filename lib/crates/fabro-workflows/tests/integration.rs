@@ -10679,7 +10679,7 @@ impl Handler for FileWriterHandler {
     }
 }
 
-/// End-to-end test: pipeline with git checkpointing enabled emits `GitCheckpoint`
+/// End-to-end test: pipeline with git checkpointing enabled emits `CheckpointCompleted`
 /// events with valid commit SHAs and writes `diff.patch` per stage.
 #[tokio::test]
 async fn git_checkpoint_host_emits_events_and_diff_patch() {
@@ -10796,12 +10796,12 @@ async fn git_checkpoint_host_emits_events_and_diff_patch() {
         .expect("pipeline should succeed");
     assert_eq!(outcome.status, StageStatus::Success);
 
-    // 6. Assert GitCheckpoint events were emitted
+    // 6. Assert CheckpointCompleted events were emitted
     let events = events.lock().unwrap();
     let git_events: Vec<_> = events
         .iter()
         .filter_map(|e| {
-            if let WorkflowRunEvent::GitCheckpoint {
+            if let WorkflowRunEvent::CheckpointCompleted {
                 node_id,
                 git_commit_sha,
                 ..
@@ -10816,12 +10816,12 @@ async fn git_checkpoint_host_emits_events_and_diff_patch() {
     // work node gets a checkpoint commit (start is skipped, exit is terminal)
     assert!(
         !git_events.is_empty(),
-        "expected at least 1 GitCheckpoint event, got {}",
+        "expected at least 1 CheckpointCompleted event, got {}",
         git_events.len()
     );
     assert!(
         !git_events.iter().any(|(id, _)| id == "start"),
-        "start node should not have a git checkpoint"
+        "start node should not have a checkpoint"
     );
     // Each SHA should be a valid 40-char hex string
     assert!(

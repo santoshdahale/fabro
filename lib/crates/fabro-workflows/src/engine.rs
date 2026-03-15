@@ -665,12 +665,12 @@ pub(crate) async fn git_push_host(
     refspec: &str,
     github_app: &Option<fabro_github::GitHubAppCredentials>,
     label: &str,
-) {
+) -> bool {
     let (origin_url, _) = match crate::daytona_sandbox::detect_repo_info(repo_path) {
         Ok(info) => info,
         Err(e) => {
             tracing::warn!(error = %e, label, "Cannot detect origin for push");
-            return;
+            return false;
         }
     };
 
@@ -680,12 +680,12 @@ pub(crate) async fn git_push_host(
             Ok(url) => url,
             Err(e) => {
                 tracing::warn!(error = %e, label, "Failed to get token for push");
-                return;
+                return false;
             }
         },
         None => {
             tracing::warn!(label, "No GitHub App credentials for push");
-            return;
+            return false;
         }
     };
 
@@ -696,13 +696,19 @@ pub(crate) async fn git_push_host(
     })
     .await;
     match result {
-        Ok(()) => tracing::info!(label, "Pushed to origin"),
-        Err(e) => tracing::warn!(error = %e, label, "Failed to push"),
+        Ok(()) => {
+            tracing::info!(label, "Pushed to origin");
+            true
+        }
+        Err(e) => {
+            tracing::warn!(error = %e, label, "Failed to push");
+            false
+        }
     }
 }
 
 /// Push the run branch to origin inside a remote sandbox (best-effort).
-async fn git_push_remote(sandbox: &dyn Sandbox, branch: &str) {
+async fn git_push_remote(sandbox: &dyn Sandbox, branch: &str) -> bool {
     if let Err(e) = sandbox.refresh_push_credentials().await {
         tracing::warn!(error = %e, "Failed to refresh push credentials");
     }
@@ -710,12 +716,15 @@ async fn git_push_remote(sandbox: &dyn Sandbox, branch: &str) {
     match sandbox.exec_command(&cmd, 60_000, None, None, None).await {
         Ok(r) if r.exit_code == 0 => {
             tracing::info!(branch, "Pushed run branch to origin");
+            true
         }
         Ok(r) => {
             tracing::warn!(branch, exit_code = r.exit_code, "Failed to push run branch");
+            false
         }
         Err(e) => {
             tracing::warn!(branch, error = %e, "Failed to push run branch");
+            false
         }
     }
 }
@@ -1949,18 +1958,22 @@ impl WorkflowRunEngine {
                         }
                         self.services
                             .emitter
-                            .emit(&WorkflowRunEvent::GitCheckpoint {
+                            .emit(&WorkflowRunEvent::CheckpointCompleted {
                                 run_id: run_id.clone(),
                                 node_id: node.id.clone(),
                                 status: outcome.status.to_string(),
                                 git_commit_sha: sha.clone(),
                             });
+                        self.services.emitter.emit(&WorkflowRunEvent::GitCommit {
+                            node_id: Some(node.id.clone()),
+                            sha: sha.clone(),
+                        });
 
                         // Push run branch (skip in dry-run mode)
                         if !config.dry_run {
                             if let Some(ref branch) = config.run_branch {
-                                if self.services.sandbox.is_remote() {
-                                    git_push_remote(&*self.services.sandbox, branch).await;
+                                let push_ok = if self.services.sandbox.is_remote() {
+                                    git_push_remote(&*self.services.sandbox, branch).await
                                 } else if let Some(ref repo_path) = config.host_repo_path {
                                     let refspec = format!("refs/heads/{branch}");
                                     git_push_host(
@@ -1969,8 +1982,14 @@ impl WorkflowRunEngine {
                                         &config.github_app,
                                         "run branch",
                                     )
-                                    .await;
-                                }
+                                    .await
+                                } else {
+                                    false
+                                };
+                                self.services.emitter.emit(&WorkflowRunEvent::GitPush {
+                                    branch: branch.clone(),
+                                    success: push_ok,
+                                });
                             }
                             // Push metadata branch (always from host)
                             if let (Some(ref meta_branch), Some(ref repo_path)) =
@@ -1985,13 +2004,17 @@ impl WorkflowRunEngine {
                                     .unwrap_or(meta_branch);
                                 let refspec =
                                     format!("{meta_branch}:refs/heads/fabro/meta/{run_id_part}");
-                                git_push_host(
+                                let meta_push_ok = git_push_host(
                                     repo_path,
                                     &refspec,
                                     &config.github_app,
                                     "metadata branch",
                                 )
                                 .await;
+                                self.services.emitter.emit(&WorkflowRunEvent::GitPush {
+                                    branch: format!("fabro/meta/{run_id_part}"),
+                                    success: meta_push_ok,
+                                });
                             }
                         }
 
@@ -2018,7 +2041,7 @@ impl WorkflowRunEngine {
                     Err(e) => {
                         self.services
                             .emitter
-                            .emit(&WorkflowRunEvent::GitCheckpointFailed {
+                            .emit(&WorkflowRunEvent::CheckpointFailed {
                                 node_id: node.id.clone(),
                                 error: e.clone(),
                             });
@@ -5171,7 +5194,7 @@ mod tests {
         let git_checkpoint_node_ids: Vec<&str> = collected
             .iter()
             .filter_map(|e| match e {
-                WorkflowRunEvent::GitCheckpoint { node_id, .. } => Some(node_id.as_str()),
+                WorkflowRunEvent::CheckpointCompleted { node_id, .. } => Some(node_id.as_str()),
                 _ => None,
             })
             .collect();

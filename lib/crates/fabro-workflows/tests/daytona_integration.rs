@@ -613,13 +613,13 @@ async fn daytona_git_checkpoint_remote_emits_events() {
         .expect("pipeline should succeed");
     assert_eq!(outcome.status, StageStatus::Success);
 
-    // Assert GitCheckpoint events were emitted
+    // Assert CheckpointCompleted events were emitted
     {
         let events = events.lock().unwrap();
         let git_events: Vec<_> = events
             .iter()
             .filter_map(|e| {
-                if let fabro_workflows::event::WorkflowRunEvent::GitCheckpoint {
+                if let fabro_workflows::event::WorkflowRunEvent::CheckpointCompleted {
                     node_id,
                     git_commit_sha,
                     ..
@@ -636,7 +636,7 @@ async fn daytona_git_checkpoint_remote_emits_events() {
         assert_eq!(
             git_events.len(),
             1,
-            "expected 1 GitCheckpoint event (work node only), got {}",
+            "expected 1 CheckpointCompleted event (work node only), got {}",
             git_events.len()
         );
         assert!(
