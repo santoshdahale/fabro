@@ -36,6 +36,7 @@ RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
 # Rust
 RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
 ENV PATH="/root/.cargo/bin:${PATH}"
+ENV CARGO_INCREMENTAL=0
 
 # Bun
 RUN curl -fsSL https://bun.sh/install | bash
