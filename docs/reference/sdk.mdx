@@ -1,0 +1,595 @@
+---
+title: "Fabro SDK"
+description: "Using the fabro-llm crate as a Rust library for multi-provider LLM completions"
+---
+
+The `fabro-llm` crate is a standalone Rust library for calling LLM providers. It provides a unified client that routes requests to Anthropic, OpenAI, Gemini, and other providers, with built-in streaming, tool execution, retries, and middleware.
+
+You can use it independently of Fabro's workflow engine — add it as a dependency in any Rust project.
+
+```toml title="Cargo.toml"
+[dependencies]
+fabro-llm = { git = "https://github.com/fabro-sh/fabro" }
+tokio = { version = "1", features = ["full"] }
+serde_json = "1"
+```
+
+## Quick start
+
+The simplest path is `Client::from_env()`, which auto-registers providers based on environment variables (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GEMINI_API_KEY`, etc.):
+
+```rust
+use fabro_llm::client::Client;
+use fabro_llm::generate::{generate, GenerateParams};
+use fabro_llm::set_default_client;
+
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let client = Client::from_env().await?;
+    set_default_client(client);
+
+    let result = generate(
+        GenerateParams::new("claude-sonnet-4-5")
+            .prompt("Explain ownership in Rust in two sentences.")
+    ).await?;
+
+    println!("{}", result.text());
+    println!("Tokens used: {}", result.total_usage.total_tokens);
+    Ok(())
+}
+```
+
+## Client
+
+`Client` is the core type that holds provider adapters and middleware. It routes each request to the appropriate provider.
+
+### Creating from environment
+
+```rust
+let client = Client::from_env().await?;
+```
+
+This checks for API key environment variables and registers adapters for each provider found:
+
+| Environment variable | Provider |
+|---|---|
+| `ANTHROPIC_API_KEY` | Anthropic |
+| `OPENAI_API_KEY` | OpenAI |
+| `GEMINI_API_KEY` or `GOOGLE_API_KEY` | Gemini |
+| `KIMI_API_KEY` | Kimi |
+| `ZAI_API_KEY` | ZAI |
+| `MINIMAX_API_KEY` | Minimax |
+| `INCEPTION_API_KEY` | Inception |
+
+The first provider registered becomes the default. Optional base URL overrides (e.g. `ANTHROPIC_BASE_URL`) are also read.
+
+### Creating manually
+
+```rust
+use fabro_llm::client::Client;
+use fabro_llm::providers::AnthropicAdapter;
+use std::collections::HashMap;
+use std::sync::Arc;
+
+let adapter = AnthropicAdapter::new("sk-ant-...".to_string())
+    .with_base_url("https://custom-proxy.example.com".to_string());
+
+let mut providers = HashMap::new();
+providers.insert("anthropic".to_string(), Arc::new(adapter) as _);
+
+let client = Client::new(providers, Some("anthropic".to_string()), vec![]);
+```
+
+### Low-level calls
+
+For direct control without the tool loop, use `complete()` and `stream()` on the client:
+
+```rust
+use fabro_llm::types::{Request, Message};
+
+let request = Request {
+    model: "claude-sonnet-4-5".into(),
+    messages: vec![Message::user("Hello")],
+    ..Default::default()
+};
+
+let response = client.complete(&request).await?;
+println!("{}", response.text());
+```
+
+## High-level generation
+
+The `generate()` function wraps the client with automatic tool execution loops, retries, and timeouts. It is the recommended entry point for most use cases.
+
+### Basic completion
+
+```rust
+use fabro_llm::generate::{generate, GenerateParams};
+
+let result = generate(
+    GenerateParams::new("claude-sonnet-4-5")
+        .system("You are a helpful assistant.")
+        .prompt("What is the capital of France?")
+        .temperature(0.0)
+).await?;
+
+println!("{}", result.text());
+```
+
+### Multi-turn conversations
+
+Use `.messages()` instead of `.prompt()` to pass a full conversation history:
+
+```rust
+use fabro_llm::types::Message;
+
+let result = generate(
+    GenerateParams::new("claude-sonnet-4-5")
+        .messages(vec![
+            Message::user("My name is Alice."),
+            Message::assistant("Hello Alice! How can I help you?"),
+            Message::user("What's my name?"),
+        ])
+).await?;
+```
+
+<Note>
+You cannot use both `.prompt()` and `.messages()` on the same request — this returns `SdkError::Configuration`.
+</Note>
+
+### GenerateParams reference
+
+| Method | Type | Description |
+|---|---|---|
+| `new(model)` | `impl Into<String>` | Required. Model ID or alias (e.g. `"opus"`, `"claude-sonnet-4-5"`) |
+| `.prompt(text)` | `impl Into<String>` | Convenience: sends a single user message |
+| `.messages(msgs)` | `Vec<Message>` | Full conversation history |
+| `.system(text)` | `impl Into<String>` | System prompt |
+| `.tools(tools)` | `Vec<Tool>` | Tools available to the model |
+| `.tool_choice(choice)` | `ToolChoice` | How the model selects tools |
+| `.max_tool_rounds(n)` | `u32` | Max tool execution rounds (default: 1) |
+| `.temperature(t)` | `f64` | Sampling temperature |
+| `.top_p(p)` | `f64` | Nucleus sampling |
+| `.max_tokens(n)` | `i64` | Maximum output tokens |
+| `.stop_sequences(seqs)` | `Vec<String>` | Stop sequences |
+| `.reasoning_effort(level)` | `impl Into<String>` | e.g. `"low"`, `"medium"`, `"high"` |
+| `.provider(name)` | `impl Into<String>` | Force a specific provider |
+| `.max_retries(n)` | `u32` | Retry count for transient errors (default: 2) |
+| `.timeout(config)` | `TimeoutConfig` | Total and per-step timeouts |
+| `.client(client)` | `Arc<Client>` | Override the default client |
+| `.abort_signal(token)` | `CancellationToken` | Cancel generation |
+| `.stop_when(f)` | `Fn(&[StepResult]) -> bool` | Custom stop condition after each tool round |
+
+### GenerateResult
+
+`GenerateResult` dereferences to `Response`, so you can call response methods directly:
+
+```rust
+let result = generate(params).await?;
+
+// Response methods (via Deref)
+result.text();            // concatenated text output
+result.tool_calls();      // Vec<ToolCall> from the final response
+result.reasoning();       // Option<String> — extended thinking content
+
+// GenerateResult fields
+result.total_usage;       // Usage — aggregated across all steps
+result.steps;             // Vec<StepResult> — one per tool round
+result.output;            // Option<Value> — for structured output
+```
+
+## Tools
+
+Tools let the model call functions during generation. There are two kinds:
+
+- **Active tools** have an execute handler — Fabro runs them automatically and feeds results back to the model.
+- **Passive tools** have no handler — Fabro returns the tool calls to you in the response.
+
+### Defining an active tool
+
+```rust
+use fabro_llm::tools::Tool;
+use serde_json::json;
+
+let weather = Tool::active(
+    "get_weather",
+    "Get the current weather for a city",
+    json!({
+        "type": "object",
+        "properties": {
+            "city": { "type": "string", "description": "City name" }
+        },
+        "required": ["city"]
+    }),
+    |args, _ctx| async move {
+        let city = args["city"].as_str().unwrap_or("unknown");
+        Ok(json!({ "temperature": "72°F", "city": city }))
+    },
+);
+```
+
+### Using tools with generate
+
+```rust
+let result = generate(
+    GenerateParams::new("claude-sonnet-4-5")
+        .prompt("What's the weather in San Francisco?")
+        .tools(vec![weather])
+        .max_tool_rounds(5)
+).await?;
+
+// Inspect the tool execution history
+for (i, step) in result.steps.iter().enumerate() {
+    let calls = step.response.tool_calls();
+    println!("Step {i}: {} tool calls, {} results", calls.len(), step.tool_results.len());
+}
+```
+
+The `generate()` function loops automatically: the model calls tools, Fabro executes them, feeds results back, and repeats until the model stops or `max_tool_rounds` is reached.
+
+### Tool choice
+
+Control how the model selects tools:
+
+```rust
+use fabro_llm::types::ToolChoice;
+
+// Let the model decide (default)
+GenerateParams::new("opus").tool_choice(ToolChoice::Auto);
+
+// Force a specific tool
+GenerateParams::new("opus").tool_choice(ToolChoice::Named {
+    tool_name: "get_weather".into()
+});
+
+// Force the model to use some tool
+GenerateParams::new("opus").tool_choice(ToolChoice::Required);
+
+// Prevent tool use
+GenerateParams::new("opus").tool_choice(ToolChoice::None);
+```
+
+### Passive tools
+
+Passive tools let you handle execution yourself:
+
+```rust
+let search = Tool::passive(
+    "search",
+    "Search the codebase",
+    json!({
+        "type": "object",
+        "properties": {
+            "query": { "type": "string" }
+        },
+        "required": ["query"]
+    }),
+);
+
+let result = generate(
+    GenerateParams::new("claude-sonnet-4-5")
+        .prompt("Find all uses of the Config struct")
+        .tools(vec![search])
+).await?;
+
+// Handle tool calls yourself
+for call in result.tool_calls() {
+    println!("Model wants to call {} with {}", call.name, call.arguments);
+}
+```
+
+## Streaming
+
+### Text stream
+
+For simple cases where you only need the text deltas:
+
+```rust
+use fabro_llm::generate::{stream, GenerateParams};
+use futures::StreamExt;
+
+let stream_result = stream(
+    GenerateParams::new("claude-sonnet-4-5")
+        .prompt("Write a haiku about Rust")
+).await?;
+
+let mut text_stream = stream_result.text_stream();
+while let Some(chunk) = text_stream.next().await {
+    print!("{}", chunk?);
+}
+```
+
+### Full event stream
+
+For fine-grained control, consume `StreamEvent` variants directly:
+
+```rust
+use fabro_llm::generate::{stream, GenerateParams};
+use fabro_llm::types::StreamEvent;
+use futures::StreamExt;
+
+let mut stream_result = stream(
+    GenerateParams::new("claude-sonnet-4-5")
+        .prompt("Explain monads")
+).await?;
+
+while let Some(event) = stream_result.next().await {
+    match event? {
+        StreamEvent::TextDelta { delta, .. } => print!("{delta}"),
+        StreamEvent::ReasoningDelta { delta } => eprint!("[thinking] {delta}"),
+        StreamEvent::ToolCallStart { tool_call } => {
+            println!("\n> Calling tool: {}", tool_call.name);
+        }
+        StreamEvent::StepFinish { usage, .. } => {
+            println!("\n[step done, {} tokens]", usage.total_tokens);
+        }
+        StreamEvent::Finish { response, .. } => {
+            println!("\n[done: {:?}]", response.finish_reason);
+        }
+        _ => {}
+    }
+}
+```
+
+### StreamEvent variants
+
+| Variant | Description |
+|---|---|
+| `StreamStart` | Stream opened |
+| `TextStart` | Text block started |
+| `TextDelta { delta, text_id }` | Incremental text chunk |
+| `TextEnd` | Text block ended |
+| `ReasoningStart` | Extended thinking started |
+| `ReasoningDelta { delta }` | Incremental reasoning chunk |
+| `ReasoningEnd` | Extended thinking ended |
+| `ToolCallStart { tool_call }` | Tool call started |
+| `ToolCallDelta { tool_call }` | Incremental tool call arguments |
+| `ToolCallEnd { tool_call }` | Tool call complete |
+| `StepFinish { finish_reason, usage, response, tool_calls, tool_results }` | A tool round completed (more rounds may follow) |
+| `Finish { finish_reason, usage, response }` | Generation complete |
+| `Error { error, raw }` | Provider error |
+
+## Structured output
+
+Generate typed JSON objects that conform to a JSON Schema:
+
+```rust
+use fabro_llm::generate::{generate_object, GenerateParams};
+use serde_json::json;
+
+let schema = json!({
+    "type": "object",
+    "properties": {
+        "name": { "type": "string" },
+        "age": { "type": "integer" },
+        "hobbies": {
+            "type": "array",
+            "items": { "type": "string" }
+        }
+    },
+    "required": ["name", "age", "hobbies"]
+});
+
+let result = generate_object(
+    GenerateParams::new("claude-sonnet-4-5")
+        .prompt("Generate a profile for a fictional character"),
+    schema,
+).await?;
+
+let profile = result.output.expect("structured output");
+println!("Name: {}", profile["name"]);
+```
+
+## Middleware
+
+Middleware intercepts requests and responses for logging, caching, or transformation:
+
+```rust
+use fabro_llm::middleware::{Middleware, NextFn, NextStreamFn};
+use fabro_llm::provider::StreamEventStream;
+use fabro_llm::types::{Request, Response};
+use fabro_llm::error::SdkError;
+use async_trait::async_trait;
+
+struct LoggingMiddleware;
+
+#[async_trait]
+impl Middleware for LoggingMiddleware {
+    async fn handle_complete(
+        &self,
+        request: Request,
+        next: NextFn,
+    ) -> Result<Response, SdkError> {
+        println!("Request to model: {}", request.model);
+        let response = next(request).await?;
+        println!("Response: {} tokens", response.usage.total_tokens);
+        Ok(response)
+    }
+
+    async fn handle_stream(
+        &self,
+        request: Request,
+        next: NextStreamFn,
+    ) -> Result<StreamEventStream, SdkError> {
+        println!("Streaming request to model: {}", request.model);
+        next(request).await
+    }
+}
+```
+
+Add middleware to the client:
+
+```rust
+let mut client = Client::from_env().await?;
+client.add_middleware(Arc::new(LoggingMiddleware));
+```
+
+## Model catalog
+
+The crate embeds a catalog of known models with metadata:
+
+```rust
+use fabro_llm::catalog;
+
+// Look up a model by ID or alias
+let info = catalog::get_model_info("opus").unwrap();
+println!("{} ({})", info.display_name, info.provider);
+println!("Context: {} tokens", info.limits.context_window);
+println!("Tools: {}, Vision: {}", info.features.tools, info.features.vision);
+
+// List all models for a provider
+let models = catalog::list_models(Some("anthropic"));
+
+// Get the default model for a provider
+let default = catalog::default_model_for_provider("openai").unwrap();
+
+// Find a capability-matched model on a different provider
+let equivalent = catalog::closest_model("gemini", &info);
+```
+
+See [Models](/core-concepts/models) for the full catalog table.
+
+## Error handling
+
+All fallible operations return `Result<T, SdkError>`. The error type classifies failures to enable retry and failover decisions:
+
+```rust
+use fabro_llm::error::SdkError;
+
+match result {
+    Err(SdkError::Provider { kind, detail }) => {
+        println!("Provider error ({}): {}", detail.provider, detail.message);
+        if let Some(code) = detail.status_code {
+            println!("HTTP {code}");
+        }
+    }
+    Err(SdkError::RequestTimeout { message }) => println!("Timeout: {message}"),
+    Err(SdkError::Network { message }) => println!("Network: {message}"),
+    Err(SdkError::Abort { message }) => println!("Cancelled: {message}"),
+    Err(e) => println!("Other: {e}"),
+    Ok(_) => {}
+}
+```
+
+### Error classification
+
+Every `SdkError` exposes classification methods:
+
+| Method | Returns | Description |
+|---|---|---|
+| `retryable()` | `bool` | Safe to retry with the same provider (e.g. rate limit, server error) |
+| `failover_eligible()` | `bool` | Safe to try a different provider |
+| `retry_after()` | `Option<f64>` | Seconds to wait before retrying (from provider `Retry-After` header) |
+| `status_code()` | `Option<u16>` | HTTP status code, if applicable |
+| `provider_name()` | `&str` | Which provider returned the error |
+
+### Provider error kinds
+
+| Kind | HTTP status | Retryable | Failover |
+|---|---|---|---|
+| `Authentication` | 401 | No | No |
+| `AccessDenied` | 403 | No | No |
+| `NotFound` | 404 | No | No |
+| `InvalidRequest` | 400 | No | No |
+| `RateLimit` | 429 | Yes | Yes |
+| `Server` | 500, 502, 503 | Yes | Yes |
+| `ContentFilter` | varies | No | Yes |
+| `ContextLength` | varies | No | Yes |
+| `QuotaExceeded` | varies | No | Yes |
+
+## Retries
+
+The `generate()` function retries automatically based on `max_retries` (default: 2). For low-level use, the `retry` function wraps any async operation:
+
+```rust
+use fabro_llm::retry::retry;
+use fabro_llm::types::RetryPolicy;
+
+let policy = RetryPolicy {
+    max_retries: 3,
+    base_delay: 1.0,
+    max_delay: 60.0,
+    backoff_multiplier: 2.0,
+    jitter: true,
+    on_retry: None,
+};
+
+let response = retry(&policy, || {
+    let c = client.clone();
+    let r = request.clone();
+    async move { c.complete(&r).await }
+}).await?;
+```
+
+Retry only fires when `error.retryable()` returns `true` and respects `Retry-After` headers.
+
+## Cancellation
+
+Pass a `CancellationToken` to abort long-running generation:
+
+```rust
+use tokio_util::sync::CancellationToken;
+
+let token = CancellationToken::new();
+let token_clone = token.clone();
+
+// Cancel after 30 seconds
+tokio::spawn(async move {
+    tokio::time::sleep(std::time::Duration::from_secs(30)).await;
+    token_clone.cancel();
+});
+
+let result = generate(
+    GenerateParams::new("opus")
+        .prompt("Write a novel")
+        .abort_signal(token)
+).await;
+// Returns SdkError::Abort if cancelled
+```
+
+## Provider adapters
+
+Each provider has a dedicated adapter. All adapters implement the `ProviderAdapter` trait and are interchangeable.
+
+| Adapter | Provider | Constructor |
+|---|---|---|
+| `AnthropicAdapter` | Anthropic Messages API | `::new(api_key)` |
+| `OpenAiAdapter` | OpenAI Responses API | `::new(api_key)` |
+| `GeminiAdapter` | Google Gemini API | `::new(api_key)` |
+| `OpenAiCompatibleAdapter` | Any OpenAI-compatible endpoint | `::new(api_key, base_url)` |
+
+All adapters support `.with_base_url()` for proxies or custom endpoints. `OpenAiAdapter` also supports `.with_org_id()` and `.with_project_id()`.
+
+### Custom provider
+
+Implement the `ProviderAdapter` trait to add a new provider:
+
+```rust
+use fabro_llm::provider::{ProviderAdapter, StreamEventStream};
+use fabro_llm::types::{Request, Response};
+use fabro_llm::error::SdkError;
+use async_trait::async_trait;
+
+struct MyProvider;
+
+#[async_trait]
+impl ProviderAdapter for MyProvider {
+    fn name(&self) -> &str { "my-provider" }
+
+    async fn complete(&self, request: &Request) -> Result<Response, SdkError> {
+        // Call your provider's API
+        todo!()
+    }
+
+    async fn stream(&self, request: &Request) -> Result<StreamEventStream, SdkError> {
+        // Return a stream of events
+        todo!()
+    }
+}
+```
+
+Register it on the client:
+
+```rust
+client.register_provider(Arc::new(MyProvider)).await?;
+```
