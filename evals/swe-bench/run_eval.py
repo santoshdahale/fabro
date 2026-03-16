@@ -62,6 +62,21 @@ def dot_escape(s: str) -> str:
     return s.replace("\\", "\\\\").replace('"', '\\"').replace("\n", "\\n")
 
 
+def load_completed_ids(output_dir: Path) -> set[str]:
+    """Load instance IDs that have already been completed from prior runs."""
+    completed = set()
+    for jsonl_file in [output_dir / "results.jsonl"]:
+        if jsonl_file.exists():
+            with open(jsonl_file) as f:
+                for line in f:
+                    if line.strip():
+                        try:
+                            completed.add(json.loads(line)["instance_id"])
+                        except (json.JSONDecodeError, KeyError):
+                            pass
+    return completed
+
+
 def load_instances(instance_ids: list[str] | None = None) -> list[dict]:
     """Load SWE-bench Lite instances from HuggingFace."""
     dataset = load_dataset("princeton-nlp/SWE-bench_Lite", split="test")
@@ -148,6 +163,9 @@ def generate_workflow_toml(instance: dict, run_dir: Path) -> str:
     lines = [
         'version = 1',
         f'graph = "{fabro_path}"',
+        '',
+        '[pull_request]',
+        'enabled = false',
         '',
         '[sandbox]',
         'provider = "daytona"',
@@ -332,6 +350,12 @@ def main():
     log.info("Loading SWE-bench Lite instances...")
     instances = load_instances(args.instance_ids)
     log.info(f"  {len(instances)} instances loaded")
+
+    # --- Resume: skip already-completed instances -------------------------
+    completed_ids = load_completed_ids(args.output_dir)
+    if completed_ids:
+        instances = [i for i in instances if i["instance_id"] not in completed_ids]
+        log.info(f"  {len(completed_ids)} already completed, {len(instances)} remaining")
     log.info("")
 
     # --- Run instances ----------------------------------------------------
@@ -357,7 +381,7 @@ def main():
             for inst in instances
         }
 
-        with open(predictions_file, "w") as pf, open(results_file, "w") as rf:
+        with open(predictions_file, "a") as pf, open(results_file, "a") as rf:
             for future in as_completed(futures):
                 result = future.result()
                 iid = result["instance_id"]
@@ -405,27 +429,40 @@ def main():
 
     wall_duration = round(time.time() - wall_start, 1)
 
-    # --- Final summary ----------------------------------------------------
+    # --- Final summary (recompute from full results file) -----------------
+    all_counters = {"completed": 0, "no_patch": 0, "failed": 0, "timeout": 0, "error": 0}
+    all_total = 0
+    with open(results_file) as f:
+        for line in f:
+            if line.strip():
+                r = json.loads(line)
+                all_counters[r["status"]] = all_counters.get(r["status"], 0) + 1
+                all_total += 1
+
     summary = {
         "model": args.model,
         "provider": args.provider,
-        "total": total,
-        **counters,
+        "total": all_total,
+        **all_counters,
         "total_duration_s": wall_duration,
     }
     summary_file = args.output_dir / "summary.json"
     summary_file.write_text(json.dumps(summary, indent=2))
 
+    skipped = len(completed_ids)
     log.info("")
     log.info("=" * 64)
     log.info("FINAL RESULTS")
     log.info("=" * 64)
-    log.info(f"  Total:       {total}")
-    log.info(f"  Completed:   {counters.get('completed', 0)}")
-    log.info(f"  No patch:    {counters.get('no_patch', 0)}")
-    log.info(f"  Failed:      {counters.get('failed', 0)}")
-    log.info(f"  Timeout:     {counters.get('timeout', 0)}")
-    log.info(f"  Error:       {counters.get('error', 0)}")
+    if skipped:
+        log.info(f"  Skipped:     {skipped} (already completed)")
+        log.info(f"  This run:    {total}")
+    log.info(f"  Total:       {all_total}")
+    log.info(f"  Completed:   {all_counters.get('completed', 0)}")
+    log.info(f"  No patch:    {all_counters.get('no_patch', 0)}")
+    log.info(f"  Failed:      {all_counters.get('failed', 0)}")
+    log.info(f"  Timeout:     {all_counters.get('timeout', 0)}")
+    log.info(f"  Error:       {all_counters.get('error', 0)}")
     log.info(f"  Wall time:   {wall_duration}s")
     log.info(f"  Predictions: {predictions_file}")
     log.info(f"  Results:     {results_file}")

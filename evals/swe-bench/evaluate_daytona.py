@@ -40,6 +40,21 @@ from gen_dockerfile import generate_dockerfile, repo_version_key
 
 EVAL_DIR = Path(__file__).parent.resolve()
 
+
+def load_completed_ids(output_dir: Path) -> set[str]:
+    """Load instance IDs that have already been evaluated from prior runs."""
+    completed = set()
+    results_file = output_dir / "eval_results.jsonl"
+    if results_file.exists():
+        with open(results_file) as f:
+            for line in f:
+                if line.strip():
+                    try:
+                        completed.add(json.loads(line)["instance_id"])
+                    except (json.JSONDecodeError, KeyError):
+                        pass
+    return completed
+
 log = logging.getLogger("swe-eval-grade")
 
 HEREDOC_DELIMITER = "EOF_114329324912"
@@ -201,6 +216,9 @@ def generate_eval_toml(instance: dict, config_dir: Path) -> str:
     lines = [
         'version = 1',
         f'graph = "{config_dir / "eval.fabro"}"',
+        '',
+        '[pull_request]',
+        'enabled = false',
         '',
         '[sandbox]',
         'provider = "daytona"',
@@ -456,6 +474,13 @@ def main():
         predictions = {k: v for k, v in predictions.items() if k in id_set}
         log.info(f"  Filtered to {len(predictions)} instances")
 
+    # Resume: skip already-evaluated instances
+    completed_ids = load_completed_ids(args.output_dir)
+    if completed_ids:
+        before = len(predictions)
+        predictions = {k: v for k, v in predictions.items() if k not in completed_ids}
+        log.info(f"  {len(completed_ids)} already evaluated, {len(predictions)} remaining")
+
     # Load dataset instances
     log.info("Loading SWE-bench Lite dataset...")
     dataset = load_dataset("princeton-nlp/SWE-bench_Lite", split="test")
@@ -493,7 +518,7 @@ def main():
             for inst, patch in eval_items
         }
 
-        with open(results_file, "w") as rf:
+        with open(results_file, "a") as rf:
             for future in as_completed(futures):
                 result = future.result()
                 iid = result["instance_id"]
@@ -528,36 +553,49 @@ def main():
                     )
 
     wall_duration = round(time.time() - wall_start, 1)
-    pct = 100 * resolved_count / total if total > 0 else 0
 
-    # Write summary
-    summary = {
-        "total": total,
-        "resolved": resolved_count,
-        "resolved_pct": round(pct, 1),
-        "status_counts": dict(counters),
-        "wall_duration_s": wall_duration,
-    }
-    (args.output_dir / "summary.json").write_text(json.dumps(summary, indent=2))
-
-    # Per-repo breakdown
+    # Recompute summary from the full results file (includes prior runs)
+    all_counters: Counter[str] = Counter()
+    all_resolved = 0
+    all_total = 0
     repo_total: Counter[str] = Counter()
     repo_resolved: Counter[str] = Counter()
     with open(results_file) as f:
         for line in f:
+            if not line.strip():
+                continue
             r = json.loads(line)
+            all_counters[r["status"]] += 1
+            all_total += 1
+            if r["resolved"]:
+                all_resolved += 1
             parts = r["instance_id"].split("__")
             repo = f"{parts[0]}/{parts[1].rsplit('-', 1)[0]}" if len(parts) >= 2 else r["instance_id"]
             repo_total[repo] += 1
             if r["resolved"]:
                 repo_resolved[repo] += 1
 
+    pct = 100 * all_resolved / all_total if all_total > 0 else 0
+
+    summary = {
+        "total": all_total,
+        "resolved": all_resolved,
+        "resolved_pct": round(pct, 1),
+        "status_counts": dict(all_counters),
+        "wall_duration_s": wall_duration,
+    }
+    (args.output_dir / "summary.json").write_text(json.dumps(summary, indent=2))
+
+    skipped = len(completed_ids)
     log.info("")
     log.info("=" * 64)
     log.info("FINAL RESULTS")
     log.info("=" * 64)
-    log.info(f"  Total:       {total}")
-    log.info(f"  Resolved:    {resolved_count} ({pct:.1f}%)")
+    if skipped:
+        log.info(f"  Skipped:     {skipped} (already evaluated)")
+        log.info(f"  This run:    {total}")
+    log.info(f"  Total:       {all_total}")
+    log.info(f"  Resolved:    {all_resolved} ({pct:.1f}%)")
     log.info(f"  Wall time:   {wall_duration}s")
     log.info("")
     log.info(f"  {'Repo':<35s}  {'Resolved':>8s}  {'Total':>6s}  {'Rate':>6s}")
@@ -568,7 +606,7 @@ def main():
         rate = 100 * res / tot if tot > 0 else 0
         log.info(f"  {repo:<35s}  {res:>8d}  {tot:>6d}  {rate:>5.1f}%")
     log.info("")
-    log.info(f"  Status breakdown: {dict(counters)}")
+    log.info(f"  Status breakdown: {dict(all_counters)}")
     log.info(f"  Results:     {results_file}")
     log.info(f"  Summary:     {args.output_dir / 'summary.json'}")
     log.info(f"  Full log:    {args.output_dir / 'eval_grade.log'}")
