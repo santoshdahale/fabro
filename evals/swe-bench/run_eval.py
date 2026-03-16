@@ -388,7 +388,7 @@ def main():
         "--provider", default="anthropic", help="LLM provider",
     )
     parser.add_argument(
-        "--max-workers", type=int, default=200,
+        "--max-workers", type=int, default=150,
         help="Max concurrent sandboxes (default 100)",
     )
     parser.add_argument(

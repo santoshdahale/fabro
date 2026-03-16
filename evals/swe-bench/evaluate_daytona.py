@@ -498,7 +498,7 @@ def main():
         help="Output directory for eval results",
     )
     parser.add_argument(
-        "--max-workers", type=int, default=200,
+        "--max-workers", type=int, default=150,
         help="Max concurrent eval sandboxes (default 100)",
     )
     parser.add_argument(

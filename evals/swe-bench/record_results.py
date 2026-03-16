@@ -80,7 +80,7 @@ def main():
         help="Additional notes or observations",
     )
     parser.add_argument(
-        "--timeout", type=int, default=600,
+        "--timeout", type=int, default=1200,
         help="Per-instance timeout used (seconds)",
     )
     parser.add_argument(
