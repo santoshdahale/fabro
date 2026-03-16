@@ -79,6 +79,18 @@ def main():
         "--notes", default="",
         help="Additional notes or observations",
     )
+    parser.add_argument(
+        "--timeout", type=int, default=600,
+        help="Per-instance timeout used (seconds)",
+    )
+    parser.add_argument(
+        "--sandbox-cpu", type=int, default=2,
+        help="CPUs per Daytona sandbox",
+    )
+    parser.add_argument(
+        "--sandbox-memory", type=int, default=4,
+        help="Memory (GB) per Daytona sandbox",
+    )
     args = parser.parse_args()
 
     run_dir = SCOREBOARD_DIR / args.run_name
@@ -167,6 +179,9 @@ def main():
         "model": gen_summary.get("model", "unknown"),
         "provider": gen_summary.get("provider", "unknown"),
         "fabro_version": get_fabro_version(),
+        "timeout_s": args.timeout,
+        "sandbox_cpu": args.sandbox_cpu,
+        "sandbox_memory_gb": args.sandbox_memory,
         "description": args.description,
         "notes": args.notes,
         "total_instances": total,
