@@ -297,8 +297,8 @@ def main():
         "--provider", default="anthropic", help="LLM provider",
     )
     parser.add_argument(
-        "--max-workers", type=int, default=20,
-        help="Max concurrent sandboxes (default 20)",
+        "--max-workers", type=int, default=100,
+        help="Max concurrent sandboxes (default 100)",
     )
     parser.add_argument(
         "--instance-ids", nargs="+", help="Run only these instance IDs",
