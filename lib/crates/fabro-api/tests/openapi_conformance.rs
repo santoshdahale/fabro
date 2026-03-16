@@ -272,6 +272,7 @@ fn fully_populated_server_config() -> ServerConfig {
         },
         features: Features {
             session_sandboxes: true,
+            retros: false,
         },
         log: LogConfig {
             level: Some("debug".into()),

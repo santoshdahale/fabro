@@ -3284,6 +3284,7 @@ mod settings {
             },
             features: Features {
                 session_sandboxes: false,
+                retros: false,
             },
             log: Default::default(),
             run_defaults: fabro_workflows::cli::run_config::RunDefaults {

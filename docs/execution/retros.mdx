@@ -3,7 +3,11 @@ title: "Retros"
 description: "Automatic retrospectives that analyze every workflow run"
 ---
 
-After every workflow run, Fabro generates a **retro** — a structured retrospective that captures what happened, what went well, and what didn't. Retros combine deterministic metrics extracted from the run's checkpoint with a qualitative narrative produced by an LLM agent that analyzes the full event stream.
+<Warning>
+**Experimental feature.** Retros are disabled by default. Enable them with `[features] retros = true` in your project config or server config.
+</Warning>
+
+After every workflow run, Fabro can generate a **retro** — a structured retrospective that captures what happened, what went well, and what didn't. Retros combine deterministic metrics extracted from the run's checkpoint with a qualitative narrative produced by an LLM agent that analyzes the full event stream.
 
 The goal is continuous improvement. Retros give you a searchable history of how your workflows perform over time, surface friction patterns that would otherwise go unnoticed, and identify follow-up work before it falls through the cracks.
 
@@ -116,19 +120,26 @@ Retro: smooth — Successfully implemented the feature
   Retro saved to ~/fabro-logs/01JKXYZ.../retro.json
 ```
 
-To skip retro generation for a single run, pass `--no-retro`:
+To enable retros for your project, set `retros = true` in the `[features]` section of your `fabro.toml`:
+
+```toml title="fabro.toml"
+version = 1
+
+[features]
+retros = true
+```
+
+To skip retro generation for a single run when retros are enabled, pass `--no-retro`:
 
 ```bash
 fabro run workflow.fabro --no-retro
 ```
 
-To disable retros project-wide, set `retro = false` in your `fabro.toml`:
+Retros can also be enabled server-wide in `server.toml`:
 
-```toml title="fabro.toml"
-version = 1
-
-[fabro]
-retro = false
+```toml title="server.toml"
+[features]
+retros = true
 ```
 
 ### API

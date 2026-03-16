@@ -22,6 +22,7 @@ interface GitConfig {
 
 interface Features {
   session_sandboxes: boolean;
+  retros: boolean;
 }
 
 interface WebConfig {
@@ -60,6 +61,7 @@ const GIT_DEFAULTS: GitConfig = {
 
 const FEATURES_DEFAULTS: Features = {
   session_sandboxes: false,
+  retros: false,
 };
 
 export const FABRO_CONFIG_PATH = join(homedir(), ".fabro", "server.toml");

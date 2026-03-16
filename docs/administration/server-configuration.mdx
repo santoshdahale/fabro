@@ -71,6 +71,9 @@ auto_stop_interval = 60
 [sandbox.daytona.labels]
 team = "platform"
 
+[features]
+retros = true
+
 [checkpoint]
 exclude_globs = ["**/node_modules/**", "**/.cache/**"]
 
@@ -137,6 +140,17 @@ Configure checkpoint behavior for all runs.
 | `exclude_globs` | Glob patterns for files to exclude from checkpoint commits (e.g. `["**/node_modules/**"]`) |
 
 Exclude globs from `server.toml` and run configs are merged (union, deduplicated). See [Run Configuration — Checkpoint](/execution/run-configuration#checkpoint) for per-run configuration.
+
+### `[features]` section
+
+Toggle experimental or opt-in features. All features default to `false`.
+
+| Key | Description |
+|---|---|
+| `retros` | Enable automatic [retro](/execution/retros) generation after workflow runs (experimental) |
+| `session_sandboxes` | Enable session sandboxes in the web UI |
+
+The same `[features]` section can be set in `fabro.toml` (project-level) to enable features per-project.
 
 ## Environment variables
 

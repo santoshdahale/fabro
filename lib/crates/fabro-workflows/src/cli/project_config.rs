@@ -19,6 +19,8 @@ pub struct ProjectConfig {
     pub version: u32,
     #[serde(default)]
     pub fabro: ProjectFabroConfig,
+    #[serde(default)]
+    pub features: ProjectFeatures,
     #[serde(alias = "directory")]
     pub work_dir: Option<String>,
     pub llm: Option<LlmConfig>,
@@ -60,25 +62,27 @@ impl ProjectConfig {
 pub struct ProjectFabroConfig {
     #[serde(default = "default_root")]
     pub root: String,
-    #[serde(default = "default_retro")]
-    pub retro: bool,
 }
 
 fn default_root() -> String {
     ".".to_string()
 }
 
-fn default_retro() -> bool {
-    true
-}
-
 impl Default for ProjectFabroConfig {
     fn default() -> Self {
         Self {
             root: default_root(),
-            retro: default_retro(),
         }
     }
+}
+
+/// Feature flags for the project. All features default to `false` (opt-in).
+#[derive(Debug, Default, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct ProjectFeatures {
+    /// Experimental: enable automatic retro generation after workflow runs.
+    #[serde(default)]
+    pub retros: bool,
 }
 
 /// Parse a project config from a TOML string.
@@ -342,12 +346,13 @@ fn resolve_workflow_from(
 }
 
 /// Check whether retros are enabled in the project config.
-/// Returns `true` (the default) if no config is found or on error.
+/// Returns `false` (the default) if no config is found or on error.
+/// Retros are an experimental feature gated behind `[features] retros = true`.
 pub fn is_retro_enabled() -> bool {
     let start = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
     match discover_project_config(&start) {
-        Ok(Some((_path, config))) => config.fabro.retro,
-        _ => true,
+        Ok(Some((_path, config))) => config.features.retros,
+        _ => false,
     }
 }
 
@@ -375,7 +380,6 @@ mod tests {
                 version: 1,
                 fabro: ProjectFabroConfig {
                     root: ".".to_string(),
-                    retro: true,
                 },
                 ..Default::default()
             }
@@ -389,9 +393,15 @@ mod tests {
     }
 
     #[test]
-    fn parse_retro_false() {
-        let config = parse_project_config("version = 1\n[fabro]\nretro = false\n").unwrap();
-        assert!(!config.fabro.retro);
+    fn parse_retros_default_false() {
+        let config = parse_project_config("version = 1\n").unwrap();
+        assert!(!config.features.retros);
+    }
+
+    #[test]
+    fn parse_retros_enabled() {
+        let config = parse_project_config("version = 1\n[features]\nretros = true\n").unwrap();
+        assert!(config.features.retros);
     }
 
     #[test]

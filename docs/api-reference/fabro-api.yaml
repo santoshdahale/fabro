@@ -4505,6 +4505,9 @@ components:
         session_sandboxes:
           type: boolean
           description: Enable session sandboxes.
+        retros:
+          type: boolean
+          description: "Experimental: enable automatic retro generation after workflow runs."
 
     # ── Discovery Schemas ────────────────────────────────────────────────
 

@@ -22,5 +22,9 @@ export interface Features {
      * Enable session sandboxes.
      */
     'session_sandboxes'?: boolean;
+    /**
+     * Experimental: enable automatic retro generation after workflow runs.
+     */
+    'retros'?: boolean;
 }
 
