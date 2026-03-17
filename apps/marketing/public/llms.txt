@@ -2,10 +2,10 @@
 
 > Fabro is the open source dark software factory for expert engineers. Define your process as a workflow graph, let AI agents execute it, and intervene only where it matters.
 
-Fabro replaces the prompt-wait-review loop with version-controlled workflow graphs that orchestrate AI agents, shell commands, and human decisions into repeatable, long-horizon coding processes. Workflows are defined as DOT graphs where each node is a stage (agent, prompt, command, conditional, human, parallel, etc.) executed by the workflow engine.
+Fabro replaces the prompt-wait-review loop with version-controlled workflow graphs that orchestrate AI agents, shell commands, and human decisions into repeatable, long-horizon coding processes. Workflows are defined as Graphviz graphs where each node is a stage (agent, prompt, command, conditional, human, parallel, etc.) executed by the workflow engine.
 
 - Open source, MIT-licensed
-- Workflows defined as DOT graphs with CSS-like model stylesheets
+- Workflows defined as Graphviz graphs with CSS-like model stylesheets
 - Sandboxed execution via local Docker, Daytona, SSH, or Sprites
 - Checkpoint/resume for long-running workflows
 - Human-in-the-loop via CLI, web UI, or Slack
@@ -71,7 +71,7 @@ Fabro replaces the prompt-wait-review loop with version-controlled workflow grap
 - [API Overview](https://docs.fabro.sh/api-reference/overview): Introduction to the Fabro REST API
 - [CLI Reference](https://docs.fabro.sh/reference/cli): Command-line interface reference
 - [Architecture](https://docs.fabro.sh/reference/architecture): How CLI and API modes work under the hood
-- [DOT Language](https://docs.fabro.sh/reference/dot-language): Complete reference for Fabro's workflow language
+- [Graphviz DOT Language](https://docs.fabro.sh/reference/dot-language): Complete reference for Fabro's workflow language
 
 ## Optional
 

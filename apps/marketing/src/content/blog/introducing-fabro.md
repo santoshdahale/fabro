@@ -11,7 +11,7 @@ Most AI coding tools give you a chat window and hope for the best. Fabro takes a
 
 A chat-based agent is a single loop: prompt, act, repeat. That works for small tasks, but it falls apart when you need structure — when the plan should be approved before implementation begins, when tests must pass before the PR is opened, when a second model should cross-review the first.
 
-Fabro workflows are DOT graphs. Each node is a stage with a specific role: planning, coding, reviewing, testing. Edges define the flow. Human-in-the-loop gates let you intervene where it matters and step back where it doesn't.
+Fabro workflows are Graphviz graphs. Each node is a stage with a specific role: planning, coding, reviewing, testing. Edges define the flow. Human-in-the-loop gates let you intervene where it matters and step back where it doesn't.
 
 ## Multi-model by design
 

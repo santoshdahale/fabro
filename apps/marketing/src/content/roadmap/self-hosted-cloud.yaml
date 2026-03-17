@@ -1,4 +1,0 @@
-title: Self-hosted cloud
-description: Deploy Fabro as a managed service in your own infrastructure. Kubernetes-native with horizontal scaling and multi-tenant isolation.
-status: next
-sortOrder: 4

@@ -1,5 +1,4 @@
-title: Core workflow engine
-description: DOT graph parsing with branching, loops, parallel execution, and conditional routing.
+title: Workflow engine
+description: Graphviz graph parsing with agent, command, and human nodes. Dynamic edge selection with conditions and loops.
 status: shipped
-date: May 2025
-sortOrder: 7
+date: 2026-02-15

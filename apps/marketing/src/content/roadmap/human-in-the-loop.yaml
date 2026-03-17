@@ -1,5 +1,4 @@
-title: Human-in-the-loop
-description: Approval gates pause for human decisions. Steer running agents mid-turn. Interview steps collect input.
+title: Interview-based steering
+description: Approval gates, multiple choice, and freeform questions. Steer running agents via CLI, web, or Slack.
 status: shipped
-date: Sep 2025
-sortOrder: 5
+date: 2026-02-15

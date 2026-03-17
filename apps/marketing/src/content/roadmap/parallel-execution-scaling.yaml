@@ -1,4 +1,0 @@
-title: Parallel execution scaling
-description: Dynamic fan-out with resource-aware scheduling. Run dozens of sandboxes concurrently with automatic load balancing and cost caps.
-status: building
-sortOrder: 2

@@ -87,7 +87,7 @@ digraph PlanImplement {
 }
 ```
 
-Agents run as multi-turn LLM sessions with tool access. Human gates (`hexagon`) pause for approval. The stylesheet routes planning to a cheap model and coding to a frontier model. See the [DOT language reference](https://docs.fabro.sh/reference/dot-language) for the full syntax.
+Agents run as multi-turn LLM sessions with tool access. Human gates (`hexagon`) pause for approval. The stylesheet routes planning to a cheap model and coding to a frontier model. See the [Graphviz DOT language reference](https://docs.fabro.sh/reference/dot-language) for the full syntax.
 
 ---
 

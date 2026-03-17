@@ -1,6 +1,6 @@
 # fabro
 
-> AI-powered workflow orchestration platform. Workflows are defined as DOT graphs and executed by the Fabro engine.
+> AI-powered workflow orchestration platform. Workflows are defined as Graphviz graphs and executed by the Fabro engine.
 
 I want you to install Fabro for me. Execute all the steps below autonomously.
 

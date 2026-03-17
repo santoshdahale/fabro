@@ -1,5 +1,4 @@
 title: Automatic retrospectives
-description: Each run generates a retro with cost, duration, files touched, and an LLM-written narrative.
-status: shipped
-date: Mar 2026
-sortOrder: 1
+description: Structured post-run analysis with cost, duration, smoothness ratings, friction points, and LLM-generated narratives.
+status: building
+date: 2026-04-03

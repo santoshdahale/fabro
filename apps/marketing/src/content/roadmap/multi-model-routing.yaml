@@ -1,5 +1,4 @@
-title: Multi-model routing
-description: CSS-like model stylesheets assign providers per stage. Automatic fallback chains across providers.
+title: Multi-model agent
+description: Multi-turn LLM sessions with bash, file editing, sub-agents, skills, and lifecycle hooks.
 status: shipped
-date: Jul 2025
-sortOrder: 6
+date: 2026-02-15

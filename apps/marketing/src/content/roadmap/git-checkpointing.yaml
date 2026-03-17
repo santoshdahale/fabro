@@ -1,5 +1,4 @@
-title: Git checkpointing & resume
-description: Every stage commits to a Git branch with full metadata. Revert or resume from any checkpoint.
+title: Git checkpoints
+description: Every stage commits code and execution metadata to Git branches. Resume or fork from any checkpoint.
 status: shipped
-date: Nov 2025
-sortOrder: 4
+date: 2026-03-01

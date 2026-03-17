@@ -1,5 +1,4 @@
-title: API server & web UI
-description: REST API with SSE event streaming and a React dashboard for managing workflows at scale.
-status: shipped
-date: Feb 2026
-sortOrder: 2
+title: REST API server mode
+description: REST API with SSE event streaming for queuing runs, tracking progress, and managing workflows programmatically.
+status: building
+date: 2026-04-02

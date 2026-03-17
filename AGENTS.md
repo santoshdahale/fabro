@@ -45,11 +45,11 @@ The OpenAPI spec at `docs/api-reference/fabro-api.yaml` is the source of truth f
 
 ## Architecture
 
-Fabro is an AI-powered workflow orchestration platform. Workflows are defined as DOT graphs, where each node is a stage (agent, prompt, command, conditional, human, parallel, etc.) executed by the workflow engine.
+Fabro is an AI-powered workflow orchestration platform. Workflows are defined as Graphviz graphs, where each node is a stage (agent, prompt, command, conditional, human, parallel, etc.) executed by the workflow engine.
 
 ### Rust crates (`lib/crates/`)
 - **fabro-cli** — CLI entry point. Commands: `run`, `exec`, `serve`, `validate`, `parse`, `cp`, `model`, `doctor`, `init`, `install`, `ps`, `system prune`, `llm`
-- **fabro-workflows** — Core workflow engine. Parses DOT graphs, runs stages, manages checkpoints/resume, hooks, retros, and human-in-the-loop interactions
+- **fabro-workflows** — Core workflow engine. Parses Graphviz graphs, runs stages, manages checkpoints/resume, hooks, retros, and human-in-the-loop interactions
 - **fabro-agent** — AI coding agent with tool use (Bash, Read, Write, Edit, Glob, Grep, WebFetch). `Sandbox` trait abstracts execution environments
 - **fabro-api** — Axum HTTP server. Routes for runs, sessions, models, completions, usage. SSE event streaming. Demo mode via header
 - **fabro-exe** — SSH-based sandbox implementation (`ExeSandbox`)
@@ -70,7 +70,7 @@ Fabro is an AI-powered workflow orchestration platform. Workflows are defined as
 
 ### Key design patterns
 - **Sandbox trait** — Uniform interface for local, Docker, SSH (ExeSandbox), Sprites, and Daytona execution environments
-- **DOT graph workflows** — Stages and transitions defined as DOT graph attributes
+- **Graphviz graph workflows** — Stages and transitions defined as Graphviz graph attributes
 - **OpenAPI-first** — `fabro-api.yaml` drives both Rust type generation (typify) and TypeScript client generation (openapi-generator)
 - **Checkpoint/resume** — Workflows can be paused, checkpointed, and resumed
 
