@@ -141,6 +141,8 @@ enum Command {
         #[command(subcommand)]
         command: WorkflowCommand,
     },
+    /// Open the docs website in the browser
+    Docs,
     /// Upgrade fabro to the latest version
     Upgrade(upgrade::UpgradeArgs),
     /// System maintenance commands
@@ -451,6 +453,7 @@ async fn main_inner() -> (String, Result<()>) {
         Command::Skill { command } => match command {
             SkillCommand::Install(_) => "skill install",
         },
+        Command::Docs => "docs",
         Command::Upgrade(_) => "upgrade",
         Command::System { command } => match command {
             SystemCommand::Prune(_) => "system prune",
@@ -746,6 +749,9 @@ async fn main_inner() -> (String, Result<()>) {
                 let verbose = verbose || cli_config.verbose;
                 let exit_code = doctor::run_doctor(verbose, !dry_run).await;
                 std::process::exit(exit_code);
+            }
+            Command::Docs => {
+                open::that("https://docs.fabro.sh/")?;
             }
             Command::Init => {
                 init::run_init().await?;
