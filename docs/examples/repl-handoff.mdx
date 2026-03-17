@@ -16,6 +16,10 @@ This pattern is useful when a task is well-understood enough to plan interactive
 
 ## The workflow
 
+<Frame>
+  <img src="/images/example-repl-handoff.svg" alt="Start → Toolchain → Preflight Compile → Preflight Lint → Implement → Simplify (Opus) → Simplify (Gemini) → Simplify (GPT-54) → Verify → Format → Exit, with Preflight Lint/Fix Lints retry loop, Verify/Fixup retry loop, and early exit from Toolchain and Preflight Compile on failure" />
+</Frame>
+
 ```dot title="implement.fabro"
 digraph ImplementAndSimplify {
     graph [
