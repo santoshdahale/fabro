@@ -16,7 +16,7 @@ AI coding agents are powerful, but they're also chaotic. The current generation 
 - **No verification.** The agent decides when it's "done." There's no deterministic gate confirming that the code compiles, tests pass, and linting is clean.
 - **No reproducibility.** Sessions are ephemeral. You can't checkpoint mid-run, resume after a failure, or replay a workflow with a different model.
 
-The result is that engineers babysit their agents instead of leveraging them. That's the opposite of the productivity gains AI is supposed to deliver.
+The result is that engineers babysit their agents instead of using them. You spend more time supervising than you save.
 
 ## Workflow graphs: your engineering process as code
 
@@ -48,7 +48,7 @@ digraph PlanImplement {
 
 Each node is a stage with a specific role. Edges define the flow. Node shapes determine behavior — `box` for agents with tool access, `hexagon` for human decision gates, `diamond` for conditionals, `parallelogram` for shell commands. The graph supports loops, not just DAGs, so you can build implement-test-fix cycles that repeat until verification passes.
 
-This is the key insight: **the process is deterministic, even though the AI execution within each stage is not.** You control the structure. The models do the work.
+**The process is deterministic, even though the AI execution within each stage is not.** You control the structure. The models do the work.
 
 ## Multi-model by design
 
