@@ -3,6 +3,8 @@ use std::path::{Path, PathBuf};
 use anyhow::{bail, Context, Result};
 use clap::Args;
 
+use super::shared::split_run_path;
+
 #[derive(Args)]
 pub struct AssetListArgs {
     /// Run ID (or prefix)
@@ -205,13 +207,6 @@ fn parse_source(source: &str) -> (&str, Option<&str>) {
         Some((run_id, path)) => (run_id, Some(path)),
         None => (source, None),
     }
-}
-
-fn split_run_path(s: &str) -> Option<(&str, &str)> {
-    if s.starts_with('/') || s.starts_with("./") || s.starts_with("../") {
-        return None;
-    }
-    s.split_once(':')
 }
 
 fn format_size(bytes: u64) -> String {

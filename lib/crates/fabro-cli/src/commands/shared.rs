@@ -1,5 +1,8 @@
 use std::path::Path;
+use std::time::Duration;
 
+use anyhow::{bail, Result};
+use cli_table::Color;
 use fabro_util::terminal::Styles;
 use fabro_validate::{Diagnostic, Severity};
 
@@ -64,6 +67,62 @@ pub fn tilde_path(path: &Path) -> String {
         }
     }
     path.display().to_string()
+}
+
+pub fn color_if(use_color: bool, color: Color) -> Option<Color> {
+    if use_color {
+        Some(color)
+    } else {
+        None
+    }
+}
+
+pub fn split_run_path(s: &str) -> Option<(&str, &str)> {
+    if s.starts_with('/') || s.starts_with("./") || s.starts_with("../") {
+        return None;
+    }
+    s.split_once(':')
+}
+
+pub fn validate_daytona_provider(
+    record: &fabro_workflows::sandbox_record::SandboxRecord,
+    feature: &str,
+) -> Result<()> {
+    if record.provider != "daytona" {
+        bail!(
+            "{feature} is only supported for Daytona sandboxes (this run uses '{}')",
+            record.provider
+        );
+    }
+    Ok(())
+}
+
+pub fn format_duration_ms(ms: u64) -> String {
+    let duration = Duration::from_millis(ms);
+    let secs = duration.as_secs();
+    if secs >= 60 {
+        format!("{}m{:02}s", secs / 60, secs % 60)
+    } else if duration.as_millis() >= 1000 {
+        format!("{secs}s")
+    } else {
+        format!("{}ms", duration.as_millis())
+    }
+}
+
+pub fn format_size(bytes: u64) -> String {
+    const KB: u64 = 1024;
+    const MB: u64 = 1024 * KB;
+    const GB: u64 = 1024 * MB;
+
+    if bytes >= GB {
+        format!("{:.1} GB", bytes as f64 / GB as f64)
+    } else if bytes >= MB {
+        format!("{:.1} MB", bytes as f64 / MB as f64)
+    } else if bytes >= KB {
+        format!("{:.1} KB", bytes as f64 / KB as f64)
+    } else {
+        format!("{bytes} B")
+    }
 }
 
 #[cfg(test)]

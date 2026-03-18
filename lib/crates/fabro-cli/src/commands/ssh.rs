@@ -2,6 +2,8 @@ use anyhow::{bail, Context, Result};
 use clap::Args;
 use tracing::info;
 
+use super::shared::validate_daytona_provider;
+
 #[derive(Args)]
 pub struct SshArgs {
     /// Run ID or prefix
@@ -22,7 +24,7 @@ pub async fn run(args: SshArgs) -> Result<()> {
         "Failed to load sandbox.json — was this run started with a recent version of arc?",
     )?;
 
-    validate_provider(&record)?;
+    validate_daytona_provider(&record, "SSH access")?;
 
     let name = record
         .identifier
@@ -46,16 +48,6 @@ pub async fn run(args: SshArgs) -> Result<()> {
         exec_ssh(&ssh_cmd)?;
     }
 
-    Ok(())
-}
-
-fn validate_provider(record: &fabro_workflows::sandbox_record::SandboxRecord) -> Result<()> {
-    if record.provider != "daytona" {
-        bail!(
-            "SSH access is only supported for Daytona sandboxes (this run uses '{}')",
-            record.provider
-        );
-    }
     Ok(())
 }
 

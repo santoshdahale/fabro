@@ -1,6 +1,8 @@
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result};
 use clap::Args;
 use tracing::info;
+
+use super::shared::validate_daytona_provider;
 
 #[derive(Args)]
 pub struct PreviewArgs {
@@ -33,7 +35,7 @@ pub async fn run(args: PreviewArgs) -> Result<()> {
         "Failed to load sandbox.json — was this run started with a recent version of arc?",
     )?;
 
-    validate_provider(&record)?;
+    validate_daytona_provider(&record, "Preview URLs")?;
 
     let name = record
         .identifier
@@ -67,16 +69,6 @@ pub async fn run(args: PreviewArgs) -> Result<()> {
         print!("{}", format_standard_output(&preview.url, &preview.token));
     }
 
-    Ok(())
-}
-
-fn validate_provider(record: &fabro_workflows::sandbox_record::SandboxRecord) -> Result<()> {
-    if record.provider != "daytona" {
-        bail!(
-            "Preview URLs are only supported for Daytona sandboxes (this run uses '{}')",
-            record.provider
-        );
-    }
     Ok(())
 }
 

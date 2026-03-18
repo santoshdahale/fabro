@@ -4,6 +4,8 @@ use anyhow::{bail, Context, Result};
 use clap::Args;
 use tracing::{debug, info};
 
+use super::shared::split_run_path;
+
 #[derive(Args)]
 pub struct CpArgs {
     /// Source: <run-id>:<path> or local path
@@ -94,13 +96,6 @@ fn parse_direction(src: &str, dst: &str) -> Result<CopyDirection> {
         }
         (None, None) => bail!("One argument must contain a run-id prefix (e.g. <run-id>:<path>)"),
     }
-}
-
-fn split_run_path(s: &str) -> Option<(&str, &str)> {
-    if s.starts_with('/') || s.starts_with("./") || s.starts_with("../") {
-        return None;
-    }
-    s.split_once(':')
 }
 
 async fn load_sandbox(

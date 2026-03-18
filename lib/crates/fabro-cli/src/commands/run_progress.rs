@@ -12,7 +12,7 @@ use fabro_interview::{Answer, ConsoleInterviewer, Interviewer, Question};
 use fabro_workflows::event::{EventEmitter, WorkflowRunEvent};
 use fabro_workflows::outcome::StageStatus;
 
-use crate::commands::shared::{format_tokens_human, tilde_path};
+use crate::commands::shared::{format_duration_ms, format_tokens_human, tilde_path};
 use fabro_workflows::cost::{compute_stage_cost, format_cost};
 
 // ── Cached styles ───────────────────────────────────────────────────────
@@ -72,10 +72,6 @@ pub(crate) fn format_duration_short(d: Duration) -> String {
     } else {
         format!("{}ms", d.as_millis())
     }
-}
-
-pub(crate) fn format_duration_ms(ms: u64) -> String {
-    format_duration_short(Duration::from_millis(ms))
 }
 
 /// Wrap `text` in an OSC 8 terminal hyperlink pointing to `url`.

@@ -1,5 +1,4 @@
 use std::path::Path;
-use std::time::Duration;
 
 use anyhow::{bail, Context, Result};
 use chrono::{DateTime, Utc};
@@ -8,6 +7,8 @@ use cli_table::format::{Border, Justify, Separator};
 use cli_table::{print_stdout, Cell, CellStruct, Color, Style, Table};
 use fabro_util::terminal::Styles;
 use tracing::{debug, info, warn};
+
+use super::shared::{color_if, format_duration_ms, format_size, tilde_path};
 
 #[derive(Args)]
 pub struct RunFilterArgs {
@@ -120,6 +121,7 @@ pub fn list_command(args: &RunsListArgs, styles: &Styles) -> Result<()> {
     display_runs.reverse();
 
     let use_color = styles.use_color;
+    let now = Utc::now();
     let title = vec![
         "RUN ID".cell().bold(true),
         "WORKFLOW".cell().bold(true),
@@ -136,7 +138,7 @@ pub fn list_command(args: &RunsListArgs, styles: &Styles) -> Result<()> {
                 Some(ms) => format_duration_ms(ms),
                 None => match run.start_time_dt {
                     Some(start) => {
-                        let elapsed = Utc::now().signed_duration_since(start);
+                        let elapsed = now.signed_duration_since(start);
                         format_duration_ms(elapsed.num_milliseconds().max(0) as u64)
                     }
                     None => "-".to_string(),
@@ -226,41 +228,12 @@ fn short_run_id(id: &str) -> &str {
 
 fn truncate_goal(goal: &str, max_len: usize) -> String {
     let line = goal.lines().next().unwrap_or("");
-    let chars: Vec<char> = line.chars().collect();
-    if chars.len() <= max_len {
+    let char_count = line.chars().count();
+    if char_count <= max_len {
         return line.to_string();
     }
-    let truncated: String = chars[..max_len - 3].iter().collect();
+    let truncated: String = line.chars().take(max_len - 3).collect();
     format!("{truncated}...")
-}
-
-fn color_if(use_color: bool, color: Color) -> Option<Color> {
-    if use_color {
-        Some(color)
-    } else {
-        None
-    }
-}
-
-fn tilde_path(path: &Path) -> String {
-    if let Some(home) = dirs::home_dir() {
-        if let Ok(suffix) = path.strip_prefix(&home) {
-            return format!("~/{}", suffix.display());
-        }
-    }
-    path.display().to_string()
-}
-
-fn format_duration_ms(ms: u64) -> String {
-    let duration = Duration::from_millis(ms);
-    let secs = duration.as_secs();
-    if secs >= 60 {
-        format!("{}m{:02}s", secs / 60, secs % 60)
-    } else if duration.as_millis() >= 1000 {
-        format!("{secs}s")
-    } else {
-        format!("{}ms", duration.as_millis())
-    }
 }
 
 fn dir_size(path: &Path) -> u64 {
@@ -271,22 +244,6 @@ fn dir_size(path: &Path) -> u64 {
         .filter(|metadata| metadata.is_file())
         .map(|metadata| metadata.len())
         .sum()
-}
-
-fn format_size(bytes: u64) -> String {
-    const KB: u64 = 1024;
-    const MB: u64 = 1024 * KB;
-    const GB: u64 = 1024 * MB;
-
-    if bytes >= GB {
-        format!("{:.1} GB", bytes as f64 / GB as f64)
-    } else if bytes >= MB {
-        format!("{:.1} MB", bytes as f64 / MB as f64)
-    } else if bytes >= KB {
-        format!("{:.1} KB", bytes as f64 / KB as f64)
-    } else {
-        format!("{bytes} B")
-    }
 }
 
 fn df_from(args: &DfArgs, data_dir: &Path, runs_base: &Path, logs_base: &Path) -> Result<()> {

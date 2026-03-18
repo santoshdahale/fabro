@@ -7,6 +7,8 @@ use fabro_git_storage::gitobj::Store;
 use fabro_util::terminal::Styles;
 use git2::Repository;
 
+use super::shared::color_if;
+
 #[derive(Debug, Args)]
 pub struct RewindArgs {
     /// Run ID (or unambiguous prefix)
@@ -108,12 +110,4 @@ pub(crate) fn print_timeline(
         .border(Border::builder().build())
         .separator(Separator::builder().build());
     let _ = print_stderr(table);
-}
-
-fn color_if(use_color: bool, color: Color) -> Option<Color> {
-    if use_color {
-        Some(color)
-    } else {
-        None
-    }
 }
