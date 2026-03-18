@@ -1,4 +1,5 @@
 pub mod cli;
+pub mod dotenv;
 pub mod hook;
 pub mod mcp;
 pub mod project;

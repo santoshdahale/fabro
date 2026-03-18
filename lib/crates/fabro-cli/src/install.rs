@@ -200,38 +200,11 @@ ca = "~/.fabro/certs/ca.crt"
 }
 
 // ---------------------------------------------------------------------------
-// .env merge
+// .env merge (delegates to fabro_config::dotenv)
 // ---------------------------------------------------------------------------
 
 fn merge_env(existing: &str, new_vars: &[(&str, &str)]) -> String {
-    let mut result_lines: Vec<String> = Vec::new();
-    let mut handled_keys: std::collections::HashSet<&str> = std::collections::HashSet::new();
-
-    for line in existing.lines() {
-        if let Some(eq_pos) = line.find('=') {
-            let key = line[..eq_pos].trim();
-            if !key.is_empty() && !key.starts_with('#') {
-                if let Some((_, new_val)) = new_vars.iter().find(|(k, _)| *k == key) {
-                    result_lines.push(format!("{key}={new_val}"));
-                    handled_keys.insert(key);
-                    continue;
-                }
-            }
-        }
-        result_lines.push(line.to_string());
-    }
-
-    for (key, val) in new_vars {
-        if !handled_keys.contains(*key) {
-            result_lines.push(format!("{key}={val}"));
-        }
-    }
-
-    let mut result = result_lines.join("\n");
-    if !result.ends_with('\n') {
-        result.push('\n');
-    }
-    result
+    fabro_config::dotenv::merge_env(existing, new_vars)
 }
 
 // ---------------------------------------------------------------------------
@@ -577,12 +550,7 @@ fn write_env_file(arc_dir: &Path, env_pairs: &[(String, String)], s: &Styles) ->
         .map(|(k, v)| (k.as_str(), v.as_str()))
         .collect();
     let merged = merge_env(&existing, &refs);
-    std::fs::write(&env_path, &merged)?;
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(&env_path, std::fs::Permissions::from_mode(0o600))?;
-    }
+    fabro_config::dotenv::write_env_file(&env_path, &merged)?;
     eprintln!(
         "  {}",
         s.dim.apply_to(format!("Wrote {}", env_path.display()))

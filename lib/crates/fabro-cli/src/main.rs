@@ -135,6 +135,11 @@ enum Command {
         #[command(subcommand)]
         command: SkillCommand,
     },
+    /// Manage secrets in ~/.fabro/.env
+    Secret {
+        #[command(subcommand)]
+        command: SecretCommand,
+    },
     /// Rewind a workflow run to an earlier checkpoint
     Rewind(commands::rewind::RewindArgs),
     /// Fork a workflow run from an earlier checkpoint into a new run
@@ -206,6 +211,19 @@ enum RepoCommand {
     },
     /// Remove fabro.toml and fabro/ directory
     Deinit,
+}
+
+#[derive(Subcommand)]
+enum SecretCommand {
+    /// Get a secret value
+    Get(commands::secret::SecretGetArgs),
+    /// List secret names
+    #[command(alias = "ls")]
+    List(commands::secret::SecretListArgs),
+    /// Remove a secret
+    Rm(commands::secret::SecretRmArgs),
+    /// Set a secret value
+    Set(commands::secret::SecretSetArgs),
 }
 
 #[derive(Subcommand)]
@@ -469,6 +487,12 @@ async fn main_inner() -> (String, Result<()>) {
             PrCommand::View(_) => "pr view",
             PrCommand::Merge(_) => "pr merge",
             PrCommand::Close(_) => "pr close",
+        },
+        Command::Secret { command } => match command {
+            SecretCommand::Get(_) => "secret get",
+            SecretCommand::List(_) => "secret list",
+            SecretCommand::Rm(_) => "secret rm",
+            SecretCommand::Set(_) => "secret set",
         },
         Command::Rewind(_) => "rewind",
         Command::Fork(_) => "fork",
@@ -837,6 +861,20 @@ async fn main_inner() -> (String, Result<()>) {
                     }
                 }
             }
+            Command::Secret { command } => match command {
+                SecretCommand::Get(args) => {
+                    commands::secret::get_command(&args)?;
+                }
+                SecretCommand::List(args) => {
+                    commands::secret::list_command(&args)?;
+                }
+                SecretCommand::Rm(args) => {
+                    commands::secret::rm_command(&args)?;
+                }
+                SecretCommand::Set(args) => {
+                    commands::secret::set_command(&args)?;
+                }
+            },
             Command::Rewind(args) => {
                 let styles = fabro_util::terminal::Styles::detect_stderr();
                 commands::rewind::run(&args, &styles)?;

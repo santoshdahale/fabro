@@ -12,6 +12,7 @@ pub mod rewind;
 pub mod run;
 mod run_progress;
 pub mod runs;
+pub mod secret;
 pub(crate) mod shared;
 pub mod ssh;
 pub mod validate;
