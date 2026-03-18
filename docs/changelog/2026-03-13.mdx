@@ -20,11 +20,11 @@ graph = "workflow.fabro"
 
 Human-in-the-loop gates now show the previous stage's output before prompting, so you can see what the agent produced before deciding what to do next. Gates with only a freeform edge also skip the multiple-choice menu and go straight to a text input, making conversational loops like REPL workflows feel more natural.
 
-## More
+## User-level workflows
 
-<Accordion title="CLI">
-- Added user-level workflow lookup in `~/.fabro/workflows/` — personal workflows are now available across all projects
-</Accordion>
+Personal workflows stored in `~/.fabro/workflows/` are now available across all your projects. Drop a workflow into your home directory once and run it from anywhere with `fabro run <name>` — no need to copy it into each repo.
+
+## More
 
 <Accordion title="Workflows">
 - New `thread_id_requires_fidelity_full` lint rule warns when `thread_id` is set without `fidelity=full`

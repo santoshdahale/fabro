@@ -1,5 +1,5 @@
 ---
-title: "SSH sandbox and skill installer"
+title: "SSH sandbox, skill installer, and fabro graph"
 date: "2026-03-11"
 ---
 
@@ -32,10 +32,18 @@ fabro skill install --for user
 
 After installation, AI assistants in your editor can use the skill when generating or editing Fabro workflows.
 
+## Visualize workflows with fabro graph
+
+`fabro graph` renders your workflow DOT graphs as SVG or PNG, so you can see the full structure of your workflow at a glance. Requires Graphviz `dot` to be installed.
+
+```bash
+fabro graph                # SVG to stdout
+fabro graph -o flow.png    # PNG to file
+```
+
 ## More
 
 <Accordion title="CLI">
-- Added `fabro graph` subcommand to render workflow DOT graphs as SVG or PNG (requires Graphviz `dot`)
 - `fabro run` and `fabro validate` now print the resolved workflow path before execution
 - `fabro doctor` now groups checks into **Required**, **Optional**, and **Server** sections and shows a spinner while checks run
 - Added warning during `fabro init` when no git remote is configured

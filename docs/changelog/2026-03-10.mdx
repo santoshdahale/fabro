@@ -1,5 +1,5 @@
 ---
-title: "One-line installer, MCP servers, and devcontainer support"
+title: "One-line installer, MCP servers, devcontainers, and new CLI commands"
 date: "2026-03-10"
 ---
 
@@ -38,6 +38,40 @@ devcontainer = true
 **`--no-dotenv` flag removed.** Fabro now always loads `~/.fabro/.env` and never loads a local `./.env` file. If you were relying on project-local `.env` files, move those values to `~/.fabro/.env`.
 </Warning>
 
+## Manage PRs with fabro pr
+
+`fabro pr list`, `fabro pr view`, `fabro pr merge`, and `fabro pr close` let you manage pull requests created by workflow runs without leaving the CLI. Pair with `fabro pr create` (introduced Mar 9) for the full lifecycle.
+
+```bash
+fabro pr list               # list PRs from workflow runs
+fabro pr view <run-id>      # view PR details
+fabro pr merge <run-id>     # merge a workflow PR
+```
+
+## Scaffold projects with fabro init
+
+`fabro init` generates a `fabro.toml` with sensible defaults for your project — workflow aliases, pull request config, and sandbox settings — so you can go from zero to `fabro run` in seconds.
+
+```bash
+fabro init
+```
+
+## View run diffs with fabro diff
+
+`fabro diff` shows the code changes from any workflow run. It works on both completed and in-progress runs — for active runs, you get a live diff of the current state.
+
+```bash
+fabro diff <run-id>
+```
+
+## Preview sandbox URLs with fabro preview
+
+`fabro preview` returns preview URLs for ports exposed by Daytona sandboxes, so you can open a running web app or service directly from the CLI.
+
+```bash
+fabro preview <run-id>
+```
+
 ## More
 
 <Accordion title="API">
@@ -45,12 +79,8 @@ devcontainer = true
 </Accordion>
 
 <Accordion title="CLI">
-- Added `fabro pr list/view/merge/close` subcommands for managing pull requests created by workflow runs
-- Added `fabro init` command to scaffold new projects with a generated `fabro.toml`
-- Added `fabro diff` command to view code changes from workflow runs, with live diffs for in-progress runs
 - `fabro setup` renamed to `fabro install` for clarity
 - Added `fabro ssh` command for direct SSH access to Daytona sandboxes
-- Added `fabro preview` command to get preview URLs for ports exposed by Daytona sandboxes
 - `fabro doctor` now runs live service probes by default; use `--dry-run` to skip
 - `fabro doctor` now validates GitHub App configuration and private key
 - `fabro doctor` now hides unconfigured LLM providers for a cleaner output

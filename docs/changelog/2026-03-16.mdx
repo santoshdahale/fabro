@@ -1,5 +1,5 @@
 ---
-title: "Auto-merge for PRs, lifecycle hooks, and styled workflow graphs"
+title: "Auto-merge for PRs, three new lifecycle hooks, and styled workflow graphs"
 date: "2026-03-16"
 ---
 
@@ -13,9 +13,9 @@ auto_merge = true
 merge_strategy = "squash"
 ```
 
-## Lifecycle hooks fully wired
+## Three new lifecycle hooks
 
-Three hook events — `stage_retrying`, `parallel_start`, and `parallel_complete` — were previously defined and documented but never actually fired by the engine. They now trigger at the correct points: `stage_retrying` fires immediately before backoff sleep on both error-retry and explicit-retry paths, and the parallel hooks fire when parallel node groups start and finish execution. If you had hooks configured for these events that weren't running, they'll start working now.
+Three new hook events are now available — `stage_retrying`, `parallel_start`, and `parallel_complete`. `stage_retrying` fires immediately before backoff sleep on both error-retry and explicit-retry paths, and the parallel hooks fire when parallel node groups start and finish execution.
 
 ## More
 
