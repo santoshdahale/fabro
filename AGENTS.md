@@ -64,7 +64,8 @@ Fabro is an AI-powered workflow orchestration platform. Workflows are defined as
 - **fabro-slack** — Slack integration (socket mode, blocks API)
 - **fabro-devcontainer** — Parses `.devcontainer/devcontainer.json` for container setup
 - **fabro-git-storage** — Git-based storage with branch store and snapshots
-- **fabro-util** — Shared utilities (redaction, telemetry, terminal formatting)
+- **fabro-telemetry** — CLI analytics (Segment) and crash reporting (Sentry), with anonymous IDs, command sanitization, and detached subprocess delivery
+- **fabro-util** — Shared utilities (redaction, terminal formatting)
 
 ### TypeScript (`apps/` and `lib/packages/`)
 - **apps/fabro-web** — React 19 + React Router + Vite + Tailwind CSS frontend

@@ -75,6 +75,43 @@ fn build_segment_batch(content: &str) -> Option<serde_json::Value> {
     Some(serde_json::json!({ "batch": batch }))
 }
 
+/// Sends track events to Segment synchronously. Used for mid-run flushes
+/// on the background telemetry thread.
+/// No-ops if `SEGMENT_WRITE_KEY` was not set at compile time or `tracks` is empty.
+pub fn upload_blocking(tracks: &[Track]) -> anyhow::Result<()> {
+    let write_key = SEGMENT_WRITE_KEY
+        .ok_or_else(|| anyhow::anyhow!("SEGMENT_WRITE_KEY not set at compile time"))?;
+
+    if tracks.is_empty() {
+        return Ok(());
+    }
+
+    let lines: Vec<String> = tracks
+        .iter()
+        .filter_map(|t| serde_json::to_string(t).ok())
+        .collect();
+
+    let content = lines.join("\n");
+    let payload = match build_segment_batch(&content) {
+        Some(p) => p,
+        None => return Ok(()),
+    };
+
+    let auth = STANDARD.encode(format!("{write_key}:"));
+
+    let resp = reqwest::blocking::Client::new()
+        .post(format!("{SEGMENT_BASE_URL}/v1/batch"))
+        .header("Authorization", format!("Basic {auth}"))
+        .json(&payload)
+        .send()?;
+
+    if !resp.status().is_success() {
+        anyhow::bail!("segment API returned status {}", resp.status());
+    }
+
+    Ok(())
+}
+
 /// Reads a JSONL file of serialized track events from `path` and sends them
 /// to Segment as a batch.
 /// Called by the `__send_analytics` subcommand.
@@ -208,7 +245,35 @@ mod tests {
         emit(&[]);
     }
 
-    // -- Step 3: upload() tests --
+    // -- Step 3: upload_blocking() tests --
+
+    #[test]
+    fn upload_blocking_noops_without_write_key() {
+        let track = Track {
+            user: User::AnonymousId {
+                anonymous_id: "test".to_string(),
+            },
+            event: "test".to_string(),
+            properties: json!({}),
+            context: None,
+            timestamp: None,
+            message_id: "msg-test".to_string(),
+        };
+
+        let result = upload_blocking(&[track]);
+        assert!(result.is_err());
+        let err_msg = result.unwrap_err().to_string();
+        assert!(err_msg.contains("SEGMENT_WRITE_KEY not set"));
+    }
+
+    #[test]
+    fn upload_blocking_noops_with_empty_tracks() {
+        // With no write key, but empty tracks should still error on write key check
+        let result = upload_blocking(&[]);
+        assert!(result.is_err());
+    }
+
+    // -- Step 4: upload() tests --
 
     #[test]
     fn upload_noops_without_write_key() {

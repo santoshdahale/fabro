@@ -15,21 +15,11 @@ termimad.workspace = true
 aho-corasick.workspace = true
 serde_json.workspace = true
 serde.workspace = true
-reqwest.workspace = true
 tokio.workspace = true
-uuid.workspace = true
-chrono.workspace = true
-base64.workspace = true
 dirs.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
 anyhow.workspace = true
-mac_address.workspace = true
-md5.workspace = true
-git2.workspace = true
-sentry.workspace = true
-fork.workspace = true
-exec.workspace = true
 
 [build-dependencies]
 toml = "0.8"

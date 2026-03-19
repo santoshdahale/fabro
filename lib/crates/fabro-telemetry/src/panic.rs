@@ -3,7 +3,7 @@ use std::path::Path;
 
 use sentry::protocol::{Event, Exception, Mechanism};
 
-use super::TelemetryLevel;
+use crate::TelemetryLevel;
 
 const SENTRY_DSN: Option<&str> = option_env!("SENTRY_DSN");
 
@@ -20,7 +20,7 @@ pub fn install_panic_hook() {
 }
 
 /// Build a Sentry event from panic info. Exposed for testing.
-pub fn build_panic_event(message: &str) -> Event<'static> {
+pub fn build_event(message: &str) -> Event<'static> {
     let mut event = Event::new();
     event.level = sentry::Level::Fatal;
 
@@ -52,7 +52,7 @@ pub fn build_panic_event(message: &str) -> Event<'static> {
     );
 
     // Set release to the package version.
-    event.release = Some(crate::version::FABRO_VERSION.into());
+    event.release = Some(env!("CARGO_PKG_VERSION").into());
 
     event
 }
@@ -80,7 +80,7 @@ fn report_panic(info: &PanicHookInfo<'_>) {
         return;
     }
 
-    let level = super::telemetry_level();
+    let level = crate::telemetry_level();
     if level == TelemetryLevel::Off {
         return;
     }
@@ -90,7 +90,7 @@ fn report_panic(info: &PanicHookInfo<'_>) {
         return;
     }
 
-    let event = build_panic_event(&message);
+    let event = build_event(&message);
     spawn_panic_sender(event);
 }
 
@@ -102,14 +102,14 @@ fn spawn_panic_sender(event: Event<'static>) {
     };
 
     let filename = format!("fabro-panic-{}.json", event.event_id);
-    super::spawn::spawn_fabro_subcommand("__send_panic", &filename, &json);
+    crate::spawn::spawn_fabro_subcommand("__send_panic", &filename, &json);
 }
 
 /// Send a serialized Sentry panic event. Called by the `__send_panic` subcommand.
 ///
 /// Reads the JSON event from `path` and sends it to Sentry.
 /// No-ops if `SENTRY_DSN` was not set at compile time.
-pub async fn send_panic_to_sentry(path: &Path) -> anyhow::Result<()> {
+pub async fn capture(path: &Path) -> anyhow::Result<()> {
     let dsn = SENTRY_DSN.ok_or_else(|| anyhow::anyhow!("SENTRY_DSN not set at compile time"))?;
 
     let json = std::fs::read(path)?;
@@ -130,8 +130,8 @@ mod tests {
     use super::*;
 
     #[test]
-    fn build_panic_event_structure() {
-        let event = build_panic_event("test panic message");
+    fn build_event_structure() {
+        let event = build_event("test panic message");
 
         assert_eq!(event.level, sentry::Level::Fatal);
         assert_eq!(event.exception.values.len(), 1);
@@ -163,12 +163,9 @@ mod tests {
 
     #[test]
     fn report_panic_noop_when_telemetry_off() {
-        use crate::env::TestEnv;
-        use std::collections::HashMap;
-        // Verify telemetry_level_from returns Off without mutating process env.
-        let env = TestEnv(HashMap::from([("FABRO_TELEMETRY".into(), "off".into())]));
+        // Verify telemetry_level_from returns Off for "off".
         assert_eq!(
-            super::super::telemetry_level_from(&env),
+            crate::telemetry_level_from(Some("off")),
             TelemetryLevel::Off
         );
     }
@@ -177,7 +174,7 @@ mod tests {
     fn send_panic_noops_without_dsn() {
         // SENTRY_DSN is not set at compile time in tests, so this should error.
         let rt = tokio::runtime::Runtime::new().unwrap();
-        let result = rt.block_on(send_panic_to_sentry(Path::new("/nonexistent")));
+        let result = rt.block_on(capture(Path::new("/nonexistent")));
         assert!(result.is_err());
         let err_msg = result.unwrap_err().to_string();
         assert!(err_msg.contains("SENTRY_DSN not set"));
@@ -185,7 +182,7 @@ mod tests {
 
     #[test]
     fn event_round_trips_through_json() {
-        let event = build_panic_event("roundtrip test");
+        let event = build_event("roundtrip test");
         let json = serde_json::to_vec(&event).unwrap();
         let deserialized: Event<'static> = serde_json::from_slice(&json).unwrap();
         assert_eq!(deserialized.level, sentry::Level::Fatal);

@@ -376,7 +376,8 @@ fn detach_run(args: commands::run::RunArgs) -> Result<()> {
 
 #[tokio::main]
 async fn main() {
-    fabro_util::telemetry::panic::install_panic_hook();
+    fabro_telemetry::panic::install_panic_hook();
+    fabro_telemetry::init_cli();
 
     let start = std::time::Instant::now();
     let raw_args: Vec<String> = std::env::args().collect();
@@ -384,7 +385,29 @@ async fn main() {
     let (command_name, result) = main_inner().await;
     let duration_ms = start.elapsed().as_millis() as u64;
 
-    send_telemetry_event(&raw_args, &command_name, duration_ms, &result);
+    let is_error = result.is_err();
+    if is_error {
+        fabro_telemetry::track!("CLI Errored", {
+            "subcommand": command_name,
+            "command": fabro_telemetry::sanitize::sanitize_command(&raw_args, &command_name),
+            "durationMs": duration_ms,
+            "repository": fabro_telemetry::git::repository_identifier(),
+            "ci": std::env::var("CI").is_ok(),
+            "success": false,
+            "exitCode": 1,
+        }, error);
+    } else {
+        fabro_telemetry::track!("CLI Executed", {
+            "subcommand": command_name,
+            "command": fabro_telemetry::sanitize::sanitize_command(&raw_args, &command_name),
+            "durationMs": duration_ms,
+            "repository": fabro_telemetry::git::repository_identifier(),
+            "ci": std::env::var("CI").is_ok(),
+            "success": true,
+            "exitCode": 0,
+        });
+    }
+    fabro_telemetry::shutdown();
 
     if let Err(err) = result {
         let style = console::Style::new().red().bold();
@@ -406,48 +429,6 @@ async fn main() {
         }
         std::process::exit(1);
     }
-}
-
-fn send_telemetry_event(
-    raw_args: &[String],
-    command_name: &str,
-    duration_ms: u64,
-    result: &Result<()>,
-) {
-    let is_error = result.is_err();
-    let telemetry = match fabro_util::telemetry::Telemetry::for_cli() {
-        Ok(t) => t,
-        Err(err) => {
-            debug!(%err, "Telemetry initialization failed");
-            return;
-        }
-    };
-    if !telemetry.should_track(is_error) {
-        return;
-    }
-
-    let event_name = if is_error {
-        "Command Error"
-    } else {
-        "Command Run"
-    };
-    let properties = serde_json::json!({
-        "subcommand": command_name,
-        "command": fabro_util::telemetry::sanitize::sanitize_command(raw_args, command_name),
-        "durationMs": duration_ms,
-        "repository": fabro_util::telemetry::git::repository_identifier(),
-        "ci": std::env::var("CI").is_ok(),
-        "success": !is_error,
-        "exitCode": if is_error { 1 } else { 0 },
-    });
-
-    let track = telemetry.build_track(event_name, properties);
-    fabro_util::telemetry::sender::emit(&[track]);
-    debug!(
-        event = event_name,
-        subcommand = command_name,
-        "Telemetry event queued"
-    );
 }
 
 async fn main_inner() -> (String, Result<()>) {
@@ -932,12 +913,12 @@ async fn main_inner() -> (String, Result<()>) {
                 }
             },
             Command::SendAnalytics { path } => {
-                let result = fabro_util::telemetry::sender::upload(&path).await;
+                let result = fabro_telemetry::sender::upload(&path).await;
                 let _ = std::fs::remove_file(&path);
                 result?;
             }
             Command::SendPanic { path } => {
-                let result = fabro_util::telemetry::panic::send_panic_to_sentry(&path).await;
+                let result = fabro_telemetry::panic::capture(&path).await;
                 let _ = std::fs::remove_file(&path);
                 result?;
             }
