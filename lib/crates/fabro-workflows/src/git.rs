@@ -278,6 +278,46 @@ pub fn ensure_clean_and_pushed(repo: &Path, remote: &str, branch: Option<&str>) 
     }
 }
 
+/// Tri-state summary of the local repository's readiness for a workflow run.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GitSyncStatus {
+    /// Working tree is clean and the branch is pushed to the remote.
+    Synced,
+    /// Working tree is clean but the branch has unpushed commits
+    /// (or push status could not be verified, e.g. detached HEAD).
+    Unsynced,
+    /// Working tree has uncommitted changes.
+    Dirty,
+}
+
+impl GitSyncStatus {
+    /// Whether the working tree has no uncommitted changes.
+    pub fn is_clean(&self) -> bool {
+        matches!(self, Self::Synced | Self::Unsynced)
+    }
+}
+
+impl std::fmt::Display for GitSyncStatus {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Synced => write!(f, "synced"),
+            Self::Unsynced => write!(f, "unsynced (unpushed commits)"),
+            Self::Dirty => write!(f, "dirty (uncommitted changes)"),
+        }
+    }
+}
+
+/// Determine the sync status of the repository relative to a remote.
+pub fn sync_status(repo: &Path, remote: &str, branch: Option<&str>) -> GitSyncStatus {
+    if ensure_clean(repo).is_err() {
+        return GitSyncStatus::Dirty;
+    }
+    match branch {
+        Some(b) if !branch_needs_push(repo, remote, b) => GitSyncStatus::Synced,
+        _ => GitSyncStatus::Unsynced,
+    }
+}
+
 /// Sanitize a string for use as a git ref component.
 /// Lowercases, replaces non-alphanumeric chars with dashes, collapses runs.
 pub fn sanitize_ref_component(s: &str) -> String {

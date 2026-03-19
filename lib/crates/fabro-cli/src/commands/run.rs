@@ -398,6 +398,17 @@ async fn mint_github_token(
     Ok(token)
 }
 
+/// How the workflow run's working directory is set up.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum WorkdirStrategy {
+    /// Run directly in the current working directory.
+    LocalDirectory,
+    /// Create a local git worktree for isolation.
+    LocalWorktree,
+    /// Remote sandbox clones from origin (Daytona, Exe, SSH).
+    Cloud,
+}
+
 /// Accumulates token usage and cost across all workflow stages.
 #[derive(Default)]
 struct CostAccumulator {
@@ -557,16 +568,8 @@ pub async fn run_command(
     let (origin_url, detected_base_branch) = fabro_daytona::detect_repo_info(&original_cwd)
         .map(|(url, branch)| (Some(url), branch))
         .unwrap_or((None, None));
-    let git_clean = if sandbox_provider.is_remote() {
-        fabro_workflows::git::ensure_clean_and_pushed(
-            &original_cwd,
-            "origin",
-            detected_base_branch.as_deref(),
-        )
-        .is_ok()
-    } else {
-        fabro_workflows::git::ensure_clean(&original_cwd).is_ok()
-    };
+    let git_status =
+        fabro_workflows::git::sync_status(&original_cwd, "origin", detected_base_branch.as_deref());
 
     if args.preflight {
         return run_preflight(
@@ -574,7 +577,7 @@ pub async fn run_command(
             &run_cfg,
             &args,
             &run_defaults,
-            git_clean,
+            git_status,
             sandbox_provider,
             styles,
             github_app,
@@ -720,44 +723,84 @@ pub async fn run_command(
         ))
     };
 
-    // Set up git worktree for local execution (must happen before cwd is captured).
-    // Remote sandboxes (Daytona, Exe) clone into their own environment, so a local
-    // worktree is unnecessary and wastes disk.
-    let worktree_mode = resolve_worktree_mode(run_cfg.as_ref(), &run_defaults);
-    let should_create_worktree = if sandbox_provider.is_remote() {
-        false
+    // Determine the working directory strategy.
+    // Remote sandboxes clone from origin; local runs may use a git worktree.
+    let workdir_strategy = if sandbox_provider.is_remote() {
+        WorkdirStrategy::Cloud
     } else {
+        let worktree_mode = resolve_worktree_mode(run_cfg.as_ref(), &run_defaults);
         match worktree_mode {
-            sandbox_config::WorktreeMode::Always => true,
-            sandbox_config::WorktreeMode::Clean => git_clean,
-            sandbox_config::WorktreeMode::Dirty => !git_clean,
-            sandbox_config::WorktreeMode::Never => false,
+            sandbox_config::WorktreeMode::Always => WorkdirStrategy::LocalWorktree,
+            sandbox_config::WorktreeMode::Clean => {
+                if git_status.is_clean() {
+                    WorkdirStrategy::LocalWorktree
+                } else {
+                    WorkdirStrategy::LocalDirectory
+                }
+            }
+            sandbox_config::WorktreeMode::Dirty => {
+                if git_status.is_clean() {
+                    WorkdirStrategy::LocalDirectory
+                } else {
+                    WorkdirStrategy::LocalWorktree
+                }
+            }
+            sandbox_config::WorktreeMode::Never => WorkdirStrategy::LocalDirectory,
         }
     };
     debug!(
-        ?worktree_mode,
+        ?workdir_strategy,
         ?sandbox_provider,
-        git_clean,
-        should_create_worktree,
-        "Resolved worktree mode"
+        ?git_status,
+        "Resolved workdir strategy"
     );
 
-    if should_create_worktree && !git_clean {
-        eprintln!(
-            "{} Uncommitted changes will not be included in the worktree.",
-            styles.yellow.apply_to("Warning:"),
-        );
+    // Warn about uncommitted changes that won't be available in the execution environment.
+    if git_status == fabro_workflows::git::GitSyncStatus::Dirty {
+        match workdir_strategy {
+            WorkdirStrategy::LocalWorktree => {
+                eprintln!(
+                    "{} Uncommitted changes will not be included in the worktree.",
+                    styles.yellow.apply_to("Warning:"),
+                );
+            }
+            WorkdirStrategy::Cloud => {
+                eprintln!(
+                    "{} Uncommitted changes will not be included in the remote sandbox.",
+                    styles.yellow.apply_to("Warning:"),
+                );
+            }
+            WorkdirStrategy::LocalDirectory => {}
+        }
     }
 
-    if should_create_worktree && !args.dry_run {
+    // Auto-push when the execution environment needs commits on the remote.
+    if !args.dry_run
+        && matches!(
+            workdir_strategy,
+            WorkdirStrategy::LocalWorktree | WorkdirStrategy::Cloud
+        )
+    {
         if let Some(ref branch) = detected_base_branch {
-            let check_repo = original_cwd.clone();
-            let check_branch = branch.clone();
-            let needs_push = tokio::task::spawn_blocking(move || {
-                fabro_workflows::git::branch_needs_push(&check_repo, "origin", &check_branch)
-            })
-            .await
-            .unwrap_or(true);
+            // For Synced we know no push is needed; for Unsynced we know it is;
+            // for Dirty the push status wasn't checked, so check now.
+            let needs_push = match git_status {
+                fabro_workflows::git::GitSyncStatus::Synced => false,
+                fabro_workflows::git::GitSyncStatus::Unsynced => true,
+                fabro_workflows::git::GitSyncStatus::Dirty => {
+                    let check_repo = original_cwd.clone();
+                    let check_branch = branch.clone();
+                    tokio::task::spawn_blocking(move || {
+                        fabro_workflows::git::branch_needs_push(
+                            &check_repo,
+                            "origin",
+                            &check_branch,
+                        )
+                    })
+                    .await
+                    .unwrap_or(true)
+                }
+            };
 
             if needs_push {
                 let repo_path = original_cwd.clone();
@@ -788,8 +831,9 @@ pub async fn run_command(
         }
     }
 
+    // Set up git worktree for local isolation.
     let (worktree_work_dir, worktree_path, worktree_branch, worktree_base_sha) =
-        if should_create_worktree {
+        if workdir_strategy == WorkdirStrategy::LocalWorktree {
             match setup_worktree(&original_cwd, &run_dir, &run_id) {
                 Ok((wd, wt, branch, base)) => (Some(wd), Some(wt), Some(branch), Some(base)),
                 Err(e) => {
@@ -811,7 +855,15 @@ pub async fn run_command(
             .show_worktree(wt);
     }
 
-    if let Some(ref sha) = worktree_base_sha {
+    // Show base SHA for both worktree and cloud strategies.
+    let base_sha_display = worktree_base_sha.clone().or_else(|| {
+        if workdir_strategy == WorkdirStrategy::Cloud {
+            fabro_workflows::git::head_sha(&original_cwd).ok()
+        } else {
+            None
+        }
+    });
+    if let Some(ref sha) = base_sha_display {
         progress_ui
             .lock()
             .expect("progress lock poisoned")
@@ -2040,7 +2092,7 @@ async fn run_preflight(
     run_cfg: &Option<run_config::WorkflowRunConfig>,
     args: &RunArgs,
     run_defaults: &RunDefaults,
-    git_clean: bool,
+    git_status: fabro_workflows::git::GitSyncStatus,
     sandbox_provider: SandboxProvider,
     styles: &'static Styles,
     github_app: Option<fabro_github::GitHubAppCredentials>,
@@ -2083,8 +2135,8 @@ async fn run_preflight(
         details: vec![
             CheckDetail::new(format!("Setup commands: {setup_command_count}")),
             CheckDetail {
-                text: format!("Git clean: {git_clean}"),
-                warn: !git_clean,
+                text: format!("Git: {git_status}"),
+                warn: git_status != fabro_workflows::git::GitSyncStatus::Synced,
             },
         ],
         remediation: None,
