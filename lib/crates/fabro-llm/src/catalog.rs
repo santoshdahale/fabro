@@ -56,6 +56,26 @@ pub fn default_model() -> ModelInfo {
         .expect("catalog.json must contain at least one default model")
 }
 
+/// Get the probe model for a provider — the cheapest model known to work for
+/// connectivity checks.  Falls back to the default model when no explicit
+/// override is configured.
+#[must_use]
+pub fn probe_model_for_provider(provider: &str) -> Option<ModelInfo> {
+    let provider = canonical_provider(provider);
+    // Provider-specific overrides where the cheapest model is unsuitable
+    // (e.g. gpt-5-mini is rejected by the ChatGPT/Codex backend).
+    let override_id: Option<&str> = match provider {
+        "openai" => Some("gpt-5.4-mini"),
+        _ => None,
+    };
+    if let Some(id) = override_id {
+        if let Some(info) = get_model_info(id) {
+            return Some(info);
+        }
+    }
+    default_model_for_provider(provider)
+}
+
 /// List all known models, optionally filtered by provider (Section 2.9).
 #[must_use]
 pub fn list_models(provider: Option<&str>) -> Vec<ModelInfo> {
@@ -606,6 +626,24 @@ mod tests {
             get_model_info("codex-spark").unwrap().id,
             "gpt-5.3-codex-spark"
         );
+    }
+
+    #[test]
+    fn probe_model_openai_returns_override() {
+        let m = probe_model_for_provider("openai").unwrap();
+        assert_eq!(m.id, "gpt-5.4-mini");
+    }
+
+    #[test]
+    fn probe_model_anthropic_returns_default() {
+        let m = probe_model_for_provider("anthropic").unwrap();
+        assert_eq!(m.id, "claude-opus-4-6");
+    }
+
+    #[test]
+    fn probe_model_gemini_returns_default() {
+        let m = probe_model_for_provider("gemini").unwrap();
+        assert_eq!(m.id, "gemini-3.1-pro-preview");
     }
 
     #[test]

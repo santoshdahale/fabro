@@ -162,7 +162,7 @@ pub(crate) async fn validate_api_key(provider: Provider, api_key: &str) -> Resul
         .await
         .map_err(|e| e.to_string())?;
 
-    let params = fabro_llm::generate::GenerateParams::new(doctor::cheapest_model(provider))
+    let params = fabro_llm::generate::GenerateParams::new(doctor::probe_model(provider))
         .provider(provider.as_str())
         .prompt("Say OK")
         .max_tokens(16)
