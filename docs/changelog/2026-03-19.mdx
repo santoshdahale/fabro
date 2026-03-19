@@ -1,0 +1,37 @@
+---
+title: "Provider login and auto-detect default provider"
+date: "2026-03-19"
+---
+
+## `fabro provider login`
+
+Re-authenticating with LLM providers previously required re-running the full `fabro install` wizard. You can now re-authenticate with any provider independently using `fabro provider login`.
+
+```bash
+fabro provider login --provider openai
+```
+
+For OpenAI, this launches the browser-based OAuth PKCE flow with an automatic fallback to manual API key entry. All other providers prompt for an API key with validation. Credentials are merged non-destructively into `~/.fabro/.env`.
+
+## Auto-detect default LLM provider
+
+The CLI now checks which providers have API keys configured and automatically selects the best available one, using precedence order Anthropic > OpenAI > Gemini. Previously, running commands without an explicit `--provider` flag always defaulted to Anthropic, which caused errors for users who only had OpenAI or Gemini keys configured.
+
+## More
+
+<Accordion title="CLI">
+- Default Anthropic model changed from `claude-opus-4-6` to `claude-sonnet-4-6`
+- Removed OpenSSL runtime dependency — the CLI binary no longer dynamically links against `libssl` or `libcrypto`, so it runs on machines without OpenSSL v3 installed
+- Added `--web-url` flag to `fabro install` for specifying the web UI base URL for OAuth callbacks
+</Accordion>
+
+<Accordion title="Improvements">
+- Cloud sandbox pre-run checks now properly verify git sync status and warn about uncommitted changes before remote runs
+- `fabro doctor` no longer shows false connectivity warnings when using the ChatGPT/Codex backend
+- `repo init` detects GitHub App visibility mismatches and warns when cross-owner installs require the app to be public
+</Accordion>
+
+<Accordion title="Fixes">
+- Fixed OAuth callback URLs missing from CLI-generated GitHub App manifests, which caused OAuth login failures in the web UI
+- Fixed OpenAI multi-turn conversations failing because `store: false` was incorrectly set for all Responses API requests instead of only the Codex endpoint
+</Accordion>
