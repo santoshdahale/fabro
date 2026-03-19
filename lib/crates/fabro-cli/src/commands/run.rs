@@ -2743,8 +2743,8 @@ mod tests {
         let graph = fabro_graphviz::graph::Graph::new("test");
         let defaults = RunDefaults::default();
         let (model, provider) = resolve_model_provider(None, None, None, &defaults, &graph);
-        assert_eq!(model, "claude-opus-4-6");
-        // Catalog resolves anthropic as the provider for claude-opus-4-6
+        assert_eq!(model, "claude-sonnet-4-6");
+        // Catalog resolves anthropic as the provider for claude-sonnet-4-6
         assert_eq!(provider, Some("anthropic".to_string()));
     }
 

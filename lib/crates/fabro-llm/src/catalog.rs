@@ -206,7 +206,7 @@ mod tests {
     #[test]
     fn default_model_for_provider_returns_correct_model() {
         let m = default_model_for_provider("anthropic").unwrap();
-        assert_eq!(m.id, "claude-opus-4-6");
+        assert_eq!(m.id, "claude-sonnet-4-6");
         assert!(m.default);
 
         let m = default_model_for_provider("openai").unwrap();
@@ -289,7 +289,7 @@ mod tests {
                 "opus",
                 "claude-opus",
             ],
-            default: true,
+            default: false,
         }
         "#);
     }
@@ -637,7 +637,7 @@ mod tests {
     #[test]
     fn probe_model_anthropic_returns_default() {
         let m = probe_model_for_provider("anthropic").unwrap();
-        assert_eq!(m.id, "claude-opus-4-6");
+        assert_eq!(m.id, "claude-sonnet-4-6");
     }
 
     #[test]
