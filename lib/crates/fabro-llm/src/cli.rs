@@ -1037,12 +1037,47 @@ pub async fn run_models(
     Ok(())
 }
 
+async fn test_one_model(info: &ModelInfo, deep: bool) -> (Color, String) {
+    if deep {
+        match build_deep_test_params(info) {
+            None => (Color::Yellow, "deep: skipped (no tool support)".to_string()),
+            Some(params) => {
+                let result = tokio::time::timeout(
+                    Duration::from_secs(90),
+                    generate::generate(params),
+                )
+                .await;
+                match result {
+                    Ok(Ok(ref gen_result)) => validate_deep_result(gen_result, info),
+                    Ok(Err(e)) => (Color::Red, format!("deep: error: {e}")),
+                    Err(_) => (Color::Red, "deep: error: timeout (90s)".to_string()),
+                }
+            }
+        }
+    } else {
+        let params = GenerateParams::new(&info.id)
+            .provider(&info.provider)
+            .prompt("Say OK")
+            .max_tokens(16);
+
+        let result =
+            tokio::time::timeout(Duration::from_secs(30), generate::generate(params)).await;
+        match result {
+            Ok(Ok(_)) => (Color::Green, "ok".to_string()),
+            Ok(Err(e)) => (Color::Red, format!("error: {e}")),
+            Err(_) => (Color::Red, "error: timeout (30s)".to_string()),
+        }
+    }
+}
+
 async fn test_models(
     provider: Option<&str>,
     model: Option<&str>,
     deep: bool,
     s: &Styles,
 ) -> Result<()> {
+    use rand::seq::SliceRandom;
+
     let models_to_test = if let Some(model_id) = model {
         match catalog::get_model_info(model_id) {
             Some(info) => vec![info],
@@ -1056,85 +1091,58 @@ async fn test_models(
         bail!("No models found");
     }
 
+    let test_kind = if deep { "Deep testing" } else { "Testing" };
+    let pb = indicatif::ProgressBar::new(models_to_test.len() as u64);
+    pb.set_style(
+        indicatif::ProgressStyle::with_template(
+            &format!("{{spinner:.green}} {test_kind} {{pos}}/{{len}} models {{wide_bar}} {{eta}}"),
+        )
+        .unwrap(),
+    );
+    pb.enable_steady_tick(Duration::from_millis(100));
+
+    // Build (original_index, model_info) pairs, then shuffle for provider spread
+    let mut indexed: Vec<(usize, &ModelInfo)> =
+        models_to_test.iter().enumerate().collect();
+    indexed.shuffle(&mut rand::thread_rng());
+
+    // Run tests concurrently, 6 at a time
+    let results: Vec<(usize, Color, String)> = futures::stream::iter(indexed)
+        .map(|(idx, info)| {
+            let pb = pb.clone();
+            async move {
+                let (color, status) = test_one_model(info, deep).await;
+                pb.inc(1);
+                (idx, color, status)
+            }
+        })
+        .buffer_unordered(6)
+        .collect()
+        .await;
+
+    pb.finish_and_clear();
+
+    // Sort back to original catalog order
+    let mut sorted_results = results;
+    sorted_results.sort_by_key(|(idx, _, _)| *idx);
+
     let use_color = s.use_color;
     let mut title = models_title();
     title.push("RESULT".cell().bold(true));
 
     let mut rows: Vec<Vec<CellStruct>> = Vec::new();
     let mut failures = 0u32;
-    for info in &models_to_test {
-        if deep {
-            match build_deep_test_params(info) {
-                None => {
-                    let mut row = model_row(info, use_color);
-                    row.push(
-                        "deep: skipped (no tool support)"
-                            .cell()
-                            .foreground_color(color_if(use_color, Color::Yellow)),
-                    );
-                    rows.push(row);
-                }
-                Some(params) => {
-                    eprint!("Deep testing {}...", info.id);
-                    let deep_result = tokio::time::timeout(
-                        Duration::from_secs(90),
-                        generate::generate(params),
-                    )
-                    .await;
-                    eprintln!(" done");
-
-                    let (deep_color, deep_status) = match deep_result {
-                        Ok(Ok(ref gen_result)) => validate_deep_result(gen_result, info),
-                        Ok(Err(e)) => {
-                            failures += 1;
-                            (Color::Red, format!("deep: error: {e}"))
-                        }
-                        Err(_) => {
-                            failures += 1;
-                            (Color::Red, "deep: error: timeout (90s)".to_string())
-                        }
-                    };
-
-                    let mut row = model_row(info, use_color);
-                    row.push(
-                        deep_status
-                            .cell()
-                            .foreground_color(color_if(use_color, deep_color)),
-                    );
-                    rows.push(row);
-                }
-            }
-        } else {
-            eprint!("Testing {}...", info.id);
-            let params = GenerateParams::new(&info.id)
-                .provider(&info.provider)
-                .prompt("Say OK")
-                .max_tokens(16);
-
-            let result =
-                tokio::time::timeout(Duration::from_secs(30), generate::generate(params)).await;
-            eprintln!(" done");
-
-            let (result_color, status) = match result {
-                Ok(Ok(_)) => (Color::Green, "ok".to_string()),
-                Ok(Err(e)) => {
-                    failures += 1;
-                    (Color::Red, format!("error: {e}"))
-                }
-                Err(_) => {
-                    failures += 1;
-                    (Color::Red, "error: timeout (30s)".to_string())
-                }
-            };
-
-            let mut row = model_row(info, use_color);
-            row.push(
-                status
-                    .cell()
-                    .foreground_color(color_if(use_color, result_color)),
-            );
-            rows.push(row);
+    for (idx, result_color, status) in &sorted_results {
+        if *result_color == Color::Red {
+            failures += 1;
         }
+        let mut row = model_row(&models_to_test[*idx], use_color);
+        row.push(
+            status
+                .cell()
+                .foreground_color(color_if(use_color, *result_color)),
+        );
+        rows.push(row);
     }
 
     let table = rows
