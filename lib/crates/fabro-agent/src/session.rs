@@ -2714,10 +2714,10 @@ mod tests {
         session.close();
 
         // The subagent should have been closed
-        assert_eq!(
+        assert!(matches!(
             manager.lock().await.status(&agent_id),
-            Some(&crate::subagent::SubAgentStatus::Closed)
-        );
+            Some(crate::subagent::SubAgentStatus::Closed)
+        ));
 
         // Verify event ordering: SubAgentClosed before SessionEnded
         let mut events = Vec::new();

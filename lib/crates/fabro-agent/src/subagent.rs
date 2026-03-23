@@ -18,11 +18,10 @@ pub struct SubAgentResult {
     pub turns_used: usize,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone)]
 pub enum SubAgentStatus {
     Running,
-    Completed,
-    Failed,
+    Finished(Result<SubAgentResult, AgentError>),
     Closed,
 }
 
@@ -32,7 +31,6 @@ pub struct SubAgent {
     cancel_token: CancellationToken,
     depth: usize,
     status: SubAgentStatus,
-    cached_result: Option<Result<SubAgentResult, AgentError>>,
 }
 
 pub struct SubAgentManager {
@@ -134,7 +132,6 @@ impl SubAgentManager {
                 cancel_token,
                 depth: depth + 1,
                 status: SubAgentStatus::Running,
-                cached_result: None,
             },
         );
 
@@ -156,19 +153,9 @@ impl SubAgentManager {
 
         match agent.status {
             SubAgentStatus::Running => {}
-            SubAgentStatus::Completed => {
+            _ => {
                 return Err(AgentError::InvalidState(format!(
-                    "Agent {agent_id} has already completed"
-                )));
-            }
-            SubAgentStatus::Failed => {
-                return Err(AgentError::InvalidState(format!(
-                    "Agent {agent_id} has failed"
-                )));
-            }
-            SubAgentStatus::Closed => {
-                return Err(AgentError::InvalidState(format!(
-                    "Agent {agent_id} has been closed"
+                    "Agent {agent_id} is not running"
                 )));
             }
         }
@@ -185,25 +172,23 @@ impl SubAgentManager {
     pub async fn wait(&mut self, agent_id: &str) -> Result<SubAgentResult, AgentError> {
         // Phase 1: Check existence and current status
         let agent = self.agents.get(agent_id);
-        let (status, depth) = match agent {
+        let depth = match agent {
             None => {
                 return Err(AgentError::InvalidState(format!(
                     "No agent found with id: {agent_id} (it was never spawned)"
                 )));
             }
-            Some(a) => (a.status.clone(), a.depth),
+            Some(a) => a.depth,
         };
 
-        match status {
+        match &self.agents[agent_id].status {
             SubAgentStatus::Closed => {
                 return Err(AgentError::InvalidState(format!(
                     "Agent {agent_id} has been closed"
                 )));
             }
-            SubAgentStatus::Completed | SubAgentStatus::Failed => {
-                // Return cached result without emitting events again
-                let agent = self.agents.get(agent_id).unwrap();
-                return agent.cached_result.clone().unwrap();
+            SubAgentStatus::Finished(result) => {
+                return result.clone();
             }
             SubAgentStatus::Running => {}
         }
@@ -227,17 +212,7 @@ impl SubAgentManager {
             ))),
         };
 
-        // Phase 4: Cache result and update status
-        let new_status = if task_result.is_ok() {
-            SubAgentStatus::Completed
-        } else {
-            SubAgentStatus::Failed
-        };
-        let agent = self.agents.get_mut(agent_id).unwrap();
-        agent.status = new_status;
-        agent.cached_result = Some(task_result.clone());
-
-        // Phase 5: Emit event
+        // Phase 4: Emit event
         match &task_result {
             Ok(result) => {
                 self.emit_event(AgentEvent::SubAgentCompleted {
@@ -255,6 +230,10 @@ impl SubAgentManager {
                 });
             }
         }
+
+        // Phase 5: Store result in status and return clone
+        let agent = self.agents.get_mut(agent_id).unwrap();
+        agent.status = SubAgentStatus::Finished(task_result.clone());
 
         task_result
     }
@@ -278,7 +257,7 @@ impl SubAgentManager {
                     join_handle.abort();
                 }
             }
-            SubAgentStatus::Completed | SubAgentStatus::Failed => {
+            SubAgentStatus::Finished(_) => {
                 // No task to cancel, just transition status
             }
         }
@@ -299,7 +278,7 @@ impl SubAgentManager {
         let ids: Vec<String> = self
             .agents
             .iter()
-            .filter(|(_, a)| a.status == SubAgentStatus::Running)
+            .filter(|(_, a)| matches!(a.status, SubAgentStatus::Running))
             .map(|(id, _)| id.clone())
             .collect();
         for id in ids {
@@ -551,7 +530,10 @@ mod tests {
 
         let result = manager.close(&agent_id);
         assert!(result.is_ok());
-        assert_eq!(manager.status(&agent_id), Some(&SubAgentStatus::Closed));
+        assert!(matches!(
+            manager.status(&agent_id),
+            Some(SubAgentStatus::Closed)
+        ));
     }
 
     #[tokio::test]
@@ -582,7 +564,10 @@ mod tests {
         assert_eq!(agent_result.output, "Task completed successfully");
         assert!(agent_result.success);
         assert!(agent_result.turns_used > 0);
-        assert_eq!(manager.status(&agent_id), Some(&SubAgentStatus::Completed));
+        assert!(matches!(
+            manager.status(&agent_id),
+            Some(SubAgentStatus::Finished(Ok(_)))
+        ));
     }
 
     #[test]
@@ -738,8 +723,8 @@ mod tests {
 
         manager.close_all();
 
-        assert_eq!(manager.status(&id1), Some(&SubAgentStatus::Closed));
-        assert_eq!(manager.status(&id2), Some(&SubAgentStatus::Closed));
+        assert!(matches!(manager.status(&id1), Some(SubAgentStatus::Closed)));
+        assert!(matches!(manager.status(&id2), Some(SubAgentStatus::Closed)));
     }
 
     #[tokio::test]
@@ -760,7 +745,10 @@ mod tests {
 
         assert_eq!(result1.output, "cached output");
         assert_eq!(result2.output, "cached output");
-        assert_eq!(manager.status(&agent_id), Some(&SubAgentStatus::Completed));
+        assert!(matches!(
+            manager.status(&agent_id),
+            Some(SubAgentStatus::Finished(Ok(_)))
+        ));
     }
 
     #[tokio::test]
@@ -772,10 +760,7 @@ mod tests {
 
         let result = manager.send_input(&agent_id, "hello");
         assert!(result.is_err());
-        assert!(result
-            .unwrap_err()
-            .to_string()
-            .contains("already completed"));
+        assert!(result.unwrap_err().to_string().contains("is not running"));
     }
 
     #[tokio::test]
@@ -787,7 +772,7 @@ mod tests {
 
         let result = manager.send_input(&agent_id, "hello");
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("has been closed"));
+        assert!(result.unwrap_err().to_string().contains("is not running"));
     }
 
     #[tokio::test]
@@ -808,11 +793,17 @@ mod tests {
         let session = make_session(vec![text_response("done")]).await;
         let agent_id = manager.spawn(session, "Do something".into(), 0).unwrap();
         let _ = manager.wait(&agent_id).await.unwrap();
-        assert_eq!(manager.status(&agent_id), Some(&SubAgentStatus::Completed));
+        assert!(matches!(
+            manager.status(&agent_id),
+            Some(SubAgentStatus::Finished(Ok(_)))
+        ));
 
         let result = manager.close(&agent_id);
         assert!(result.is_ok());
-        assert_eq!(manager.status(&agent_id), Some(&SubAgentStatus::Closed));
+        assert!(matches!(
+            manager.status(&agent_id),
+            Some(SubAgentStatus::Closed)
+        ));
     }
 
     #[tokio::test]
@@ -820,7 +811,10 @@ mod tests {
         let mut manager = SubAgentManager::new(3);
         let session = make_session(vec![text_response("Hello")]).await;
         let agent_id = manager.spawn(session, "Do something".into(), 0).unwrap();
-        assert_eq!(manager.status(&agent_id), Some(&SubAgentStatus::Running));
+        assert!(matches!(
+            manager.status(&agent_id),
+            Some(SubAgentStatus::Running)
+        ));
     }
 
     #[tokio::test]
