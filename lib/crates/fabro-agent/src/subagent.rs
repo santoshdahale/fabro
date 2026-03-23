@@ -209,6 +209,15 @@ impl SubAgentManager {
         Ok(())
     }
 
+    /// Close all active subagents, cancelling their tokens and aborting tasks.
+    pub fn close_all(&mut self) {
+        let ids: Vec<String> = self.agents.keys().cloned().collect();
+        for id in ids {
+            // close() always succeeds for known IDs, ignore result
+            let _ = self.close(&id);
+        }
+    }
+
     #[cfg(test)]
     #[must_use]
     pub fn get(&self, agent_id: &str) -> Option<&SubAgent> {
@@ -620,5 +629,28 @@ mod tests {
             agent_id: "x".into(),
             depth: 0,
         });
+    }
+
+    #[tokio::test]
+    async fn close_all_removes_all_agents() {
+        let mut manager = SubAgentManager::new(3);
+        let session1 = make_session(vec![text_response("Hello")]).await;
+        let session2 = make_session(vec![text_response("World")]).await;
+        let id1 = manager.spawn(session1, "Task 1".into(), 0).unwrap();
+        let id2 = manager.spawn(session2, "Task 2".into(), 0).unwrap();
+        assert!(manager.get(&id1).is_some());
+        assert!(manager.get(&id2).is_some());
+
+        manager.close_all();
+
+        assert!(manager.get(&id1).is_none());
+        assert!(manager.get(&id2).is_none());
+    }
+
+    #[tokio::test]
+    async fn close_all_on_empty_manager_is_noop() {
+        let mut manager = SubAgentManager::new(3);
+        manager.close_all(); // should not panic
+        assert!(manager.agents.is_empty());
     }
 }
