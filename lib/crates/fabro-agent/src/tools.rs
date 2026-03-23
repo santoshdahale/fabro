@@ -460,7 +460,9 @@ pub(crate) fn make_web_search_tool() -> RegisteredTool {
 }
 
 fn make_web_search_tool_with_api_key(api_key: Option<String>) -> RegisteredTool {
-    let client = reqwest::Client::new();
+    use std::sync::OnceLock;
+    static CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
+
     RegisteredTool {
         definition: ToolDefinition {
             name: "web_search".into(),
@@ -475,7 +477,7 @@ fn make_web_search_tool_with_api_key(api_key: Option<String>) -> RegisteredTool 
             }),
         },
         executor: Arc::new(move |args, _ctx| {
-            let client = client.clone();
+            let client = CLIENT.get_or_init(reqwest::Client::new).clone();
             let api_key = api_key.clone();
             Box::pin(async move {
                 let api_key = api_key.ok_or_else(|| {

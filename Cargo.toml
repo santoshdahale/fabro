@@ -26,7 +26,7 @@ base64 = "0.22"
 bytes = "1"
 tokio-util = "0.7"
 clap = { version = "4", features = ["derive"] }
-jsonschema = "0.42"
+jsonschema = { version = "0.42", default-features = false }
 chrono = { version = "0.4", features = ["clock"] }
 bollard = "0.18"
 tar = "0.4"
