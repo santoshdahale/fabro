@@ -2,13 +2,15 @@
 ///
 /// Grammar:
 /// ```text
-/// Expr       ::= OrExpr
-/// OrExpr     ::= AndExpr ('||' AndExpr)*
-/// AndExpr    ::= UnaryExpr ('&&' UnaryExpr)*
-/// UnaryExpr  ::= '!' UnaryExpr | Clause
-/// Clause     ::= Key Op Literal | Key        (bare key = truthy)
-/// Op         ::= '=' | '!=' | '>' | '<' | '>=' | '<='
-///              | 'contains' | 'matches'
+/// Expr        ::= OrExpr
+/// OrExpr      ::= AndExpr ('||' AndExpr)*
+/// AndExpr     ::= UnaryExpr ('&&' UnaryExpr)*
+/// UnaryExpr   ::= '!' UnaryExpr | Clause
+/// Clause      ::= Key Op Literal | Key        (bare key = truthy)
+/// Op          ::= '=' | '!=' | '>' | '<' | '>=' | '<='
+///               | 'contains' | 'matches'
+/// Literal     ::= String | Integer | Boolean | BareLiteral
+/// BareLiteral ::= [A-Za-z_][A-Za-z0-9_.:-]*
 /// ```
 use crate::error::GraphvizError;
 
@@ -140,9 +142,27 @@ fn tokenize(input: &str) -> Result<Vec<Token>, GraphvizError> {
             _ => {}
         }
 
+        // Quoted string: consume `"..."` as a single word token
+        if chars[i] == '"' {
+            let start = i;
+            i += 1; // skip opening quote
+            while i < len && chars[i] != '"' {
+                if chars[i] == '\\' && i + 1 < len {
+                    i += 1; // skip escaped char
+                }
+                i += 1;
+            }
+            if i < len {
+                i += 1; // skip closing quote
+            }
+            let word: String = chars[start..i].iter().collect();
+            tokens.push(Token::Word(word));
+            continue;
+        }
+
         // Word: everything up to whitespace or operator char
         let start = i;
-        while i < len && !chars[i].is_whitespace() && !is_op_char(chars[i]) {
+        while i < len && !chars[i].is_whitespace() && !is_op_char(chars[i]) && chars[i] != '"' {
             i += 1;
         }
         if i == start {
@@ -286,7 +306,7 @@ impl Parser {
 
         // Value: must be a Word
         let value = match self.advance() {
-            Some(Token::Word(w)) => w,
+            Some(Token::Word(w)) => parse_literal(&w),
             Some(other) => {
                 return Err(GraphvizError::Parse(format!(
                     "expected value after operator, got {other:?}"
@@ -312,6 +332,19 @@ impl Parser {
         }
 
         Ok(ConditionExpr::Clause(Clause { key, op, value }))
+    }
+}
+
+/// Strip surrounding double-quotes from a literal value.
+/// Bare values pass through unchanged.
+fn parse_literal(raw: &str) -> String {
+    let trimmed = raw.trim();
+    if trimmed.len() >= 2 && trimmed.starts_with('"') && trimmed.ends_with('"') {
+        trimmed[1..trimmed.len() - 1]
+            .replace("\\\"", "\"")
+            .replace("\\\\", "\\")
+    } else {
+        trimmed.to_string()
     }
 }
 
@@ -456,5 +489,85 @@ mod tests {
     #[test]
     fn parse_not() {
         assert!(parse_condition("!x=y").is_ok());
+    }
+
+    // -----------------------------------------------------------------------
+    // parse_literal: quote stripping
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn parse_literal_bare_value() {
+        assert_eq!(parse_literal("success"), "success");
+    }
+
+    #[test]
+    fn parse_literal_strips_quotes() {
+        assert_eq!(parse_literal("\"success\""), "success");
+    }
+
+    #[test]
+    fn parse_literal_unescapes_inner_quotes() {
+        assert_eq!(parse_literal(r#""say \"hello\"""#), r#"say "hello""#);
+    }
+
+    #[test]
+    fn parse_literal_single_quote_not_stripped() {
+        // Only double-quotes are stripped
+        assert_eq!(parse_literal("\"partial"), "\"partial");
+    }
+
+    #[test]
+    fn parse_literal_empty_quoted_string() {
+        assert_eq!(parse_literal("\"\""), "");
+    }
+
+    // -----------------------------------------------------------------------
+    // Quoted string values in conditions
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn quoted_value_stripped_in_clause() {
+        let expr = parse_expression(r#"outcome="success""#).unwrap();
+        assert_eq!(
+            expr,
+            ConditionExpr::Clause(Clause {
+                key: "outcome".to_string(),
+                op: Op::Eq,
+                value: "success".to_string(),
+            })
+        );
+    }
+
+    #[test]
+    fn bare_and_quoted_values_produce_same_clause() {
+        let bare = parse_expression("outcome=success").unwrap();
+        let quoted = parse_expression(r#"outcome="success""#).unwrap();
+        assert_eq!(bare, quoted);
+    }
+
+    #[test]
+    fn quoted_value_with_not_eq() {
+        let expr = parse_expression(r#"outcome!="fail""#).unwrap();
+        assert_eq!(
+            expr,
+            ConditionExpr::Clause(Clause {
+                key: "outcome".to_string(),
+                op: Op::NotEq,
+                value: "fail".to_string(),
+            })
+        );
+    }
+
+    #[test]
+    fn quoted_value_with_spaces() {
+        let expr = parse_expression(r#"context.msg="hello world""#).unwrap();
+        assert_eq!(
+            expr,
+            ConditionExpr::Clause(Clause {
+                key: "context.msg".to_string(),
+                op: Op::Eq,
+                value: "hello world".to_string(),
+            })
+        );
     }
 }

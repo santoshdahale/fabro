@@ -579,4 +579,57 @@ mod tests {
             &context
         ));
     }
+
+    // -----------------------------------------------------------------------
+    // Phase 6: Quoted literal values (spec parse_literal)
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn quoted_value_matches_bare_value() {
+        let outcome = make_outcome(StageStatus::Success);
+        let context = Context::new();
+        assert!(evaluate_condition(
+            r#"outcome="success""#,
+            &outcome,
+            &context
+        ));
+        assert!(!evaluate_condition(r#"outcome="fail""#, &outcome, &context));
+    }
+
+    #[test]
+    fn quoted_not_eq_matches() {
+        let outcome = make_outcome(StageStatus::Success);
+        let context = Context::new();
+        assert!(evaluate_condition(r#"outcome!="fail""#, &outcome, &context));
+        assert!(!evaluate_condition(
+            r#"outcome!="success""#,
+            &outcome,
+            &context
+        ));
+    }
+
+    #[test]
+    fn quoted_context_value() {
+        let outcome = make_outcome(StageStatus::Success);
+        let context = Context::new();
+        context.set("env", serde_json::json!("production"));
+        assert!(evaluate_condition(
+            r#"context.env="production""#,
+            &outcome,
+            &context
+        ));
+    }
+
+    #[test]
+    fn quoted_and_bare_equivalent_in_compound() {
+        let outcome = make_outcome(StageStatus::Success);
+        let context = Context::new();
+        context.set("ready", serde_json::json!("true"));
+        // Mix bare and quoted in a compound expression
+        assert!(evaluate_condition(
+            r#"outcome=success && context.ready="true""#,
+            &outcome,
+            &context
+        ));
+    }
 }
