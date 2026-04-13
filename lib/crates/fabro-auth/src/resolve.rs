@@ -272,7 +272,7 @@ fn credential_ids_for(provider: Provider, usage: CredentialUsage) -> &'static [&
         (Provider::OpenAi, CredentialUsage::CliAgent(CliAgentKind::Codex)) => {
             &["openai_codex", "openai"]
         }
-        (Provider::OpenAi, _) => &["openai"],
+        (Provider::OpenAi, _) => &["openai", "openai_codex"],
         (Provider::Anthropic, _) => &["anthropic"],
         (Provider::Gemini, _) => &["gemini"],
         (Provider::Kimi, _) => &["kimi"],
@@ -354,6 +354,40 @@ mod tests {
         assert_eq!(
             api.auth_header,
             ApiKeyHeader::Bearer("vault-key".to_string())
+        );
+    }
+
+    #[tokio::test]
+    async fn resolve_openai_api_request_falls_back_to_codex_oauth_credential() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut vault = Vault::load(dir.path().join("secrets.json")).unwrap();
+        vault_set_credential(
+            &mut vault,
+            "openai_codex",
+            &oauth_credential(
+                "https://auth.openai.com/oauth/token".to_string(),
+                Utc::now() + Duration::hours(1),
+            ),
+        )
+        .unwrap();
+        let resolver = test_resolver(vault, Arc::new(|_| None));
+
+        let resolved = resolver
+            .resolve(Provider::OpenAi, CredentialUsage::ApiRequest)
+            .await
+            .unwrap();
+
+        let ResolvedCredential::Api(api) = resolved else {
+            panic!("expected api credential");
+        };
+        assert_eq!(
+            api.auth_header,
+            ApiKeyHeader::Bearer("expired-access".to_string())
+        );
+        assert!(api.codex_mode);
+        assert_eq!(
+            api.base_url.as_deref(),
+            Some("https://chatgpt.com/backend-api/codex")
         );
     }
 

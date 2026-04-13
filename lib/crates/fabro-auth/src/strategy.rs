@@ -35,7 +35,7 @@ pub fn codex_oauth_config() -> OAuthConfig {
             "offline_access".to_string(),
         ],
         redirect_uri: Some(format!("{CODEX_AUTH_URL}/deviceauth/callback")),
-        use_pkce:     true,
+        use_pkce:     false,
     }
 }
 
@@ -65,7 +65,7 @@ mod tests {
         assert_eq!(config.auth_url, CODEX_AUTH_URL);
         assert_eq!(config.token_url, CODEX_TOKEN_URL);
         assert_eq!(config.client_id, CODEX_CLIENT_ID);
-        assert!(config.use_pkce);
+        assert!(!config.use_pkce);
         assert!(config.scopes.contains(&"offline_access".to_string()));
     }
 
