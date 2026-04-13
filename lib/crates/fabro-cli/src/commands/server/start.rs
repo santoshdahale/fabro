@@ -11,7 +11,6 @@ use fabro_server::serve::{DEFAULT_TCP_PORT, ServeArgs};
 use fabro_util::printer::Printer;
 use fabro_util::terminal::Styles;
 use fabro_util::{Home, dev_token};
-use rand::Rng;
 use tokio::process::Command as TokioCommand;
 use tokio::time;
 
@@ -149,19 +148,7 @@ fn load_or_create_local_dev_token(storage_dir: &Path, home: &Home) -> Result<Str
 }
 
 fn valid_session_secret(secret: &str) -> bool {
-    secret.len() >= 64 && secret.chars().all(|ch| ch.is_ascii_hexdigit())
-}
-
-fn generate_session_secret() -> String {
-    let mut rng = rand::thread_rng();
-    let bytes: [u8; 32] = rng.gen();
-    let mut output = String::with_capacity(bytes.len() * 2);
-    for byte in bytes {
-        use std::fmt::Write as _;
-
-        write!(&mut output, "{byte:02x}").expect("writing to string should not fail");
-    }
-    output
+    fabro_util::session_secret::validate_session_secret(secret).is_ok()
 }
 
 fn load_or_create_local_session_secret(storage_dir: &Path) -> Result<String> {
@@ -182,7 +169,7 @@ fn load_or_create_local_session_secret(storage_dir: &Path) -> Result<String> {
         return Ok(secret);
     }
 
-    let secret = generate_session_secret();
+    let secret = fabro_util::session_secret::generate_session_secret();
     envfile::merge_env_file(&server_env_path, [("SESSION_SECRET", secret.as_str())])?;
     Ok(secret)
 }

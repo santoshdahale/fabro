@@ -8,6 +8,7 @@ pub mod path;
 pub mod printer;
 pub mod redact;
 pub mod run_log;
+pub mod session_secret;
 pub mod terminal;
 pub mod text;
 pub mod version;

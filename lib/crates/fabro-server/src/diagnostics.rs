@@ -144,16 +144,7 @@ fn validate_tls_private_key(pem: &str) -> Result<(), String> {
 }
 
 fn validate_session_secret(value: &str) -> Result<(), String> {
-    if value.len() < 64 {
-        return Err(format!(
-            "too short ({} chars, need at least 64 hex chars for 256-bit entropy)",
-            value.len()
-        ));
-    }
-    if !value.chars().all(|c| c.is_ascii_hexdigit()) {
-        return Err("contains non-hex characters".to_string());
-    }
-    Ok(())
+    fabro_util::session_secret::validate_session_secret(value)
 }
 
 pub async fn run_all(state: &AppState) -> DiagnosticsReport {

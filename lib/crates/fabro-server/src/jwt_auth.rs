@@ -110,13 +110,6 @@ pub(crate) fn dev_token_matches(provided: &str, expected: &str) -> bool {
     expected_mac.verify_slice(&provided_mac).is_ok()
 }
 
-fn run_auth_method_for_config(method: ServerAuthMethod) -> RunAuthMethod {
-    match method {
-        ServerAuthMethod::DevToken => RunAuthMethod::DevToken,
-        ServerAuthMethod::Github => RunAuthMethod::Github,
-    }
-}
-
 fn config_allows_run_auth_method(config: &ConfiguredAuth, method: RunAuthMethod) -> bool {
     match method {
         RunAuthMethod::Disabled => false,
@@ -240,10 +233,6 @@ pub fn auth_method_name(method: ServerAuthMethod) -> &'static str {
         ServerAuthMethod::DevToken => "dev-token",
         ServerAuthMethod::Github => "github",
     }
-}
-
-pub fn run_auth_method_for_method(method: ServerAuthMethod) -> RunAuthMethod {
-    run_auth_method_for_config(method)
 }
 
 #[cfg(test)]

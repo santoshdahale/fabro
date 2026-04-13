@@ -659,23 +659,16 @@ struct TestServerRecord {
     dev_token_path: Option<PathBuf>,
 }
 
-fn read_dev_token(path: &Path) -> Option<String> {
-    std::fs::read_to_string(path)
-        .ok()
-        .map(|token| token.trim().to_string())
-        .filter(|token| !token.is_empty())
-}
-
 pub(crate) fn local_dev_token(storage_dir: &Path) -> Option<String> {
     let server_state = Storage::new(storage_dir).server_state();
 
-    read_dev_token(&server_state.dev_token_path()).or_else(|| {
+    fabro_util::dev_token::read_dev_token_file(&server_state.dev_token_path()).or_else(|| {
         std::fs::read_to_string(server_state.record_path())
             .ok()
             .and_then(|content| serde_json::from_str::<TestServerRecord>(&content).ok())
             .and_then(|record| record.dev_token_path)
             .as_deref()
-            .and_then(read_dev_token)
+            .and_then(fabro_util::dev_token::read_dev_token_file)
     })
 }
 

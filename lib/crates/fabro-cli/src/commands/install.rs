@@ -92,16 +92,6 @@ async fn run_openssl_with_stdin(
 }
 
 // ---------------------------------------------------------------------------
-// Session secret
-// ---------------------------------------------------------------------------
-
-fn generate_session_secret() -> String {
-    let mut rng = rand::thread_rng();
-    let bytes: [u8; 32] = rng.gen();
-    hex::encode(&bytes)
-}
-
-// ---------------------------------------------------------------------------
 // JWT keypair generation
 // ---------------------------------------------------------------------------
 
@@ -938,7 +928,7 @@ pub(crate) async fn run_install(
             s.dim.apply_to("Generating secrets and auth material...")
         );
 
-        let session_secret = generate_session_secret();
+        let session_secret = fabro_util::session_secret::generate_session_secret();
         fabro_util::printerr!(
             printer,
             "  {} Session secret generated",
@@ -1037,22 +1027,6 @@ pub(crate) async fn run_install(
 }
 
 // ---------------------------------------------------------------------------
-// Hex encoding (used by generate_session_secret)
-// ---------------------------------------------------------------------------
-
-mod hex {
-    use std::fmt::Write as _;
-
-    pub(super) fn encode(bytes: &[u8]) -> String {
-        let mut encoded = String::with_capacity(bytes.len() * 2);
-        for byte in bytes {
-            write!(&mut encoded, "{byte:02x}").expect("writing to String should not fail");
-        }
-        encoded
-    }
-}
-
-// ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
@@ -1078,19 +1052,19 @@ mod tests {
 
     #[test]
     fn session_secret_length() {
-        let secret = generate_session_secret();
+        let secret = fabro_util::session_secret::generate_session_secret();
         assert_eq!(secret.len(), 64);
     }
 
     #[test]
     fn session_secret_is_hex() {
-        let secret = generate_session_secret();
+        let secret = fabro_util::session_secret::generate_session_secret();
         assert!(secret.chars().all(|c| c.is_ascii_hexdigit()));
     }
 
     #[test]
     fn session_secret_is_lowercase() {
-        let secret = generate_session_secret();
+        let secret = fabro_util::session_secret::generate_session_secret();
         assert!(secret.chars().all(|c| !c.is_ascii_uppercase()));
     }
 

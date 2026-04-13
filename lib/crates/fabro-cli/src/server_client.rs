@@ -380,16 +380,19 @@ async fn build_authed_unix_socket_client(
     Ok(unix_socket_api_client_bundle(http_client))
 }
 
+fn build_unix_socket_probe_client(path: &Path) -> Result<fabro_http::HttpClient> {
+    cli_http_client_builder()
+        .unix_socket(path)
+        .no_proxy()
+        .build()
+        .context("Failed to build Unix-socket HTTP client for fabro server")
+}
+
 async fn try_connect_unix_socket_api_client_bundle(
     path: &Path,
     storage_dir: Option<&Path>,
 ) -> Result<ServerStoreClient> {
-    let probe_client = cli_http_client_builder()
-        .unix_socket(path)
-        .no_proxy()
-        .build()
-        .context("Failed to build Unix-socket HTTP client for fabro server")?;
-    check_server_ready(&probe_client).await?;
+    check_server_ready(&build_unix_socket_probe_client(path)?).await?;
     build_authed_unix_socket_client(path, storage_dir).await
 }
 
@@ -397,12 +400,7 @@ async fn connect_unix_socket_api_client_bundle(
     path: &Path,
     storage_dir: Option<&Path>,
 ) -> Result<ServerStoreClient> {
-    let probe_client = cli_http_client_builder()
-        .unix_socket(path)
-        .no_proxy()
-        .build()
-        .context("Failed to build Unix-socket HTTP client for fabro server")?;
-    wait_for_server_ready(&probe_client).await?;
+    wait_for_server_ready(&build_unix_socket_probe_client(path)?).await?;
     build_authed_unix_socket_client(path, storage_dir).await
 }
 
