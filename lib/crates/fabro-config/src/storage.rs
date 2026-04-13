@@ -36,7 +36,7 @@ impl Storage {
 
     #[must_use]
     pub fn secrets_path(&self) -> PathBuf {
-        self.root.join("secrets.json")
+        self.root.join("vaults").join("default").join("secrets.json")
     }
 
     #[must_use]
@@ -153,7 +153,7 @@ mod tests {
         );
         assert_eq!(
             storage.secrets_path(),
-            std::path::Path::new("/tmp/fabro-data/secrets.json")
+            std::path::Path::new("/tmp/fabro-data/vaults/default/secrets.json")
         );
         assert_eq!(
             storage.store_dir(),
