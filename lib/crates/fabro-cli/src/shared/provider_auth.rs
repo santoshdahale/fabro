@@ -1,6 +1,7 @@
+use std::io::Read;
 use std::sync::Arc;
 
-use anyhow::Result;
+use anyhow::{Context, Result, anyhow};
 use dialoguer::console::Term;
 use dialoguer::theme::ColorfulTheme;
 use dialoguer::{Confirm, Password};
@@ -56,6 +57,13 @@ pub(crate) fn prompt_password(prompt: &str) -> Result<String> {
         .interact_on(&Term::stderr())?)
 }
 
+#[derive(Debug, Clone)]
+pub(crate) enum ApiKeySource {
+    Prompt,
+    Stdin,
+    EnvVar(String),
+}
+
 // ---------------------------------------------------------------------------
 // API key validation
 // ---------------------------------------------------------------------------
@@ -99,36 +107,66 @@ pub(crate) async fn validate_api_key(provider: Provider, api_key: &str) -> Resul
         .map_err(|e| e.to_string())
 }
 
-pub(crate) async fn prompt_and_validate_key(
+fn normalize_api_key_input(raw: &str) -> Result<String> {
+    let key = raw.trim_end_matches(['\r', '\n']).to_string();
+    anyhow::ensure!(!key.is_empty(), "API key input is empty");
+    Ok(key)
+}
+
+fn read_api_key_from_stdin() -> Result<String> {
+    let mut raw = String::new();
+    std::io::stdin()
+        .read_to_string(&mut raw)
+        .context("failed to read API key from stdin")?;
+    normalize_api_key_input(&raw)
+}
+
+fn read_api_key_from_env_var(name: &str) -> Result<String> {
+    let value =
+        std::env::var(name).with_context(|| format!("environment variable {name} is not set"))?;
+    normalize_api_key_input(&value)
+        .with_context(|| format!("environment variable {name} did not contain an API key"))
+}
+
+async fn read_api_key_from_source(source: &ApiKeySource, prompt: &str) -> Result<String> {
+    match source {
+        ApiKeySource::Prompt => {
+            let prompt = prompt.to_string();
+            let key: String = spawn_blocking(move || prompt_password(&prompt)).await??;
+            Ok(key)
+        }
+        ApiKeySource::Stdin => spawn_blocking(read_api_key_from_stdin).await?,
+        ApiKeySource::EnvVar(name) => read_api_key_from_env_var(name),
+    }
+}
+
+async fn read_and_validate_api_key(
     provider: Provider,
+    source: &ApiKeySource,
+    env_var: &str,
     s: &Styles,
     printer: Printer,
-) -> Result<(String, String)> {
-    let env_var = provider.api_key_env_vars()[0];
-    let url = provider_key_url(provider);
-    fabro_util::printerr!(
-        printer,
-        "  {}",
-        s.dim.apply_to(format!("Get your API key at: {url}"))
-    );
-
+) -> Result<String> {
     loop {
-        let prompt = env_var.to_string();
-        let key: String = spawn_blocking(move || prompt_password(&prompt)).await??;
+        let key = read_api_key_from_source(source, env_var).await?;
 
         fabro_util::printerr!(printer, "  {}", s.dim.apply_to("Validating API key..."));
         match validate_api_key(provider, &key).await {
             Ok(()) => {
                 fabro_util::printerr!(printer, "  {} API key is valid", s.green.apply_to("✔"));
-                return Ok((env_var.to_string(), key));
+                return Ok(key);
             }
             Err(e) => {
                 fabro_util::printerr!(printer, "  [error] API key validation failed: {e}");
-                let retry =
-                    spawn_blocking(|| prompt_confirm("Try again with a different key?", true))
-                        .await??;
-                if !retry {
-                    return Ok((env_var.to_string(), key));
+                if matches!(source, ApiKeySource::Prompt) {
+                    let retry =
+                        spawn_blocking(|| prompt_confirm("Try again with a different key?", true))
+                            .await??;
+                    if !retry {
+                        return Ok(key);
+                    }
+                } else {
+                    return Err(anyhow!("API key validation failed: {e}"));
                 }
             }
         }
@@ -159,6 +197,19 @@ pub(crate) async fn authenticate_provider(
     authenticate_provider_with_method(provider, method, s, printer).await
 }
 
+pub(crate) async fn authenticate_provider_with_api_key_source(
+    provider: Provider,
+    source: ApiKeySource,
+    s: &Styles,
+    printer: Printer,
+) -> Result<AuthCredential> {
+    let mut strategy = strategy_for(provider, AuthMethod::ApiKey);
+    let request = strategy.init().await?;
+    present_to_user(&request, s, printer);
+    let response = await_user_response_from_source(&request, &source, s, printer).await?;
+    strategy.complete(response).await
+}
+
 pub(crate) async fn authenticate_provider_with_method(
     provider: Provider,
     method: AuthMethod,
@@ -168,7 +219,8 @@ pub(crate) async fn authenticate_provider_with_method(
     let mut strategy = strategy_for(provider, method);
     let request = strategy.init().await?;
     present_to_user(&request, s, printer);
-    let response = await_user_response(&request, s, printer).await?;
+    let response =
+        await_user_response_from_source(&request, &ApiKeySource::Prompt, s, printer).await?;
     strategy.complete(response).await
 }
 
@@ -210,17 +262,26 @@ pub(crate) fn present_to_user(request: &AuthContextRequest, s: &Styles, printer:
     }
 }
 
-pub(crate) async fn await_user_response(
+async fn await_user_response_from_source(
     request: &AuthContextRequest,
+    source: &ApiKeySource,
     s: &Styles,
     printer: Printer,
 ) -> Result<AuthContextResponse> {
     match request {
-        AuthContextRequest::ApiKey { provider, .. } => {
-            let (_, key) = prompt_and_validate_key(*provider, s, printer).await?;
+        AuthContextRequest::ApiKey {
+            provider,
+            env_var_names,
+        } => {
+            let env_var = env_var_names.first().map_or("API_KEY", String::as_str);
+            let key = read_and_validate_api_key(*provider, source, env_var, s, printer).await?;
             Ok(AuthContextResponse::ApiKey { key })
         }
         AuthContextRequest::DeviceCode { .. } => {
+            anyhow::ensure!(
+                matches!(source, ApiKeySource::Prompt),
+                "device code login is not supported for scripted API key input"
+            );
             let ready = spawn_blocking(|| {
                 prompt_confirm("Continue after completing sign-in in the browser?", true)
             })
@@ -258,5 +319,17 @@ mod tests {
     async fn validate_api_key_rejects_invalid_key() {
         let result = validate_api_key(Provider::Anthropic, "sk-invalid-key-12345").await;
         assert!(result.is_err(), "expected invalid key to be rejected");
+    }
+
+    #[test]
+    fn normalize_api_key_input_trims_trailing_newlines() {
+        let key = normalize_api_key_input("secret-key\r\n").unwrap();
+        assert_eq!(key, "secret-key");
+    }
+
+    #[test]
+    fn normalize_api_key_input_rejects_empty_input() {
+        let err = normalize_api_key_input("\n").unwrap_err();
+        assert!(err.to_string().contains("API key input is empty"));
     }
 }

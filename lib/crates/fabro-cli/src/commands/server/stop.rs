@@ -7,10 +7,9 @@ use tokio::time;
 
 use super::record;
 
-pub(crate) async fn execute(storage_dir: &Path, timeout: Duration, printer: Printer) {
+pub(crate) async fn stop_server(storage_dir: &Path, timeout: Duration) -> bool {
     let Some(active) = record::active_server_record_details(storage_dir) else {
-        fabro_util::printerr!(printer, "Server is not running");
-        std::process::exit(1);
+        return false;
     };
     let record = active.record;
 
@@ -35,6 +34,15 @@ pub(crate) async fn execute(storage_dir: &Path, timeout: Duration, printer: Prin
 
     if let Bind::Unix(ref path) = record.bind {
         let _ = std::fs::remove_file(path);
+    }
+
+    true
+}
+
+pub(crate) async fn execute(storage_dir: &Path, timeout: Duration, printer: Printer) {
+    if !stop_server(storage_dir, timeout).await {
+        fabro_util::printerr!(printer, "Server is not running");
+        std::process::exit(1);
     }
 
     fabro_util::printerr!(printer, "Server stopped");

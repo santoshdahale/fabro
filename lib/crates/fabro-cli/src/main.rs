@@ -357,6 +357,28 @@ mod tests {
     }
 
     #[test]
+    fn parse_provider_login_api_key_stdin() {
+        let cli = Cli::try_parse_from([
+            "fabro",
+            "provider",
+            "login",
+            "--provider",
+            "anthropic",
+            "--api-key-stdin",
+        ])
+        .expect("should parse");
+        match *cli.command {
+            Commands::Provider(ProviderNamespace {
+                command: ProviderCommand::Login(args),
+            }) => {
+                assert_eq!(args.provider, fabro_model::Provider::Anthropic);
+                assert!(args.api_key_stdin);
+            }
+            _ => panic!("unexpected command variant"),
+        }
+    }
+
+    #[test]
     fn parse_provider_login_missing_provider_flag() {
         let result = Cli::try_parse_from(["fabro", "provider", "login"]);
         assert!(result.is_err(), "should fail without --provider");

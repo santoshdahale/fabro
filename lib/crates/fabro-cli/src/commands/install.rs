@@ -1,8 +1,10 @@
 use std::net::SocketAddr;
 use std::path::Path;
 use std::process::Stdio;
+use std::time::Duration;
 
 use anyhow::{Context, Result, anyhow, bail};
+use async_trait::async_trait;
 use axum::extract::Query;
 use axum::response::Html;
 use axum::routing::get;
@@ -12,16 +14,13 @@ use dialoguer::console::Term;
 use dialoguer::theme::ColorfulTheme;
 use dialoguer::{MultiSelect, Select};
 use fabro_api::types::{CreateSecretRequest, SecretType as ApiSecretType};
-use fabro_auth::{
-    AuthCredential, AuthMethod, codex_oauth_config, credential_id_for, parse_credential_secret,
-};
+use fabro_auth::{AuthCredential, AuthMethod, codex_oauth_config, credential_id_for};
 use fabro_config::user::SETTINGS_CONFIG_FILENAME;
 use fabro_config::{Storage, envfile, legacy_env};
 use fabro_model::Provider;
 use fabro_util::printer::Printer;
 use fabro_util::terminal::Styles;
-// Bootstrap-only direct vault writes for `fabro install` when no local server is running.
-use fabro_vault::{SecretType, Vault};
+use futures::future::BoxFuture;
 use rand::Rng;
 use tokio::io::AsyncWriteExt;
 use tokio::net::TcpListener;
@@ -30,11 +29,15 @@ use tokio::sync::oneshot;
 use tokio::task::spawn_blocking;
 
 use super::doctor;
-use crate::args::{DoctorArgs, GlobalArgs, InstallArgs, ServerTargetArgs};
-use crate::commands::server::record;
+use crate::args::{
+    DoctorArgs, GlobalArgs, InstallArgs, InstallGitHubStrategyArg, InstallNonInteractiveArgs,
+    ServerTargetArgs,
+};
+use crate::commands::server::{record, stop};
 use crate::gh::GhCli;
 use crate::shared::provider_auth::{
-    authenticate_provider, authenticate_provider_with_method, prompt_confirm, provider_display_name,
+    ApiKeySource, authenticate_provider, authenticate_provider_with_api_key_source,
+    authenticate_provider_with_method, prompt_confirm, provider_display_name,
 };
 use crate::{server_client, user_config};
 
@@ -370,10 +373,410 @@ fn prompt_multiselect(prompt: &str, items: &[String]) -> Result<Vec<usize>> {
         .interact_on(&Term::stderr())?)
 }
 
+impl InstallNonInteractiveArgs {
+    fn has_any(&self) -> bool {
+        self.llm_provider.is_some()
+            || self.llm_api_key_stdin
+            || self.llm_api_key_env.is_some()
+            || self.github_strategy.is_some()
+            || self.github_username.is_some()
+            || self.overwrite_settings
+            || self.keep_existing_settings
+            || self.run_doctor
+    }
+
+    fn first_flag_name(&self) -> Option<&'static str> {
+        if self.llm_provider.is_some() {
+            Some("--llm-provider")
+        } else if self.llm_api_key_stdin {
+            Some("--llm-api-key-stdin")
+        } else if self.llm_api_key_env.is_some() {
+            Some("--llm-api-key-env")
+        } else if self.github_strategy.is_some() {
+            Some("--github-strategy")
+        } else if self.github_username.is_some() {
+            Some("--github-username")
+        } else if self.overwrite_settings {
+            Some("--overwrite-settings")
+        } else if self.keep_existing_settings {
+            Some("--keep-existing-settings")
+        } else if self.run_doctor {
+            Some("--run-doctor")
+        } else {
+            None
+        }
+    }
+}
+
+fn non_interactive_install_usage() -> &'static str {
+    r#"Non-interactive install requires additional flags.
+
+Non-interactive usage:
+  fabro install --non-interactive \
+    --llm-provider anthropic \
+    --llm-api-key-env ANTHROPIC_API_KEY \
+    --github-strategy gh_cli \
+    --github-username brynary
+
+  printf '%s\n' "$ANTHROPIC_API_KEY" | fabro install --non-interactive \
+    --llm-provider anthropic \
+    --llm-api-key-stdin \
+    --github-strategy gh_cli \
+    --github-username brynary
+
+Hidden non-interactive flags:
+  --llm-provider <PROVIDER>
+  --llm-api-key-stdin
+  --llm-api-key-env <ENV_VAR>
+  --github-strategy <gh_cli|app>
+  --github-username <USERNAME>
+  --overwrite-settings
+  --keep-existing-settings
+  --run-doctor
+
+Notes:
+  - Only one API-key-based LLM provider is supported in non-interactive mode.
+  - GitHub CLI is supported in non-interactive mode; GitHub App setup is not."#
+}
+
+#[derive(Debug, Clone)]
+struct InstallFacts {
+    codex_detected: bool,
+}
+
+#[derive(Debug)]
+struct LlmInstallSelection {
+    credentials: Vec<AuthCredential>,
+}
+
+#[derive(Debug)]
+enum GitHubInstallSelection {
+    GhCli,
+    App {
+        owner:    GitHubAppOwner,
+        username: Option<String>,
+    },
+}
+
+#[derive(Debug)]
+enum ServerConfigSelection {
+    KeepExisting,
+    Write { username: String },
+}
+
+#[async_trait]
+trait InstallInputSource {
+    async fn choose_graphviz_install(&self, dot_missing: bool) -> Result<bool>;
+
+    async fn collect_llm_selection(
+        &self,
+        facts: &InstallFacts,
+        s: &Styles,
+        printer: Printer,
+    ) -> Result<LlmInstallSelection>;
+
+    async fn choose_github_install(
+        &self,
+        s: &Styles,
+        printer: Printer,
+    ) -> Result<GitHubInstallSelection>;
+
+    async fn choose_server_config(&self, config_exists: bool) -> Result<ServerConfigSelection>;
+
+    async fn should_run_doctor(&self) -> Result<bool>;
+}
+
+struct InteractiveInstallInputSource;
+
+#[async_trait]
+impl InstallInputSource for InteractiveInstallInputSource {
+    async fn choose_graphviz_install(&self, dot_missing: bool) -> Result<bool> {
+        if !dot_missing {
+            return Ok(false);
+        }
+
+        spawn_blocking(|| prompt_confirm("Graphviz (dot) not found. Install via Homebrew?", true))
+            .await?
+    }
+
+    async fn collect_llm_selection(
+        &self,
+        facts: &InstallFacts,
+        s: &Styles,
+        printer: Printer,
+    ) -> Result<LlmInstallSelection> {
+        let mut credentials = Vec::new();
+        let mut configured_providers: Vec<Provider> = Vec::new();
+        let mut openai_configured = false;
+
+        if facts.codex_detected {
+            tracing::debug!("Codex binary detected on PATH");
+            let use_device_auth = spawn_blocking(|| {
+                prompt_confirm(
+                    "OpenAI (Codex) detected. Set up OpenAI with device code login?",
+                    true,
+                )
+            })
+            .await??;
+
+            if use_device_auth {
+                let credential = authenticate_provider_with_method(
+                    Provider::OpenAi,
+                    AuthMethod::CodexDevice(codex_oauth_config()),
+                    s,
+                    printer,
+                )
+                .await?;
+                credentials.push(credential);
+                configured_providers.push(Provider::OpenAi);
+                openai_configured = true;
+            }
+        }
+
+        if !openai_configured {
+            let primary_providers = [Provider::Anthropic, Provider::OpenAi, Provider::Gemini];
+            let primary_labels: Vec<String> = primary_providers
+                .iter()
+                .map(|p| provider_display_name(*p).to_string())
+                .collect();
+            let primary_idx: usize = spawn_blocking({
+                let labels = primary_labels.clone();
+                move || prompt_select("Choose your first LLM provider", &labels)
+            })
+            .await??;
+
+            let first_provider = primary_providers[primary_idx];
+            credentials.push(authenticate_provider(first_provider, s, printer).await?);
+            configured_providers.push(first_provider);
+        }
+
+        let add_more =
+            spawn_blocking(|| prompt_confirm("Set up additional LLM providers?", false)).await??;
+
+        if add_more {
+            let remaining_labels: Vec<String> = Provider::ALL
+                .iter()
+                .filter(|p| !configured_providers.contains(p))
+                .map(|p| {
+                    let env_vars = p.api_key_env_vars().join(" / ");
+                    format!("{} ({})", provider_display_name(*p), env_vars)
+                })
+                .collect();
+            let remaining_providers: Vec<Provider> = Provider::ALL
+                .iter()
+                .filter(|p| !configured_providers.contains(p))
+                .copied()
+                .collect();
+
+            let selected_indices: Vec<usize> = spawn_blocking({
+                let labels = remaining_labels.clone();
+                move || prompt_multiselect("Which additional LLM providers?", &labels)
+            })
+            .await??;
+
+            for idx in selected_indices {
+                let provider = remaining_providers[idx];
+                credentials.push(authenticate_provider(provider, s, printer).await?);
+            }
+        }
+
+        Ok(LlmInstallSelection { credentials })
+    }
+
+    async fn choose_github_install(
+        &self,
+        s: &Styles,
+        _printer: Printer,
+    ) -> Result<GitHubInstallSelection> {
+        let strategy_options = vec![
+            "GitHub CLI — use your existing `gh` login".to_string(),
+            "GitHub App — recommended for teams".to_string(),
+        ];
+        let strategy = spawn_blocking({
+            let options = strategy_options.clone();
+            move || prompt_select("How should Fabro authenticate with GitHub?", &options)
+        })
+        .await??;
+
+        match strategy {
+            0 => Ok(GitHubInstallSelection::GhCli),
+            1 => {
+                let (owner, username) = prompt_github_app_owner(s).await?;
+                Ok(GitHubInstallSelection::App { owner, username })
+            }
+            _ => unreachable!("prompt_select returned an out-of-range index"),
+        }
+    }
+
+    async fn choose_server_config(&self, config_exists: bool) -> Result<ServerConfigSelection> {
+        let write_config = if config_exists {
+            spawn_blocking(|| {
+                prompt_confirm("~/.fabro/settings.toml already exists. Overwrite?", false)
+            })
+            .await??
+        } else {
+            true
+        };
+
+        if write_config {
+            let username: String =
+                spawn_blocking(|| prompt_input("GitHub username for allowed access")).await??;
+            Ok(ServerConfigSelection::Write { username })
+        } else {
+            Ok(ServerConfigSelection::KeepExisting)
+        }
+    }
+
+    async fn should_run_doctor(&self) -> Result<bool> {
+        spawn_blocking(|| prompt_confirm("Run fabro doctor to verify?", true)).await?
+    }
+}
+
+#[derive(Debug)]
+struct NonInteractiveInstallInputSource {
+    args: InstallNonInteractiveArgs,
+}
+
+impl NonInteractiveInstallInputSource {
+    fn new(args: &InstallArgs) -> Result<Option<Self>> {
+        if !args.non_interactive {
+            if let Some(flag) = args.scripted.first_flag_name() {
+                bail!("{flag} requires --non-interactive");
+            }
+            return Ok(None);
+        }
+
+        if !args.scripted.has_any() {
+            bail!("{}", non_interactive_install_usage());
+        }
+
+        anyhow::ensure!(
+            args.scripted.llm_api_key_stdin ^ args.scripted.llm_api_key_env.is_some(),
+            "non-interactive install requires exactly one of --llm-api-key-stdin or --llm-api-key-env"
+        );
+        anyhow::ensure!(
+            !(args.scripted.overwrite_settings && args.scripted.keep_existing_settings),
+            "--overwrite-settings and --keep-existing-settings cannot be used together"
+        );
+
+        Ok(Some(Self {
+            args: args.scripted.clone(),
+        }))
+    }
+
+    fn validate(&self, config_exists: bool) -> Result<()> {
+        anyhow::ensure!(
+            self.args.llm_provider.is_some(),
+            "non-interactive install requires --llm-provider"
+        );
+
+        match self.args.github_strategy {
+            Some(InstallGitHubStrategyArg::GhCli) => {}
+            Some(InstallGitHubStrategyArg::App) => {
+                bail!("GitHub App setup is not supported with --non-interactive")
+            }
+            None => bail!("non-interactive install requires --github-strategy"),
+        }
+
+        if config_exists {
+            anyhow::ensure!(
+                self.args.keep_existing_settings || self.args.overwrite_settings,
+                "settings.toml already exists; pass --overwrite-settings or --keep-existing-settings"
+            );
+
+            if self.args.keep_existing_settings {
+                return Ok(());
+            }
+        }
+
+        anyhow::ensure!(
+            self.args.github_username.is_some(),
+            "non-interactive install requires --github-username"
+        );
+
+        Ok(())
+    }
+
+    fn api_key_source(&self) -> Result<ApiKeySource> {
+        if self.args.llm_api_key_stdin {
+            Ok(ApiKeySource::Stdin)
+        } else if let Some(name) = &self.args.llm_api_key_env {
+            Ok(ApiKeySource::EnvVar(name.clone()))
+        } else {
+            bail!(
+                "non-interactive install requires exactly one of --llm-api-key-stdin or --llm-api-key-env"
+            )
+        }
+    }
+}
+
+#[async_trait]
+impl InstallInputSource for NonInteractiveInstallInputSource {
+    async fn choose_graphviz_install(&self, _dot_missing: bool) -> Result<bool> {
+        Ok(false)
+    }
+
+    async fn collect_llm_selection(
+        &self,
+        _facts: &InstallFacts,
+        s: &Styles,
+        printer: Printer,
+    ) -> Result<LlmInstallSelection> {
+        let provider = self
+            .args
+            .llm_provider
+            .context("non-interactive install requires --llm-provider")?;
+        let credential =
+            authenticate_provider_with_api_key_source(provider, self.api_key_source()?, s, printer)
+                .await?;
+        Ok(LlmInstallSelection {
+            credentials: vec![credential],
+        })
+    }
+
+    async fn choose_github_install(
+        &self,
+        _s: &Styles,
+        _printer: Printer,
+    ) -> Result<GitHubInstallSelection> {
+        match self.args.github_strategy {
+            Some(InstallGitHubStrategyArg::GhCli) => Ok(GitHubInstallSelection::GhCli),
+            Some(InstallGitHubStrategyArg::App) => {
+                bail!("GitHub App setup is not supported with --non-interactive")
+            }
+            None => bail!("non-interactive install requires --github-strategy"),
+        }
+    }
+
+    async fn choose_server_config(&self, config_exists: bool) -> Result<ServerConfigSelection> {
+        if config_exists {
+            if self.args.keep_existing_settings {
+                return Ok(ServerConfigSelection::KeepExisting);
+            }
+            anyhow::ensure!(
+                self.args.overwrite_settings,
+                "settings.toml already exists; pass --overwrite-settings or --keep-existing-settings"
+            );
+        }
+
+        let username = self
+            .args
+            .github_username
+            .clone()
+            .context("non-interactive install requires --github-username")?;
+        Ok(ServerConfigSelection::Write { username })
+    }
+
+    async fn should_run_doctor(&self) -> Result<bool> {
+        Ok(self.args.run_doctor)
+    }
+}
+
 // ---------------------------------------------------------------------------
 // GitHub App owner selection
 // ---------------------------------------------------------------------------
 
+#[derive(Debug)]
 enum GitHubAppOwner {
     Personal,
     Organization(String),
@@ -694,61 +1097,66 @@ async fn setup_github_app(
     Ok(env_pairs)
 }
 
-async fn persist_vault_secrets(
+async fn persist_vault_secrets_via_server(
+    client: &fabro_api::Client,
+    secrets: &[CreateSecretRequest],
+) -> Result<()> {
+    for secret in secrets {
+        client
+            .create_secret()
+            .body(CreateSecretRequest {
+                name:        secret.name.clone(),
+                value:       secret.value.clone(),
+                type_:       secret.type_,
+                description: secret.description.clone(),
+            })
+            .send()
+            .await?;
+    }
+
+    Ok(())
+}
+
+async fn persist_vault_secrets_with(
     storage_dir: &Path,
     secrets: &[CreateSecretRequest],
     server_was_running: bool,
+    connect_api_client: impl for<'a> Fn(&'a Path) -> BoxFuture<'a, Result<fabro_api::Client>>,
+    stop_server: impl for<'a> Fn(&'a Path, Duration) -> BoxFuture<'a, bool>,
 ) -> Result<()> {
     if secrets.is_empty() {
         return Ok(());
     }
 
-    if server_was_running {
-        let client = server_client::connect_api_client(storage_dir).await?;
-        for secret in secrets {
-            client
-                .create_secret()
-                .body(CreateSecretRequest {
-                    name:        secret.name.clone(),
-                    value:       secret.value.clone(),
-                    type_:       secret.type_,
-                    description: secret.description.clone(),
-                })
-                .send()
-                .await?;
+    let client = match connect_api_client(storage_dir).await {
+        Ok(client) => client,
+        Err(err) => {
+            if !server_was_running {
+                stop_server(storage_dir, Duration::from_secs(5)).await;
+            }
+            return Err(err);
         }
-        return Ok(());
+    };
+    let result = persist_vault_secrets_via_server(&client, secrets).await;
+    if !server_was_running {
+        stop_server(storage_dir, Duration::from_secs(5)).await;
     }
-
-    let mut store = Vault::load(Storage::new(storage_dir).secrets_path())?;
-    for secret in secrets {
-        validate_vault_secret(secret)?;
-        store.set(
-            &secret.name,
-            &secret.value,
-            local_secret_type(secret.type_),
-            secret.description.as_deref(),
-        )?;
-    }
-    Ok(())
+    result
 }
 
-fn local_secret_type(secret_type: ApiSecretType) -> SecretType {
-    match secret_type {
-        ApiSecretType::Environment => SecretType::Environment,
-        ApiSecretType::File => SecretType::File,
-        ApiSecretType::Credential => SecretType::Credential,
-    }
-}
-
-fn validate_vault_secret(secret: &CreateSecretRequest) -> Result<()> {
-    if secret.type_ != ApiSecretType::Credential {
-        return Ok(());
-    }
-
-    parse_credential_secret(&secret.name, &secret.value)
-        .map(|_| ())
-        .map_err(anyhow::Error::msg)
+async fn persist_vault_secrets(
+    storage_dir: &Path,
+    secrets: &[CreateSecretRequest],
+    server_was_running: bool,
+) -> Result<()> {
+    persist_vault_secrets_with(
+        storage_dir,
+        secrets,
+        server_was_running,
+        |path| Box::pin(server_client::connect_api_client(path)),
+        |path, timeout| Box::pin(stop::stop_server(path, timeout)),
+    )
+    .await
 }
 
 fn credential_secret_request(credential: &AuthCredential) -> Result<CreateSecretRequest> {
@@ -794,6 +1202,16 @@ pub(crate) async fn run_install(
     let cli_settings = user_config::load_settings_with_storage_dir(args.storage_dir.as_deref())?;
     let storage_dir = user_config::storage_dir(&cli_settings)?;
     let server_was_running = record::active_server_record(&storage_dir).is_some();
+    let fabro_dir = fabro_util::Home::from_env().root().to_path_buf();
+    let config_path = fabro_dir.join(SETTINGS_CONFIG_FILENAME);
+    let input_source: Box<dyn InstallInputSource + Send + Sync> =
+        match NonInteractiveInstallInputSource::new(args)? {
+            Some(source) => {
+                source.validate(config_path.exists())?;
+                Box::new(source)
+            }
+            None => Box::new(InteractiveInstallInputSource),
+        };
 
     fabro_util::printerr!(printer, "");
     fabro_util::printerr!(printer, "  {}{}", emoji, s.bold.apply_to("Fabro Install"));
@@ -811,7 +1229,6 @@ pub(crate) async fn run_install(
     );
     fabro_util::printerr!(printer, "");
 
-    let fabro_dir = fabro_util::Home::from_env().root().to_path_buf();
     std::fs::create_dir_all(&fabro_dir)?;
 
     {
@@ -827,14 +1244,19 @@ pub(crate) async fn run_install(
     }
 
     // Pre-flight checks
-    {
+    let facts = {
+        let dep_outcomes = doctor::probe_system_deps().await;
+        let dep_check = doctor::check_system_deps(doctor::DEP_SPECS, &dep_outcomes);
+        let dot_missing = doctor::DEP_SPECS
+            .iter()
+            .position(|spec| spec.name == "dot")
+            .is_some_and(|idx| matches!(dep_outcomes[idx], doctor::ProbeOutcome::NotFound));
+
         fabro_util::printerr!(
             printer,
             "  {}",
             s.dim.apply_to("[Pre-flight] System dependency checks")
         );
-        let dep_outcomes = doctor::probe_system_deps().await;
-        let dep_check = doctor::check_system_deps(doctor::DEP_SPECS, &dep_outcomes);
 
         if dep_check.status == doctor::CheckStatus::Error {
             fabro_util::printerr!(printer, "  Missing required system dependencies:");
@@ -844,25 +1266,14 @@ pub(crate) async fn run_install(
             bail!("Install missing required tools before running setup");
         }
 
-        // Check if dot is missing and offer to install
-        let dot_idx = doctor::DEP_SPECS.iter().position(|s| s.name == "dot");
-        if let Some(idx) = dot_idx {
-            if matches!(dep_outcomes[idx], doctor::ProbeOutcome::NotFound) {
-                let install = spawn_blocking(|| {
-                    prompt_confirm("Graphviz (dot) not found. Install via Homebrew?", true)
-                })
-                .await??;
-
-                if install {
-                    let status = TokioCommand::new("brew")
-                        .args(["install", "graphviz"])
-                        .status()
-                        .await
-                        .context("failed to run brew install graphviz")?;
-                    if !status.success() {
-                        fabro_util::printerr!(printer, "  Warning: brew install graphviz failed");
-                    }
-                }
+        if input_source.choose_graphviz_install(dot_missing).await? {
+            let status = TokioCommand::new("brew")
+                .args(["install", "graphviz"])
+                .status()
+                .await
+                .context("failed to run brew install graphviz")?;
+            if !status.success() {
+                fabro_util::printerr!(printer, "  Warning: brew install graphviz failed");
             }
         }
 
@@ -870,7 +1281,11 @@ pub(crate) async fn run_install(
             fabro_util::printerr!(printer, "  {}", detail.text);
         }
         fabro_util::printerr!(printer, "");
-    }
+
+        InstallFacts {
+            codex_detected: detect_binary_on_path("codex").await,
+        }
+    };
 
     // Step 1: LLM Providers
     fabro_util::printerr!(printer, "  {}", s.bold.apply_to("Step 1 · LLM Providers"));
@@ -879,88 +1294,11 @@ pub(crate) async fn run_install(
 
     let mut vault_secrets: Vec<CreateSecretRequest> = Vec::new();
     let mut server_env_pairs: Vec<(String, String)> = Vec::new();
-    let mut configured_providers: Vec<Provider> = Vec::new();
-
-    let codex_detected = detect_binary_on_path("codex").await;
-    let mut openai_configured = false;
-
-    if codex_detected {
-        tracing::debug!("Codex binary detected on PATH");
-        let use_device_auth = spawn_blocking(|| {
-            prompt_confirm(
-                "OpenAI (Codex) detected. Set up OpenAI with device code login?",
-                true,
-            )
-        })
-        .await??;
-
-        if use_device_auth {
-            let credential = authenticate_provider_with_method(
-                Provider::OpenAi,
-                AuthMethod::CodexDevice(codex_oauth_config()),
-                &s,
-                printer,
-            )
-            .await?;
-            vault_secrets.push(credential_secret_request(&credential)?);
-            configured_providers.push(Provider::OpenAi);
-            openai_configured = true;
-        }
-    }
-
-    if !openai_configured {
-        // First provider — single choice from the top 3
-        let primary_providers = [Provider::Anthropic, Provider::OpenAi, Provider::Gemini];
-        let primary_labels: Vec<String> = primary_providers
-            .iter()
-            .map(|p| provider_display_name(*p).to_string())
-            .collect();
-
-        let primary_idx: usize = spawn_blocking({
-            let labels = primary_labels.clone();
-            move || prompt_select("Choose your first LLM provider", &labels)
-        })
-        .await??;
-
-        let first_provider = primary_providers[primary_idx];
-        {
-            let credential = authenticate_provider(first_provider, &s, printer).await?;
-            vault_secrets.push(credential_secret_request(&credential)?);
-            configured_providers.push(first_provider);
-        }
-    }
-
-    // Additional providers
-    fabro_util::printerr!(printer, "");
-    let add_more =
-        spawn_blocking(|| prompt_confirm("Set up additional LLM providers?", false)).await??;
-
-    if add_more {
-        let remaining_labels: Vec<String> = Provider::ALL
-            .iter()
-            .filter(|p| !configured_providers.contains(p))
-            .map(|p| {
-                let env_vars = p.api_key_env_vars().join(" / ");
-                format!("{} ({})", provider_display_name(*p), env_vars)
-            })
-            .collect();
-        let remaining_providers: Vec<Provider> = Provider::ALL
-            .iter()
-            .filter(|p| !configured_providers.contains(p))
-            .copied()
-            .collect();
-
-        let selected_indices: Vec<usize> = spawn_blocking({
-            let labels = remaining_labels.clone();
-            move || prompt_multiselect("Which additional LLM providers?", &labels)
-        })
-        .await??;
-
-        for idx in selected_indices {
-            let provider = remaining_providers[idx];
-            let credential = authenticate_provider(provider, &s, printer).await?;
-            vault_secrets.push(credential_secret_request(&credential)?);
-        }
+    let llm_selection = input_source
+        .collect_llm_selection(&facts, &s, printer)
+        .await?;
+    for credential in llm_selection.credentials {
+        vault_secrets.push(credential_secret_request(&credential)?);
     }
     fabro_util::printerr!(printer, "");
 
@@ -969,72 +1307,58 @@ pub(crate) async fn run_install(
     fabro_util::printerr!(printer, "  {}", s.dim.apply_to("───────────────"));
     fabro_util::printerr!(printer, "");
 
-    {
-        let strategy_options = vec![
-            "GitHub CLI — use your existing `gh` login".to_string(),
-            "GitHub App — recommended for teams".to_string(),
-        ];
-        let strategy = spawn_blocking({
-            let options = strategy_options.clone();
-            move || prompt_select("How should Fabro authenticate with GitHub?", &options)
-        })
-        .await??;
-
-        match strategy {
-            0 => {
-                let token = fabro_github::gh_auth_token().await.map_err(|err| {
-                    anyhow!("{err}. Run `gh auth login` and rerun `fabro install`.")
-                })?;
+    match input_source.choose_github_install(&s, printer).await? {
+        GitHubInstallSelection::GhCli => {
+            let token = fabro_github::gh_auth_token()
+                .await
+                .map_err(|err| anyhow!("{err}. Run `gh auth login` and rerun `fabro install`."))?;
+            let user_toml_path = fabro_dir.join(SETTINGS_CONFIG_FILENAME);
+            let existing = std::fs::read_to_string(&user_toml_path).unwrap_or_default();
+            let mut doc: toml::Value = if existing.is_empty() {
+                toml::Value::Table(toml::Table::default())
+            } else {
+                toml::from_str(&existing).context("failed to parse existing settings.toml")?
+            };
+            write_github_cli_settings(&mut doc)?;
+            std::fs::write(&user_toml_path, toml::to_string_pretty(&doc)?)?;
+            fabro_util::printerr!(printer, "  {} GitHub CLI configured", s.green.apply_to("✔"));
+            vault_secrets.push(CreateSecretRequest {
+                name:        "GITHUB_CLI_TOKEN".to_string(),
+                value:       token,
+                type_:       ApiSecretType::Environment,
+                description: None,
+            });
+        }
+        GitHubInstallSelection::App { owner, username } => {
+            let github_env_pairs = setup_github_app(
+                &fabro_dir,
+                &s,
+                web_url,
+                &owner,
+                username.as_deref(),
+                printer,
+            )
+            .await?;
+            let slug = {
                 let user_toml_path = fabro_dir.join(SETTINGS_CONFIG_FILENAME);
-                let existing = std::fs::read_to_string(&user_toml_path).unwrap_or_default();
-                let mut doc: toml::Value = if existing.is_empty() {
-                    toml::Value::Table(toml::Table::default())
-                } else {
-                    toml::from_str(&existing).context("failed to parse existing settings.toml")?
-                };
-                write_github_cli_settings(&mut doc)?;
-                std::fs::write(&user_toml_path, toml::to_string_pretty(&doc)?)?;
-                fabro_util::printerr!(printer, "  {} GitHub CLI configured", s.green.apply_to("✔"));
-                vault_secrets.push(CreateSecretRequest {
-                    name:        "GITHUB_CLI_TOKEN".to_string(),
-                    value:       token,
-                    type_:       ApiSecretType::Environment,
-                    description: None,
-                });
-            }
-            1 => {
-                let (owner, username) = prompt_github_app_owner(&s).await?;
-                let github_env_pairs = setup_github_app(
-                    &fabro_dir,
-                    &s,
-                    web_url,
-                    &owner,
-                    username.as_deref(),
-                    printer,
-                )
-                .await?;
-                let slug = {
-                    let user_toml_path = fabro_dir.join(SETTINGS_CONFIG_FILENAME);
-                    let toml_content = std::fs::read_to_string(&user_toml_path).unwrap_or_default();
-                    let doc: toml::Value = toml::from_str(&toml_content)
-                        .unwrap_or(toml::Value::Table(toml::Table::default()));
-                    doc.get("server")
-                        .and_then(|server| server.get("integrations"))
-                        .and_then(|integrations| integrations.get("github"))
-                        .and_then(|github| github.get("slug"))
-                        .and_then(|slug| slug.as_str())
-                        .unwrap_or("unknown")
-                        .to_string()
-                };
-                fabro_util::printerr!(
-                    printer,
-                    "  {} GitHub App registered ({})",
-                    s.green.apply_to("✔"),
-                    slug
-                );
-                server_env_pairs.extend(github_env_pairs);
-            }
-            _ => unreachable!("prompt_select returned an out-of-range index"),
+                let toml_content = std::fs::read_to_string(&user_toml_path).unwrap_or_default();
+                let doc: toml::Value = toml::from_str(&toml_content)
+                    .unwrap_or(toml::Value::Table(toml::Table::default()));
+                doc.get("server")
+                    .and_then(|server| server.get("integrations"))
+                    .and_then(|integrations| integrations.get("github"))
+                    .and_then(|github| github.get("slug"))
+                    .and_then(|slug| slug.as_str())
+                    .unwrap_or("unknown")
+                    .to_string()
+            };
+            fabro_util::printerr!(
+                printer,
+                "  {} GitHub App registered ({})",
+                s.green.apply_to("✔"),
+                slug
+            );
+            server_env_pairs.extend(github_env_pairs);
         }
     }
     fabro_util::printerr!(printer, "");
@@ -1045,39 +1369,32 @@ pub(crate) async fn run_install(
         fabro_util::printerr!(printer, "  {}", s.dim.apply_to("─────────────────────"));
         fabro_util::printerr!(printer, "");
 
-        let config_path = fabro_dir.join(SETTINGS_CONFIG_FILENAME);
-        let write_config = if config_path.exists() {
-            spawn_blocking(|| {
-                prompt_confirm("~/.fabro/settings.toml already exists. Overwrite?", false)
-            })
-            .await??
-        } else {
-            true
-        };
-
-        if write_config {
-            let username: String =
-                spawn_blocking(|| prompt_input("GitHub username for allowed access")).await??;
-
-            let existing = std::fs::read_to_string(&config_path).unwrap_or_default();
-            let mut doc: toml::Value = if existing.is_empty() {
-                toml::Value::Table(toml::Table::default())
-            } else {
-                toml::from_str(&existing).context("failed to parse existing settings.toml")?
-            };
-            merge_server_settings(&mut doc, &username)?;
-            std::fs::write(&config_path, toml::to_string_pretty(&doc)?)?;
-            fabro_util::printerr!(
-                printer,
-                "  {}",
-                s.dim.apply_to(format!("Wrote {}", config_path.display()))
-            );
-        } else {
-            fabro_util::printerr!(
-                printer,
-                "  {}",
-                s.dim.apply_to("Keeping existing settings.toml")
-            );
+        match input_source
+            .choose_server_config(config_path.exists())
+            .await?
+        {
+            ServerConfigSelection::KeepExisting => {
+                fabro_util::printerr!(
+                    printer,
+                    "  {}",
+                    s.dim.apply_to("Keeping existing settings.toml")
+                );
+            }
+            ServerConfigSelection::Write { username } => {
+                let existing = std::fs::read_to_string(&config_path).unwrap_or_default();
+                let mut doc: toml::Value = if existing.is_empty() {
+                    toml::Value::Table(toml::Table::default())
+                } else {
+                    toml::from_str(&existing).context("failed to parse existing settings.toml")?
+                };
+                merge_server_settings(&mut doc, &username)?;
+                std::fs::write(&config_path, toml::to_string_pretty(&doc)?)?;
+                fabro_util::printerr!(
+                    printer,
+                    "  {}",
+                    s.dim.apply_to(format!("Wrote {}", config_path.display()))
+                );
+            }
         }
         fabro_util::printerr!(printer, "");
     }
@@ -1162,8 +1479,7 @@ pub(crate) async fn run_install(
     fabro_util::printerr!(printer, "");
 
     // Verify setup
-    let run_doctor =
-        spawn_blocking(|| prompt_confirm("Run fabro doctor to verify?", true)).await??;
+    let run_doctor = input_source.should_run_doctor().await?;
 
     if run_doctor {
         fabro_util::printerr!(printer, "");
@@ -1207,7 +1523,22 @@ mod hex {
 mod tests {
     #![allow(clippy::absolute_paths)]
 
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    use httpmock::Method::POST;
+    use httpmock::MockServer;
+
     use super::*;
+
+    fn install_args(non_interactive: bool, scripted: InstallNonInteractiveArgs) -> InstallArgs {
+        InstallArgs {
+            storage_dir: crate::args::StorageDirArgs::default(),
+            web_url: "http://localhost:3000".to_string(),
+            non_interactive,
+            scripted,
+        }
+    }
 
     // -- Binary detection --
 
@@ -1571,7 +1902,7 @@ client_id = "client-id"
     }
 
     #[tokio::test]
-    async fn persist_install_outputs_offline_splits_server_env_and_vault() {
+    async fn persist_install_outputs_persists_vault_secrets_via_server_when_autostarting() {
         let dir = tempfile::tempdir().unwrap();
         let server_env_pairs = vec![
             ("SESSION_SECRET".to_string(), "session".to_string()),
@@ -1592,20 +1923,200 @@ client_id = "client-id"
             })
             .unwrap(),
         ];
+        let server = MockServer::start_async().await;
+        let created = server
+            .mock_async(|when, then| {
+                when.method(POST).path("/api/v1/secrets");
+                then.status(200)
+                    .header("content-type", "application/json")
+                    .body(
+                        serde_json::json!({
+                            "name": "persisted",
+                            "type": "environment",
+                            "created_at": "2026-01-01T00:00:00Z",
+                            "updated_at": "2026-01-01T00:00:00Z"
+                        })
+                        .to_string(),
+                    );
+            })
+            .await;
+        let stop_called = Arc::new(AtomicBool::new(false));
 
-        persist_install_outputs(dir.path(), &server_env_pairs, &vault_secrets, false)
-            .await
-            .unwrap();
+        persist_server_env_secrets(dir.path(), &server_env_pairs).unwrap();
+        persist_vault_secrets_with(
+            dir.path(),
+            &vault_secrets,
+            false,
+            |_| {
+                let client = fabro_api::Client::new(&server.base_url());
+                Box::pin(async move { Ok(client) })
+            },
+            {
+                let stop_called = Arc::clone(&stop_called);
+                move |_, _| {
+                    let stop_called = Arc::clone(&stop_called);
+                    Box::pin(async move {
+                        stop_called.store(true, Ordering::SeqCst);
+                        true
+                    })
+                }
+            },
+        )
+        .await
+        .unwrap();
 
         let server_env =
             std::fs::read_to_string(Storage::new(dir.path()).server_state().env_path()).unwrap();
         assert!(server_env.contains("SESSION_SECRET=session"));
         assert!(server_env.contains("FABRO_JWT_PUBLIC_KEY=public-key"));
+        assert_eq!(created.calls_async().await, 2);
+        assert!(stop_called.load(Ordering::SeqCst));
+        assert!(!Storage::new(dir.path()).secrets_path().exists());
+    }
 
-        let vault = Vault::load(Storage::new(dir.path()).secrets_path()).unwrap();
-        assert_eq!(vault.get("GITHUB_CLI_TOKEN"), Some("gh-token"));
-        let anthropic = vault.get_entry("anthropic").unwrap();
-        assert_eq!(anthropic.secret_type, SecretType::Credential);
-        assert_eq!(vault.get("SESSION_SECRET"), None);
+    #[test]
+    fn non_interactive_source_rejects_missing_scripted_inputs() {
+        let args = install_args(true, InstallNonInteractiveArgs::default());
+        let err = NonInteractiveInstallInputSource::new(&args).unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("Non-interactive install requires additional flags")
+        );
+    }
+
+    #[test]
+    fn non_interactive_source_rejects_hidden_args_without_switch() {
+        let args = install_args(false, InstallNonInteractiveArgs {
+            llm_provider: Some(Provider::Anthropic),
+            ..InstallNonInteractiveArgs::default()
+        });
+        let err = NonInteractiveInstallInputSource::new(&args).unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("--llm-provider requires --non-interactive")
+        );
+    }
+
+    #[test]
+    fn non_interactive_source_rejects_conflicting_api_key_inputs() {
+        let args = install_args(true, InstallNonInteractiveArgs {
+            llm_provider: Some(Provider::Anthropic),
+            llm_api_key_stdin: true,
+            llm_api_key_env: Some("ANTHROPIC_API_KEY".to_string()),
+            github_strategy: Some(InstallGitHubStrategyArg::GhCli),
+            github_username: Some("brynary".to_string()),
+            ..InstallNonInteractiveArgs::default()
+        });
+        let err = NonInteractiveInstallInputSource::new(&args).unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("requires exactly one of --llm-api-key-stdin or --llm-api-key-env")
+        );
+    }
+
+    #[test]
+    fn non_interactive_source_rejects_missing_llm_provider() {
+        let source = NonInteractiveInstallInputSource {
+            args: InstallNonInteractiveArgs {
+                llm_api_key_env: Some("ANTHROPIC_API_KEY".to_string()),
+                github_strategy: Some(InstallGitHubStrategyArg::GhCli),
+                github_username: Some("brynary".to_string()),
+                ..InstallNonInteractiveArgs::default()
+            },
+        };
+
+        let err = source.validate(false).unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("non-interactive install requires --llm-provider")
+        );
+    }
+
+    #[test]
+    fn non_interactive_source_rejects_missing_github_strategy() {
+        let source = NonInteractiveInstallInputSource {
+            args: InstallNonInteractiveArgs {
+                llm_provider: Some(Provider::Anthropic),
+                llm_api_key_env: Some("ANTHROPIC_API_KEY".to_string()),
+                github_username: Some("brynary".to_string()),
+                ..InstallNonInteractiveArgs::default()
+            },
+        };
+
+        let err = source.validate(false).unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("non-interactive install requires --github-strategy")
+        );
+    }
+
+    #[test]
+    fn non_interactive_source_rejects_missing_github_username_for_new_config() {
+        let source = NonInteractiveInstallInputSource {
+            args: InstallNonInteractiveArgs {
+                llm_provider: Some(Provider::Anthropic),
+                llm_api_key_env: Some("ANTHROPIC_API_KEY".to_string()),
+                github_strategy: Some(InstallGitHubStrategyArg::GhCli),
+                ..InstallNonInteractiveArgs::default()
+            },
+        };
+
+        let err = source.validate(false).unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("non-interactive install requires --github-username")
+        );
+    }
+
+    #[test]
+    fn non_interactive_source_allows_keep_existing_settings_without_username() {
+        let source = NonInteractiveInstallInputSource {
+            args: InstallNonInteractiveArgs {
+                llm_provider: Some(Provider::Anthropic),
+                llm_api_key_env: Some("ANTHROPIC_API_KEY".to_string()),
+                github_strategy: Some(InstallGitHubStrategyArg::GhCli),
+                keep_existing_settings: true,
+                ..InstallNonInteractiveArgs::default()
+            },
+        };
+
+        source.validate(true).unwrap();
+    }
+
+    #[tokio::test]
+    async fn non_interactive_source_rejects_github_app_setup() {
+        let source = NonInteractiveInstallInputSource {
+            args: InstallNonInteractiveArgs {
+                llm_provider: Some(Provider::Anthropic),
+                llm_api_key_env: Some("ANTHROPIC_API_KEY".to_string()),
+                github_strategy: Some(InstallGitHubStrategyArg::App),
+                github_username: Some("brynary".to_string()),
+                ..InstallNonInteractiveArgs::default()
+            },
+        };
+
+        let err = source.validate(false).unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("GitHub App setup is not supported with --non-interactive")
+        );
+    }
+
+    #[tokio::test]
+    async fn non_interactive_source_requires_config_choice_when_settings_exist() {
+        let source = NonInteractiveInstallInputSource {
+            args: InstallNonInteractiveArgs {
+                llm_provider: Some(Provider::Anthropic),
+                llm_api_key_env: Some("ANTHROPIC_API_KEY".to_string()),
+                github_strategy: Some(InstallGitHubStrategyArg::GhCli),
+                github_username: Some("brynary".to_string()),
+                ..InstallNonInteractiveArgs::default()
+            },
+        };
+
+        let err = source.choose_server_config(true).await.unwrap_err();
+        assert!(err.to_string().contains(
+            "settings.toml already exists; pass --overwrite-settings or --keep-existing-settings"
+        ));
     }
 }

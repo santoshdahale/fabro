@@ -19,6 +19,7 @@ fn help() {
           --debug                      Enable DEBUG-level logging (default is INFO) [env: FABRO_DEBUG=]
           --web-url <WEB_URL>          Base URL for the web UI (used for OAuth callback URLs) [default: http://localhost:3000]
           --no-upgrade-check           Disable automatic upgrade check [env: FABRO_NO_UPGRADE_CHECK=true]
+          --non-interactive            Run install without prompts; use hidden scripted flags for inputs
           --quiet                      Suppress non-essential output [env: FABRO_QUIET=]
           --verbose                    Enable verbose output [env: FABRO_VERBOSE=]
       -h, --help                       Print help
@@ -38,4 +39,34 @@ fn install_rejects_json() {
     assert!(!output.status.success());
     let stderr = String::from_utf8(output.stderr).unwrap();
     assert!(stderr.contains("--json is not supported for this command"));
+}
+
+#[test]
+fn non_interactive_without_inputs_prints_scripted_usage_and_fails() {
+    let context = test_context!();
+    let output = context
+        .command()
+        .args(["install", "--non-interactive"])
+        .output()
+        .expect("command should run");
+
+    assert!(!output.status.success());
+    let stderr = String::from_utf8(output.stderr).unwrap();
+    assert!(stderr.contains("Non-interactive install requires additional flags"));
+    assert!(stderr.contains("--llm-provider"));
+    assert!(stderr.contains("--github-strategy"));
+}
+
+#[test]
+fn hidden_non_interactive_args_require_non_interactive() {
+    let context = test_context!();
+    let output = context
+        .command()
+        .args(["install", "--llm-provider", "anthropic"])
+        .output()
+        .expect("command should run");
+
+    assert!(!output.status.success());
+    let stderr = String::from_utf8(output.stderr).unwrap();
+    assert!(stderr.contains("requires --non-interactive"));
 }

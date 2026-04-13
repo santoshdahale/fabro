@@ -262,7 +262,9 @@ impl CredentialResolver {
 fn codex_login_command(api_key: &str) -> String {
     let quoted =
         try_quote(api_key).map_or_else(|_| api_key.to_string(), std::borrow::Cow::into_owned);
-    format!("PATH=\"$HOME/.local/bin:$PATH\" echo {quoted} | codex login --with-api-key")
+    format!(
+        "export PATH=\"$HOME/.local/bin:$PATH\" && printf '%s\\n' {quoted} | codex login --with-api-key"
+    )
 }
 
 fn credential_ids_for(provider: Provider, usage: CredentialUsage) -> &'static [&'static str] {
@@ -283,6 +285,9 @@ fn credential_ids_for(provider: Provider, usage: CredentialUsage) -> &'static [&
 
 #[cfg(test)]
 mod tests {
+    #[cfg(unix)]
+    use std::os::unix::fs::PermissionsExt;
+
     use chrono::{Duration, Utc};
     use httpmock::Method::POST;
     use httpmock::MockServer;
@@ -465,6 +470,64 @@ mod tests {
         );
         assert!(!cli.env_vars.contains_key("CHATGPT_ACCOUNT_ID"));
         assert!(cli.login_command.is_some());
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn openai_api_key_cli_login_command_executes_codex_from_local_bin() {
+        let dir = tempfile::tempdir().unwrap();
+        let local_bin = dir.path().join(".local/bin");
+        std::fs::create_dir_all(&local_bin).unwrap();
+
+        let codex_path = local_bin.join("codex");
+        std::fs::write(
+            &codex_path,
+            "#!/bin/sh\nprintf '%s\\n' \"$@\" > \"$HOME/codex-args.txt\"\ncat > \"$HOME/codex-stdin.txt\"\n",
+        )
+        .unwrap();
+        let mut permissions = std::fs::metadata(&codex_path).unwrap().permissions();
+        permissions.set_mode(0o755);
+        std::fs::set_permissions(&codex_path, permissions).unwrap();
+
+        let mut vault = Vault::load(dir.path().join("secrets.json")).unwrap();
+        vault_set_credential(
+            &mut vault,
+            "openai",
+            &api_key_credential(Provider::OpenAi, "openai-key"),
+        )
+        .unwrap();
+        let resolver = test_resolver(vault, Arc::new(|_| None));
+
+        let ResolvedCredential::Cli(cli) = resolver
+            .resolve(
+                Provider::OpenAi,
+                CredentialUsage::CliAgent(CliAgentKind::Codex),
+            )
+            .await
+            .unwrap()
+        else {
+            panic!("expected cli credential");
+        };
+
+        let status = std::process::Command::new("/bin/sh")
+            .arg("-lc")
+            .arg(cli.login_command.unwrap())
+            .env("HOME", dir.path())
+            .env("PATH", "/usr/bin:/bin")
+            .status()
+            .unwrap();
+
+        assert!(status.success());
+        assert_eq!(
+            std::fs::read_to_string(dir.path().join("codex-args.txt")).unwrap(),
+            "login\n--with-api-key\n"
+        );
+        assert_eq!(
+            std::fs::read_to_string(dir.path().join("codex-stdin.txt"))
+                .unwrap()
+                .trim_end(),
+            "openai-key"
+        );
     }
 
     #[tokio::test]

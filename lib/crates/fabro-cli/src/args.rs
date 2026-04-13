@@ -599,6 +599,10 @@ pub(crate) struct ProviderLoginArgs {
     /// LLM provider to authenticate with
     #[arg(long)]
     pub(crate) provider: fabro_model::Provider,
+
+    /// Read an API key from stdin instead of prompting
+    #[arg(long)]
+    pub(crate) api_key_stdin: bool,
 }
 
 #[derive(Args)]
@@ -1268,6 +1272,39 @@ pub(crate) struct DoctorArgs {
     pub(crate) verbose: bool,
 }
 
+#[derive(Debug, Clone, Copy, ValueEnum)]
+pub(crate) enum InstallGitHubStrategyArg {
+    GhCli,
+    App,
+}
+
+#[derive(Args, Debug, Clone, Default)]
+pub(crate) struct InstallNonInteractiveArgs {
+    #[arg(long, hide = true)]
+    pub(crate) llm_provider: Option<fabro_model::Provider>,
+
+    #[arg(long, hide = true)]
+    pub(crate) llm_api_key_stdin: bool,
+
+    #[arg(long, hide = true)]
+    pub(crate) llm_api_key_env: Option<String>,
+
+    #[arg(long, hide = true)]
+    pub(crate) github_strategy: Option<InstallGitHubStrategyArg>,
+
+    #[arg(long, hide = true)]
+    pub(crate) github_username: Option<String>,
+
+    #[arg(long, hide = true)]
+    pub(crate) overwrite_settings: bool,
+
+    #[arg(long, hide = true)]
+    pub(crate) keep_existing_settings: bool,
+
+    #[arg(long, hide = true)]
+    pub(crate) run_doctor: bool,
+}
+
 #[derive(Args)]
 pub(crate) struct InstallArgs {
     #[command(flatten)]
@@ -1276,6 +1313,13 @@ pub(crate) struct InstallArgs {
     /// Base URL for the web UI (used for OAuth callback URLs)
     #[arg(long, default_value = "http://localhost:3000")]
     pub(crate) web_url: String,
+
+    /// Run install without prompts; use hidden scripted flags for inputs
+    #[arg(long)]
+    pub(crate) non_interactive: bool,
+
+    #[command(flatten)]
+    pub(crate) scripted: InstallNonInteractiveArgs,
 }
 
 #[derive(Args)]
