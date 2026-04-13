@@ -18,6 +18,7 @@ sleep_inhibitor = ["dep:core-foundation"]
 workspace = true
 
 [dependencies]
+fabro-auth = { path = "../fabro-auth" }
 fabro-config = { path = "../fabro-config" }
 fabro-llm = { path = "../fabro-llm" }
 fabro-model = { path = "../fabro-model" }

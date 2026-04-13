@@ -4,6 +4,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use fabro_agent::Sandbox;
 use fabro_agent::sandbox::ExecResult;
+use fabro_auth::{CliAgentKind, CredentialResolver, CredentialUsage, ResolvedCredential};
 use fabro_graphviz::graph::Node;
 use fabro_llm::types::TokenCounts;
 use fabro_model::Provider;
@@ -369,8 +370,11 @@ pub fn parse_cli_response(provider: Provider, output: &str) -> Option<CliRespons
 }
 
 /// Escape a value for safe embedding inside single quotes in a shell command.
-fn shell_escape(val: &str) -> String {
-    val.replace('\'', "'\\''")
+fn shell_quote(val: &str) -> String {
+    shlex::try_quote(val).map_or_else(
+        |_| format!("'{}'", val.replace('\'', "'\\''")),
+        std::borrow::Cow::into_owned,
+    )
 }
 
 /// CLI backend that invokes external CLI tools (claude, codex, gemini) via
@@ -380,16 +384,29 @@ pub struct AgentCliBackend {
     provider:      Provider,
     env:           HashMap<String, String>,
     poll_interval: std::time::Duration,
+    resolver:      Option<CredentialResolver>,
 }
 
 impl AgentCliBackend {
     #[must_use]
-    pub fn new(model: String, provider: Provider) -> Self {
+    pub fn new(model: String, provider: Provider, resolver: CredentialResolver) -> Self {
         Self {
             model,
             provider,
             env: HashMap::new(),
             poll_interval: std::time::Duration::from_secs(5),
+            resolver: Some(resolver),
+        }
+    }
+
+    #[must_use]
+    pub fn new_from_env(model: String, provider: Provider) -> Self {
+        Self {
+            model,
+            provider,
+            env: HashMap::new(),
+            poll_interval: std::time::Duration::from_secs(5),
+            resolver: None,
         }
     }
 
@@ -516,26 +533,22 @@ impl CodergenBackend for AgentCliBackend {
         // base64-encoded command, avoiding filesystem-to-process race
         // conditions that can occur when writing an env file via the fs API and
         // sourcing it via the process API.
-        let mut launch_env: HashMap<String, String> = HashMap::new();
-        for name in provider.api_key_env_vars() {
-            if let Ok(val) = std::env::var(name) {
-                launch_env.insert((*name).to_string(), val);
-            }
-        }
-        for (name, val) in &self.env {
-            launch_env.insert(name.clone(), val.clone());
-        }
-
-        // Codex CLI requires `codex login --with-api-key` to store credentials;
-        // it does not read OPENAI_API_KEY from the environment at runtime.
-        if cli == AgentCli::Codex {
-            if let Some(api_key) = launch_env.get("OPENAI_API_KEY") {
-                let login_cmd = format!(
-                    "PATH=\"$HOME/.local/bin:$PATH\" echo '{}' | codex login --with-api-key",
-                    shell_escape(api_key)
-                );
+        let cli_agent = match cli {
+            AgentCli::Claude => CliAgentKind::Claude,
+            AgentCli::Codex => CliAgentKind::Codex,
+            AgentCli::Gemini => CliAgentKind::Gemini,
+        };
+        let mut launch_env = if let Some(resolver) = &self.resolver {
+            let resolved = resolver
+                .resolve(provider, CredentialUsage::CliAgent(cli_agent))
+                .await
+                .map_err(|e| Error::handler(format!("Failed to resolve CLI credential: {e}")))?;
+            let ResolvedCredential::Cli(cli_credential) = resolved else {
+                return Err(Error::handler("Expected CLI credential".to_string()));
+            };
+            if let Some(login_cmd) = &cli_credential.login_command {
                 let login_result = sandbox
-                    .exec_command(&login_cmd, 30_000, None, None, None)
+                    .exec_command(login_cmd, 30_000, None, None, None)
                     .await
                     .map_err(|e| Error::handler(format!("codex login failed: {e}")))?;
                 if login_result.exit_code != 0 {
@@ -546,6 +559,18 @@ impl CodergenBackend for AgentCliBackend {
                     );
                 }
             }
+            cli_credential.env_vars
+        } else {
+            let mut env = HashMap::new();
+            for name in provider.api_key_env_vars() {
+                if let Ok(val) = std::env::var(name) {
+                    env.insert((*name).to_string(), val);
+                }
+            }
+            env
+        };
+        for (name, val) in &self.env {
+            launch_env.insert(name.clone(), val.clone());
         }
 
         // Also write env file as fallback for commands that source it (e.g. ensure_cli
@@ -554,7 +579,7 @@ impl CodergenBackend for AgentCliBackend {
         env_lines.extend(
             launch_env
                 .iter()
-                .map(|(k, v)| format!("export {k}='{}'", shell_escape(v))),
+                .map(|(k, v)| format!("export {k}={}", shell_quote(v))),
         );
         {
             sandbox
@@ -1161,7 +1186,7 @@ mod tests {
         node.attrs
             .insert("backend".to_string(), AttrValue::String("cli".to_string()));
 
-        let cli_backend = AgentCliBackend::new("model".into(), Provider::Anthropic);
+        let cli_backend = AgentCliBackend::new_from_env("model".into(), Provider::Anthropic);
         let router = BackendRouter::new(Box::new(StubBackend), cli_backend);
         assert!(router.should_use_cli(&node));
     }
@@ -1170,7 +1195,7 @@ mod tests {
     fn router_uses_api_by_default() {
         let node = Node::new("test");
 
-        let cli_backend = AgentCliBackend::new("model".into(), Provider::Anthropic);
+        let cli_backend = AgentCliBackend::new_from_env("model".into(), Provider::Anthropic);
         let router = BackendRouter::new(Box::new(StubBackend), cli_backend);
         assert!(!router.should_use_cli(&node));
     }
@@ -1183,7 +1208,7 @@ mod tests {
             AttrValue::String("claude-opus-4-6".to_string()),
         );
 
-        let cli_backend = AgentCliBackend::new("model".into(), Provider::Anthropic);
+        let cli_backend = AgentCliBackend::new_from_env("model".into(), Provider::Anthropic);
         let router = BackendRouter::new(Box::new(StubBackend), cli_backend);
         assert!(!router.should_use_cli(&node));
     }

@@ -18,6 +18,7 @@ workspace = true
 
 [dependencies]
 anyhow.workspace = true
+fabro-auth = { path = "../fabro-auth" }
 fabro-agent = { path = "../fabro-agent" }
 fabro-config = { path = "../fabro-config" }
 fabro-graphviz = { path = "../fabro-graphviz" }
@@ -64,6 +65,7 @@ tracing.workspace = true
 walkdir.workspace = true
 tempfile = "3"
 toml.workspace = true
+fabro-vault = { path = "../fabro-vault" }
 [dev-dependencies]
 base64.workspace = true
 fabro-mcp = { path = "../fabro-mcp" }

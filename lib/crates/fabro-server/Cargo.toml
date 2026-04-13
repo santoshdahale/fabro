@@ -13,6 +13,7 @@ doctest = false
 workspace = true
 
 [dependencies]
+fabro-auth = { path = "../fabro-auth" }
 fabro-spa = { path = "../fabro-spa" }
 fabro-config = { path = "../fabro-config" }
 fabro-graphviz = { path = "../fabro-graphviz" }

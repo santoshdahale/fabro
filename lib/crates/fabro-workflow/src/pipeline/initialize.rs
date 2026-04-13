@@ -4,6 +4,7 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use fabro_agent::Sandbox;
+use fabro_auth::CredentialResolver;
 use fabro_config::RunScratch;
 use fabro_graphviz::graph;
 use fabro_hooks::{HookContext, HookDecision, HookEvent, HookRunner};
@@ -12,9 +13,11 @@ use fabro_sandbox::{
     ReadBeforeWriteSandbox, SandboxEventCallback, SandboxSpec, WorkdirStrategy, WorktreeOptions,
     WorktreeSandbox,
 };
+use fabro_vault::Vault;
 use shlex::try_quote;
 use tokio::process::Command as TokioCommand;
 use tokio::runtime::Handle;
+use tokio::sync::RwLock as AsyncRwLock;
 use tokio::task::spawn_blocking;
 use tokio::time::timeout as tokio_timeout;
 
@@ -23,6 +26,7 @@ use crate::devcontainer_bridge::{devcontainer_to_snapshot_config, run_devcontain
 use crate::error::Error;
 use crate::event::{Emitter, Event, RunNoticeLevel};
 use crate::git::{self, GitSyncStatus, MetadataStore};
+use crate::handler::llm::api::{auth_issue_message, build_llm_client};
 use crate::handler::llm::{AgentApiBackend, AgentCliBackend, BackendRouter};
 use crate::handler::{HandlerRegistry, default_registry, sandbox_cancel_token};
 use crate::run_options::GitCheckpointOptions;
@@ -279,6 +283,7 @@ async fn build_registry(
     interviewer: Arc<dyn fabro_interview::Interviewer>,
     sandbox_env: &HashMap<String, String>,
     graph: &graph::Graph,
+    vault: Option<Arc<AsyncRwLock<Vault>>>,
 ) -> Result<(Arc<HandlerRegistry>, Option<Client>, bool), Error> {
     let build_no_backend = || Arc::new(default_registry(Arc::clone(&interviewer), || None));
 
@@ -291,26 +296,65 @@ async fn build_registry(
         .values()
         .any(|n| graph::is_llm_handler_type(n.handler_type()));
 
-    match Client::from_env().await {
-        Ok(client) if client.provider_names().is_empty() => {
+    let resolver = vault.map(CredentialResolver::new);
+
+    match build_llm_client(resolver.as_ref()).await {
+        Ok(result) if result.client.provider_names().is_empty() => {
             if graph_needs_llm {
-                return Err(Error::Precondition(
-                    "No LLM providers configured. Set ANTHROPIC_API_KEY or OPENAI_API_KEY, or pass --dry-run to simulate.".to_string(),
-                ));
+                let detail = (!result.auth_issues.is_empty()).then(|| {
+                    result
+                        .auth_issues
+                        .iter()
+                        .map(|(provider, issue)| auth_issue_message(*provider, issue))
+                        .collect::<Vec<_>>()
+                        .join("; ")
+                });
+                let prefix = detail.map_or_else(
+                    || "No LLM providers configured".to_string(),
+                    |detail| format!("No usable LLM providers configured: {detail}"),
+                );
+                return Err(Error::Precondition(format!(
+                    "{prefix}. Set ANTHROPIC_API_KEY or OPENAI_API_KEY, or pass --dry-run to simulate."
+                )));
             }
             Ok((build_no_backend(), None, false))
         }
-        Ok(client) => {
+        Ok(result) => {
             let env = sandbox_env.clone();
             let model = spec.model.clone();
             let provider = spec.provider;
             let fallback_chain = spec.fallback_chain.clone();
             let mcp_servers = spec.mcp_servers.clone();
+            let client = result.client;
             let registry = Arc::new(default_registry(interviewer, move || {
-                let api = AgentApiBackend::new(model.clone(), provider, fallback_chain.clone())
+                let api = resolver
+                    .clone()
+                    .map_or_else(
+                        || {
+                            AgentApiBackend::new_from_env(
+                                model.clone(),
+                                provider,
+                                fallback_chain.clone(),
+                            )
+                        },
+                        |resolver| {
+                            AgentApiBackend::new(
+                                model.clone(),
+                                provider,
+                                fallback_chain.clone(),
+                                resolver,
+                            )
+                        },
+                    )
                     .with_env(env.clone())
                     .with_mcp_servers(mcp_servers.clone());
-                let cli = AgentCliBackend::new(model.clone(), provider).with_env(env.clone());
+                let cli = resolver
+                    .clone()
+                    .map_or_else(
+                        || AgentCliBackend::new_from_env(model.clone(), provider),
+                        |resolver| AgentCliBackend::new(model.clone(), provider, resolver),
+                    )
+                    .with_env(env.clone());
                 Some(Box::new(BackendRouter::new(Box::new(api), cli)))
             }));
             Ok((registry, Some(client), false))
@@ -545,7 +589,14 @@ pub async fn initialize(
             // A caller-supplied registry owns execution behavior for its handlers.
             (registry, None, options.dry_run)
         } else {
-            build_registry(&options.llm, Arc::clone(&options.interviewer), &env, &graph).await?
+            build_registry(
+                &options.llm,
+                Arc::clone(&options.interviewer),
+                &env,
+                &graph,
+                options.vault.clone(),
+            )
+            .await?
         };
     if effective_dry_run {
         use fabro_types::settings::run::{RunExecutionLayer, RunLayer, RunMode};
@@ -705,13 +756,16 @@ mod tests {
     use std::sync::atomic::AtomicBool;
     use std::time::Duration;
 
+    use fabro_auth::{AuthCredential, AuthDetails};
     use fabro_graphviz::graph::{AttrValue, Edge, Graph, Node};
     use fabro_interview::AutoApproveInterviewer;
     use fabro_sandbox::SandboxSpec;
     use fabro_store::Database;
     use fabro_types::settings::SettingsLayer;
     use fabro_types::{RunId, fixtures};
+    use fabro_vault::{SecretType, Vault};
     use object_store::memory::InMemory;
+    use tokio::sync::RwLock as AsyncRwLock;
 
     use super::*;
     use crate::event::StoreProgressLogger;
@@ -752,6 +806,38 @@ mod tests {
         graph.nodes.insert("start".to_string(), start);
         graph.nodes.insert("exit".to_string(), exit);
         graph.edges.push(Edge::new("start", "exit"));
+        (graph, source)
+    }
+
+    fn llm_graph() -> (Graph, String) {
+        let source = r#"digraph test {
+  start [shape=Mdiamond];
+  writer [shape=box];
+  exit [shape=Msquare];
+  start -> writer;
+  writer -> exit;
+}"#
+        .to_string();
+        let mut graph = Graph::new("test");
+        let mut start = Node::new("start");
+        start.attrs.insert(
+            "shape".to_string(),
+            AttrValue::String("Mdiamond".to_string()),
+        );
+        let mut writer = Node::new("writer");
+        writer
+            .attrs
+            .insert("shape".to_string(), AttrValue::String("box".to_string()));
+        let mut exit = Node::new("exit");
+        exit.attrs.insert(
+            "shape".to_string(),
+            AttrValue::String("Msquare".to_string()),
+        );
+        graph.nodes.insert("start".to_string(), start);
+        graph.nodes.insert("writer".to_string(), writer);
+        graph.nodes.insert("exit".to_string(), exit);
+        graph.edges.push(Edge::new("start", "writer"));
+        graph.edges.push(Edge::new("writer", "exit"));
         (graph, source)
     }
 
@@ -838,6 +924,7 @@ mod tests {
                 github_permissions: None,
                 origin_url:         None,
             },
+            vault: None,
             devcontainer: None,
             git: None,
             worktree_mode: None,
@@ -861,6 +948,46 @@ mod tests {
         assert_eq!(initialized.model, "test-model");
         assert_eq!(initialized.provider, fabro_llm::Provider::Anthropic);
         assert!(initialized.llm_client.is_none());
+    }
+
+    #[tokio::test]
+    async fn build_registry_accepts_vault_only_llm_provider() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut vault = Vault::load(dir.path().join("secrets.json")).unwrap();
+        vault
+            .set(
+                "anthropic",
+                &serde_json::to_string(&AuthCredential {
+                    provider: fabro_llm::Provider::Anthropic,
+                    details:  AuthDetails::ApiKey {
+                        key: "anthropic-key".to_string(),
+                    },
+                })
+                .unwrap(),
+                SecretType::Credential,
+                None,
+            )
+            .unwrap();
+        let (graph, _) = llm_graph();
+
+        let (_, llm_client, effective_dry_run) = build_registry(
+            &LlmSpec {
+                model:          "claude-opus-4-6".to_string(),
+                provider:       fabro_llm::Provider::Anthropic,
+                fallback_chain: Vec::new(),
+                mcp_servers:    Vec::new(),
+                dry_run:        false,
+            },
+            Arc::new(AutoApproveInterviewer),
+            &HashMap::new(),
+            &graph,
+            Some(Arc::new(AsyncRwLock::new(vault))),
+        )
+        .await
+        .unwrap();
+
+        assert!(!effective_dry_run);
+        assert!(llm_client.unwrap().provider_names().contains(&"anthropic"));
     }
 
     #[tokio::test]
@@ -912,6 +1039,7 @@ mod tests {
                 github_permissions: None,
                 origin_url:         None,
             },
+            vault: None,
             devcontainer: None,
             git: None,
             worktree_mode: None,
@@ -980,6 +1108,7 @@ mod tests {
                 github_permissions: None,
                 origin_url:         None,
             },
+            vault: None,
             devcontainer: None,
             git: None,
             worktree_mode: None,
@@ -1042,6 +1171,7 @@ mod tests {
                 github_permissions: None,
                 origin_url:         None,
             },
+            vault: None,
             devcontainer: None,
             git: None,
             worktree_mode: None,

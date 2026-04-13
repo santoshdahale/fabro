@@ -6,7 +6,6 @@ use anyhow::Context;
 use clap::Args;
 use fabro_config::user::{active_settings_path, load_settings_config};
 use fabro_config::{Storage, resolve_server_from_file};
-use fabro_llm::client::Client as LlmClient;
 use fabro_sandbox::SandboxProvider;
 use fabro_types::settings::server::GithubIntegrationStrategy;
 use fabro_types::settings::{
@@ -20,7 +19,7 @@ use object_store::aws::AmazonS3Builder;
 use object_store::local::LocalFileSystem;
 use object_store::memory::InMemory;
 use tokio::net::{TcpListener, UnixListener};
-use tokio::sync::watch;
+use tokio::sync::{RwLock as AsyncRwLock, watch};
 use tokio::time::interval;
 use tracing::{error, info, warn};
 
@@ -31,7 +30,7 @@ use crate::server::{
     RouterOptions, build_app_state_with_path, build_router_with_options,
     reconcile_incomplete_runs_on_startup, shutdown_active_workers, spawn_scheduler,
 };
-use crate::server_secrets::ServerSecrets;
+use crate::server_secrets::{ProviderCredentials, ServerSecrets};
 use crate::tls::{build_rustls_config, serve_tls_with_shutdown};
 
 const TEST_IN_MEMORY_STORE_ENV: &str = "FABRO_TEST_IN_MEMORY_STORE";
@@ -266,22 +265,20 @@ where
     };
     let storage = Storage::new(&data_dir);
     let vault_path = storage.secrets_path();
-    let vault = Vault::load(vault_path.clone())?;
-    let vault_snapshot = vault.snapshot();
+    let vault = Arc::new(AsyncRwLock::new(Vault::load(vault_path.clone())?));
     let server_secrets = ServerSecrets::load(storage.server_state().env_path())?;
 
     // Resolve dry-run mode (same pattern as run.rs)
     let dry_run_mode = if args.dry_run {
         true
     } else {
-        match LlmClient::from_lookup(|name| {
-            std::env::var(name)
-                .ok()
-                .or_else(|| vault_snapshot.get(name).cloned())
-        })
-        .await
+        match ProviderCredentials::new(Arc::clone(&vault))
+            .build_llm_client()
+            .await
         {
-            Ok(c) if c.provider_names().is_empty() => {
+            Ok(result)
+                if result.client.provider_names().is_empty() && result.auth_issues.is_empty() =>
+            {
                 eprintln!(
                     "{} No LLM providers configured. Running in dry-run mode.",
                     styles.yellow.apply_to("Warning:"),

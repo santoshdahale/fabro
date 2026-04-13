@@ -2,29 +2,14 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 
+use fabro_auth::{CredentialResolver, CredentialUsage, ResolveError, ResolvedCredential};
 use fabro_config::envfile;
 use fabro_llm::client::Client as LlmClient;
+use fabro_model::Provider;
 use fabro_vault::Vault;
 use tokio::sync::RwLock as AsyncRwLock;
 
 type EnvLookup = Arc<dyn Fn(&str) -> Option<String> + Send + Sync>;
-
-const PROVIDER_LOOKUP_NAMES: &[&str] = &[
-    "ANTHROPIC_API_KEY",
-    "ANTHROPIC_BASE_URL",
-    "OPENAI_API_KEY",
-    "CHATGPT_ACCOUNT_ID",
-    "OPENAI_BASE_URL",
-    "OPENAI_ORG_ID",
-    "OPENAI_PROJECT_ID",
-    "GEMINI_API_KEY",
-    "GOOGLE_API_KEY",
-    "GEMINI_BASE_URL",
-    "KIMI_API_KEY",
-    "ZAI_API_KEY",
-    "MINIMAX_API_KEY",
-    "INCEPTION_API_KEY",
-];
 
 #[derive(Debug, thiserror::Error)]
 pub(crate) enum Error {
@@ -102,6 +87,7 @@ impl ProviderCredentials {
         }
     }
 
+    #[cfg(test)]
     pub(crate) async fn get(&self, name: &str) -> Option<String> {
         let env_value = (self.env_lookup)(name);
         if env_value.is_some() {
@@ -111,29 +97,53 @@ impl ProviderCredentials {
         self.vault.read().await.get(name).map(str::to_string)
     }
 
-    pub(crate) async fn has_any(&self, names: &[&str]) -> bool {
-        for name in names {
-            if self.get(name).await.is_some() {
-                return true;
+    pub(crate) async fn build_llm_client(&self) -> Result<LlmClientResult, String> {
+        let resolver =
+            CredentialResolver::with_env_lookup(Arc::clone(&self.vault), self.env_lookup.clone());
+        let mut api_credentials = Vec::new();
+        let mut auth_issues = Vec::new();
+
+        for provider in Provider::ALL {
+            match resolver
+                .resolve(*provider, CredentialUsage::ApiRequest)
+                .await
+            {
+                Ok(ResolvedCredential::Api(credential)) => api_credentials.push(credential),
+                Ok(ResolvedCredential::Cli(_)) | Err(ResolveError::NotConfigured(_)) => {}
+                Err(err) => auth_issues.push((*provider, err)),
             }
         }
-        false
-    }
 
-    pub(crate) async fn build_llm_client(&self) -> Result<LlmClient, String> {
-        let vault_snapshot = self.vault.read().await.snapshot();
-        let lookup = PROVIDER_LOOKUP_NAMES
-            .iter()
-            .filter_map(|name| {
-                (self.env_lookup)(name)
-                    .or_else(|| vault_snapshot.get(*name).cloned())
-                    .map(|value| ((*name).to_string(), value))
-            })
-            .collect::<HashMap<_, _>>();
-
-        LlmClient::from_lookup(|name| lookup.get(name).cloned())
+        let client = LlmClient::from_credentials(api_credentials)
             .await
-            .map_err(|err| err.to_string())
+            .map_err(|err| err.to_string())?;
+
+        Ok(LlmClientResult {
+            client,
+            auth_issues,
+        })
+    }
+}
+
+pub(crate) struct LlmClientResult {
+    pub client:      LlmClient,
+    pub auth_issues: Vec<(Provider, ResolveError)>,
+}
+
+pub(crate) fn auth_issue_message(provider: Provider, err: &ResolveError) -> String {
+    match err {
+        ResolveError::NotConfigured(_) => {
+            format!("{} is not configured", provider.display_name())
+        }
+        ResolveError::RefreshFailed { source, .. } => format!(
+            "{} requires re-authentication: {}",
+            provider.display_name(),
+            source
+        ),
+        ResolveError::RefreshTokenMissing(_) => format!(
+            "{} requires re-authentication: refresh token missing",
+            provider.display_name()
+        ),
     }
 }
 

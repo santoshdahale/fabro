@@ -94,6 +94,11 @@ pub fn build_authorize_url(
 // Token types
 // ---------------------------------------------------------------------------
 
+pub struct OAuthEndpoint<'a> {
+    pub token_url: &'a str,
+    pub client_id: &'a str,
+}
+
 #[derive(Debug, Deserialize)]
 pub struct TokenResponse {
     pub id_token:      Option<String>,
@@ -106,27 +111,33 @@ pub struct TokenResponse {
 // Token exchange
 // ---------------------------------------------------------------------------
 
-pub async fn exchange_code_for_tokens(
-    client: &fabro_http::HttpClient,
-    issuer: &str,
-    client_id: &str,
+pub async fn exchange_code(
+    endpoint: OAuthEndpoint<'_>,
     code: &str,
-    redirect_uri: &str,
-    code_verifier: &str,
+    redirect_uri: Option<&str>,
+    verifier: Option<&str>,
 ) -> Result<TokenResponse, String> {
-    tracing::debug!(issuer, "Exchanging authorization code");
+    tracing::debug!(
+        token_url = endpoint.token_url,
+        "Exchanging authorization code"
+    );
 
-    let body = encode_form(&[
+    let mut params = vec![
         ("grant_type", "authorization_code"),
-        ("client_id", client_id),
+        ("client_id", endpoint.client_id),
         ("code", code),
-        ("redirect_uri", redirect_uri),
-        ("code_verifier", code_verifier),
-    ]);
+    ];
+    if let Some(redirect_uri) = redirect_uri {
+        params.push(("redirect_uri", redirect_uri));
+    }
+    if let Some(verifier) = verifier {
+        params.push(("code_verifier", verifier));
+    }
 
-    let url = format!("{issuer}/oauth/token");
+    let body = encode_form(&params);
+    let client = fabro_http::http_client().map_err(|e| e.to_string())?;
     let resp = client
-        .post(&url)
+        .post(endpoint.token_url)
         .header("content-type", "application/x-www-form-urlencoded")
         .body(body)
         .send()
@@ -153,23 +164,21 @@ pub async fn exchange_code_for_tokens(
 // Token refresh
 // ---------------------------------------------------------------------------
 
-pub async fn refresh_access_token(
-    client: &fabro_http::HttpClient,
-    issuer: &str,
-    client_id: &str,
+pub async fn refresh_token(
+    endpoint: OAuthEndpoint<'_>,
     refresh_token: &str,
 ) -> Result<TokenResponse, String> {
-    tracing::debug!(issuer, "Refreshing access token");
+    tracing::debug!(token_url = endpoint.token_url, "Refreshing access token");
 
     let body = encode_form(&[
         ("grant_type", "refresh_token"),
-        ("client_id", client_id),
+        ("client_id", endpoint.client_id),
         ("refresh_token", refresh_token),
     ]);
 
-    let url = format!("{issuer}/oauth/token");
+    let client = fabro_http::http_client().map_err(|e| e.to_string())?;
     let resp = client
-        .post(&url)
+        .post(endpoint.token_url)
         .header("content-type", "application/x-www-form-urlencoded")
         .body(body)
         .send()
@@ -394,14 +403,15 @@ pub async fn run_browser_flow(
         .map_err(|_| "Did not receive authorization code".to_string())?
         .map_err(|e| format!("Authorization failed: {e}"))?;
 
-    let client = fabro_http::http_client().map_err(|e| e.to_string())?;
-    exchange_code_for_tokens(
-        &client,
-        issuer,
-        client_id,
+    let token_url = format!("{issuer}/oauth/token");
+    exchange_code(
+        OAuthEndpoint {
+            token_url: &token_url,
+            client_id,
+        },
         &code,
-        &redirect_uri,
-        &pkce.verifier,
+        Some(&redirect_uri),
+        Some(&pkce.verifier),
     )
     .await
 }
@@ -599,14 +609,14 @@ mod tests {
             })
             .await;
 
-        let client = test_http_client();
-        let tokens = exchange_code_for_tokens(
-            &client,
-            &server.url(""),
-            "test-client",
+        let tokens = exchange_code(
+            OAuthEndpoint {
+                token_url: &server.url("/oauth/token"),
+                client_id: "test-client",
+            },
             "test-code",
-            "http://localhost/cb",
-            "test-verifier",
+            Some("http://localhost/cb"),
+            Some("test-verifier"),
         )
         .await
         .unwrap();
@@ -637,14 +647,14 @@ mod tests {
             })
             .await;
 
-        let client = test_http_client();
-        let tokens = exchange_code_for_tokens(
-            &client,
-            &server.url(""),
-            "test-client",
+        let tokens = exchange_code(
+            OAuthEndpoint {
+                token_url: &server.url("/oauth/token"),
+                client_id: "test-client",
+            },
             "test-code",
-            "http://localhost/cb",
-            "test-verifier",
+            Some("http://localhost/cb"),
+            Some("test-verifier"),
         )
         .await
         .unwrap();
@@ -666,19 +676,58 @@ mod tests {
             })
             .await;
 
-        let client = test_http_client();
-        let err = exchange_code_for_tokens(
-            &client,
-            &server.url(""),
-            "test-client",
+        let err = exchange_code(
+            OAuthEndpoint {
+                token_url: &server.url("/oauth/token"),
+                client_id: "test-client",
+            },
             "bad-code",
-            "http://localhost/cb",
-            "verifier",
+            Some("http://localhost/cb"),
+            Some("verifier"),
         )
         .await
         .unwrap_err();
 
         assert!(err.contains("400"), "error should contain status: {err}");
+    }
+
+    #[tokio::test]
+    async fn exchange_code_skips_optional_params_when_absent() {
+        let server = httpmock::MockServer::start_async().await;
+
+        let mock = server
+            .mock_async(|when, then| {
+                when.method("POST")
+                    .path("/oauth/token")
+                    .header("content-type", "application/x-www-form-urlencoded")
+                    .form_urlencoded_tuple("grant_type", "authorization_code")
+                    .form_urlencoded_tuple("client_id", "test-client")
+                    .form_urlencoded_tuple("code", "test-code");
+                then.status(200)
+                    .header("content-type", "application/json")
+                    .body(
+                        serde_json::json!({
+                            "access_token": "access-tok"
+                        })
+                        .to_string(),
+                    );
+            })
+            .await;
+
+        let tokens = exchange_code(
+            OAuthEndpoint {
+                token_url: &server.url("/oauth/token"),
+                client_id: "test-client",
+            },
+            "test-code",
+            None,
+            None,
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(tokens.access_token, "access-tok");
+        mock.assert_async().await;
     }
 
     // -----------------------------------------------------------------------
@@ -710,11 +759,15 @@ mod tests {
             })
             .await;
 
-        let client = test_http_client();
-        let tokens =
-            refresh_access_token(&client, &server.url(""), "test-client", "old-refresh-tok")
-                .await
-                .unwrap();
+        let tokens = refresh_token(
+            OAuthEndpoint {
+                token_url: &server.url("/oauth/token"),
+                client_id: "test-client",
+            },
+            "old-refresh-tok",
+        )
+        .await
+        .unwrap();
 
         assert_eq!(tokens.id_token.as_deref(), Some("new-id"));
         assert_eq!(tokens.access_token, "new-access");
@@ -735,10 +788,15 @@ mod tests {
             })
             .await;
 
-        let client = test_http_client();
-        let err = refresh_access_token(&client, &server.url(""), "test-client", "expired-tok")
-            .await
-            .unwrap_err();
+        let err = refresh_token(
+            OAuthEndpoint {
+                token_url: &server.url("/oauth/token"),
+                client_id: "test-client",
+            },
+            "expired-tok",
+        )
+        .await
+        .unwrap_err();
 
         assert!(err.contains("401"), "error should contain status: {err}");
     }

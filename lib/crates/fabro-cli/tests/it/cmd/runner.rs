@@ -170,11 +170,11 @@ fn help() {
           --server <SERVER>    Fabro server target: http(s) URL or absolute Unix socket path
           --debug              Enable DEBUG-level logging (default is INFO) [env: FABRO_DEBUG=]
           --no-upgrade-check   Disable automatic upgrade check [env: FABRO_NO_UPGRADE_CHECK=true]
-          --run-dir <RUN_DIR>  Run scratch directory
           --quiet              Suppress non-essential output [env: FABRO_QUIET=]
+          --run-dir <RUN_DIR>  Run scratch directory
           --run-id <RUN_ID>    Run ID
-          --mode <MODE>        Worker mode [possible values: start, resume]
           --verbose            Enable verbose output [env: FABRO_VERBOSE=]
+          --mode <MODE>        Worker mode [possible values: start, resume]
       -h, --help               Print help
     ----- stderr -----
     ");

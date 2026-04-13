@@ -81,6 +81,21 @@ impl Provider {
             .unwrap_or(Self::Anthropic)
     }
 
+    /// Human-readable display name for the provider.
+    #[must_use]
+    pub fn display_name(self) -> &'static str {
+        match self {
+            Self::Anthropic => "Anthropic",
+            Self::OpenAi => "OpenAI",
+            Self::Gemini => "Gemini",
+            Self::Kimi => "Kimi",
+            Self::Zai => "Zai",
+            Self::Minimax => "Minimax",
+            Self::Inception => "Inception",
+            Self::OpenAiCompatible => "OpenAI Compatible",
+        }
+    }
+
     /// Stable lowercase string representation used in `Request.provider`,
     /// adapter names, and other serialization boundaries.
     #[must_use]
