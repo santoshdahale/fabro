@@ -154,7 +154,6 @@ fn apply_runtime_settings(
 
 fn router_web_enabled(settings: &ResolvedServerSettings) -> bool {
     settings.web.enabled
-        && settings.integrations.github.strategy != GithubIntegrationStrategy::GhCli
 }
 
 fn use_in_memory_store() -> bool {
@@ -805,7 +804,7 @@ enabled = false
     }
 
     #[test]
-    fn gh_cli_strategy_forces_web_disabled_in_router_options() {
+    fn web_enabled_stays_enabled_without_github_app_mode() {
         let base = parse_settings(
             r#"
 _version = 1
@@ -820,7 +819,7 @@ strategy = "gh_cli"
 
         let resolved = resolve_server_settings(&base).expect("settings should resolve");
 
-        assert!(!router_web_enabled(&resolved));
+        assert!(router_web_enabled(&resolved));
     }
 
     #[test]

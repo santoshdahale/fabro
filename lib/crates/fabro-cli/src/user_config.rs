@@ -197,11 +197,11 @@ pub(crate) fn cli_http_client_builder() -> fabro_http::HttpClientBuilder {
     fabro_http::HttpClientBuilder::new().user_agent(format!("fabro-cli/{FABRO_VERSION}"))
 }
 
-pub(crate) fn build_server_client(
+pub(crate) fn build_server_client_builder(
     tls: Option<&ClientTlsSettings>,
-) -> anyhow::Result<fabro_http::HttpClient> {
+) -> anyhow::Result<fabro_http::HttpClientBuilder> {
     let Some(tls) = tls else {
-        return Ok(cli_http_client_builder().build()?);
+        return Ok(cli_http_client_builder());
     };
 
     let cert_path = fabro_config::expand_tilde(&tls.cert);
@@ -219,13 +219,16 @@ pub(crate) fn build_server_client(
     let identity = fabro_http::Identity::from_pem(&identity_pem)?;
     let ca_cert = fabro_http::Certificate::from_pem(&ca_pem)?;
 
-    let client = cli_http_client_builder()
+    Ok(cli_http_client_builder()
         .use_rustls_tls()
         .identity(identity)
-        .add_root_certificate(ca_cert)
-        .build()?;
+        .add_root_certificate(ca_cert))
+}
 
-    Ok(client)
+pub(crate) fn build_server_client(
+    tls: Option<&ClientTlsSettings>,
+) -> anyhow::Result<fabro_http::HttpClient> {
+    Ok(build_server_client_builder(tls)?.build()?)
 }
 
 #[cfg(test)]

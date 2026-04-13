@@ -921,15 +921,8 @@ pub fn build_router_with_options(
             },
         );
 
-    let mut router = Router::new().route("/health", get(health));
-    if options.web_enabled {
-        router = router.layer(middleware::from_fn_with_state(
-            middleware_state,
-            cookie_and_demo_middleware,
-        ));
-    }
-
-    router
+    let mut router = Router::new()
+        .route("/health", get(health))
         .fallback_service(service_fn(move |req: axum_extract::Request| {
             let dispatch = dispatch.clone();
             async move {
@@ -947,8 +940,16 @@ pub fn build_router_with_options(
                     Ok::<_, std::convert::Infallible>(StatusCode::NOT_FOUND.into_response())
                 }
             }
-        }))
-        .layer(trace_layer)
+        }));
+
+    if options.web_enabled {
+        router = router.layer(middleware::from_fn_with_state(
+            middleware_state,
+            cookie_and_demo_middleware,
+        ));
+    }
+
+    router.layer(trace_layer)
 }
 
 fn demo_routes() -> Router<Arc<AppState>> {
@@ -6210,12 +6211,15 @@ mod tests {
     use std::process::Stdio;
 
     use axum::body::Body;
-    use axum::http::Request;
+    use axum::http::{Request, header};
+    use axum_extra::extract::cookie::Key;
     use fabro_interview::{AnswerValue, ControlInterviewer, Interviewer, Question, QuestionType};
     use fabro_types::{InterviewQuestionRecord, InterviewQuestionType, RunBlobId, RunId, fixtures};
+    use serde_json::json;
     use tower::ServiceExt;
 
     use super::*;
+    use crate::jwt_auth::AuthStrategy;
 
     const MINIMAL_DOT: &str = r#"digraph Test {
         graph [goal="Test"]
@@ -7024,6 +7028,84 @@ slug = "fabro"
             "disabled"
         );
         assert!(body["run"]["provenance"]["subject"]["login"].is_null());
+    }
+
+    #[tokio::test]
+    async fn dev_token_web_login_authorizes_cookie_backed_api_requests() {
+        const DEV_TOKEN: &str =
+            "fabro_dev_abababababababababababababababababababababababababababababababab";
+
+        let state = create_test_app_state_with_session_key(
+            SettingsLayer::default(),
+            Some(Key::derive_from(b"server-test-session-key-0123456789")),
+            false,
+        );
+        let app = build_router(
+            Arc::clone(&state),
+            AuthMode::Strategies(vec![
+                AuthStrategy::DevToken {
+                    token: DEV_TOKEN.to_string(),
+                },
+                AuthStrategy::Cookie,
+            ]),
+        );
+
+        let login_response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/auth/login/dev-token")
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(json!({ "token": DEV_TOKEN }).to_string()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(login_response.status(), StatusCode::OK);
+        let session_cookie = login_response
+            .headers()
+            .get(header::SET_COOKIE)
+            .and_then(|value| value.to_str().ok())
+            .and_then(|value| value.split(';').next())
+            .expect("session cookie should be set")
+            .to_string();
+
+        let create_response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(api("/runs"))
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .header(header::COOKIE, &session_cookie)
+                    .body(manifest_body(MINIMAL_DOT))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(create_response.status(), StatusCode::CREATED);
+        let create_body = body_json(create_response.into_body()).await;
+        let run_id = create_body["id"].as_str().unwrap();
+
+        let state_response = app
+            .oneshot(
+                Request::builder()
+                    .method("GET")
+                    .uri(api(&format!("/runs/{run_id}/state")))
+                    .header(header::COOKIE, &session_cookie)
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(state_response.status(), StatusCode::OK);
+        let state_body = body_json(state_response.into_body()).await;
+        assert_eq!(
+            state_body["run"]["provenance"]["subject"]["auth_method"],
+            "dev_token"
+        );
+        assert_eq!(state_body["run"]["provenance"]["subject"]["login"], "dev");
     }
 
     #[tokio::test]

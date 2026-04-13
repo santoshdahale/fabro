@@ -36,6 +36,58 @@ fn help() {
 }
 
 #[test]
+fn ps_accepts_local_tcp_server_target() {
+    let context = test_context!();
+    let storage_root = tempfile::tempdir_in("/tmp").unwrap();
+    let storage_dir = storage_root.path().join("storage");
+    std::fs::create_dir_all(&storage_dir).unwrap();
+
+    context
+        .command()
+        .env("FABRO_STORAGE_DIR", &storage_dir)
+        .args(["server", "start", "--dry-run", "--bind", "127.0.0.1"])
+        .assert()
+        .success();
+
+    let status_output = context
+        .command()
+        .env("FABRO_STORAGE_DIR", &storage_dir)
+        .args(["server", "status", "--json"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let status_json: Value = serde_json::from_slice(&status_output).unwrap();
+    let bind = status_json["bind"]
+        .as_str()
+        .expect("bind should be present");
+
+    let output = context
+        .command()
+        .env("FABRO_STORAGE_DIR", &storage_dir)
+        .args(["ps", "-a", "--json", "--server", &format!("http://{bind}")])
+        .output()
+        .expect("ps should run");
+
+    context
+        .command()
+        .env("FABRO_STORAGE_DIR", &storage_dir)
+        .args(["server", "stop"])
+        .assert()
+        .success();
+
+    assert!(
+        output.status.success(),
+        "ps against local TCP target failed:\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let runs: Vec<Value> = serde_json::from_slice(&output.stdout).unwrap();
+    assert!(runs.is_empty(), "new local TCP server should have no runs");
+}
+
+#[test]
 fn ps_default_excludes_non_running_runs() {
     let context = test_context!();
     setup_completed_fast_dry_run(&context);

@@ -1,4 +1,5 @@
 use std::collections::VecDeque;
+use std::net::IpAddr;
 use std::num::NonZeroU64;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -90,7 +91,7 @@ pub(crate) async fn connect_server(storage_dir: &Path) -> Result<ServerStoreClie
 
 pub(crate) async fn connect_server_target_direct(target: &str) -> Result<ServerStoreClient> {
     if target.starts_with("http://") || target.starts_with("https://") {
-        connect_remote_api_client_bundle(target, None)
+        connect_remote_api_client_bundle(target, None, RemoteDevTokenAuth::Ambient)
     } else {
         let path = Path::new(target);
         if !path.is_absolute() {
@@ -146,9 +147,11 @@ async fn connect_target_api_client_bundle(
     runtime: &LocalServerRuntime,
 ) -> Result<ServerStoreClient> {
     match target {
-        user_config::ServerTarget::HttpUrl { api_url, tls } => {
-            connect_remote_api_client_bundle(api_url, tls.as_ref())
-        }
+        user_config::ServerTarget::HttpUrl { api_url, tls } => connect_remote_api_client_bundle(
+            api_url,
+            tls.as_ref(),
+            remote_dev_token_auth_for_target(api_url, &runtime.storage_dir),
+        ),
         user_config::ServerTarget::UnixSocket(path) => {
             if let Ok(client) =
                 try_connect_unix_socket_api_client_bundle(path, Some(&runtime.storage_dir)).await
@@ -168,12 +171,36 @@ async fn connect_target_api_client_bundle(
     }
 }
 
+#[derive(Clone, Copy)]
+enum RemoteDevTokenAuth<'a> {
+    None,
+    Storage(&'a Path),
+    AmbientLocalTarget,
+    Ambient,
+}
+
 fn connect_remote_api_client_bundle(
     api_url: &str,
     tls: Option<&user_config::ClientTlsSettings>,
+    dev_token_auth: RemoteDevTokenAuth<'_>,
 ) -> Result<ServerStoreClient> {
-    let http_client = user_config::build_server_client(tls)?;
     let normalized = normalize_remote_server_target(api_url);
+    let mut builder = user_config::build_server_client_builder(tls)?;
+    builder = match dev_token_auth {
+        RemoteDevTokenAuth::None => builder,
+        RemoteDevTokenAuth::Storage(storage_dir) => {
+            apply_dev_token_auth(builder.no_proxy(), Some(storage_dir))?
+        }
+        RemoteDevTokenAuth::AmbientLocalTarget => {
+            if remote_url_targets_local_host(&normalized) {
+                apply_dev_token_auth(builder.no_proxy(), None)?
+            } else {
+                builder
+            }
+        }
+        RemoteDevTokenAuth::Ambient => apply_dev_token_auth(builder, None)?,
+    };
+    let http_client = builder.build()?;
     let client = fabro_api::Client::new_with_client(&normalized, http_client.clone());
     Ok(ServerStoreClient {
         client,
@@ -188,6 +215,73 @@ fn normalize_remote_server_target(api_url: &str) -> String {
         .strip_suffix("/api/v1")
         .unwrap_or(api_url.trim_end_matches('/'))
         .to_string()
+}
+
+fn remote_dev_token_auth_for_target<'a>(
+    api_url: &str,
+    storage_dir: &'a Path,
+) -> RemoteDevTokenAuth<'a> {
+    if remote_url_matches_active_local_tcp_server(api_url, storage_dir) {
+        RemoteDevTokenAuth::Storage(storage_dir)
+    } else if remote_url_targets_local_host(api_url) {
+        RemoteDevTokenAuth::AmbientLocalTarget
+    } else {
+        RemoteDevTokenAuth::None
+    }
+}
+
+fn remote_url_matches_active_local_tcp_server(api_url: &str, storage_dir: &Path) -> bool {
+    let Some(record) = record::active_server_record(storage_dir) else {
+        return false;
+    };
+    let Bind::Tcp(bind_addr) = record.bind else {
+        return false;
+    };
+    remote_url_matches_tcp_bind(api_url, bind_addr)
+}
+
+fn remote_url_matches_tcp_bind(api_url: &str, bind_addr: std::net::SocketAddr) -> bool {
+    let Ok(url) = fabro_http::Url::parse(&normalize_remote_server_target(api_url)) else {
+        return false;
+    };
+    if url.scheme() != "http" && url.scheme() != "https" {
+        return false;
+    }
+    let Some(port) = url.port_or_known_default() else {
+        return false;
+    };
+    if port != bind_addr.port() {
+        return false;
+    }
+    let Some(host) = url.host_str() else {
+        return false;
+    };
+    host_matches_bind(host, bind_addr.ip())
+}
+
+fn remote_url_targets_local_host(api_url: &str) -> bool {
+    let Ok(url) = fabro_http::Url::parse(&normalize_remote_server_target(api_url)) else {
+        return false;
+    };
+    let Some(host) = url.host_str() else {
+        return false;
+    };
+    host_is_local(host)
+}
+
+fn host_matches_bind(host: &str, bind_ip: IpAddr) -> bool {
+    host.parse::<IpAddr>()
+        .ok()
+        .is_some_and(|host_ip| host_ip == bind_ip)
+        || (host_is_local(host) && (bind_ip.is_loopback() || bind_ip.is_unspecified()))
+}
+
+fn host_is_local(host: &str) -> bool {
+    host.eq_ignore_ascii_case("localhost")
+        || host
+            .parse::<IpAddr>()
+            .ok()
+            .is_some_and(|ip| ip.is_loopback() || ip.is_unspecified())
 }
 
 fn load_dev_token_if_available(storage_dir: Option<&Path>) -> Option<String> {
@@ -1063,6 +1157,48 @@ mod tests {
         std::env::remove_var("FABRO_HOME");
 
         assert_eq!(loaded.as_deref(), Some(token));
+    }
+
+    #[test]
+    fn remote_url_matches_tcp_bind_accepts_loopback_aliases() {
+        let bind_addr = "127.0.0.1:32276".parse().unwrap();
+
+        assert!(remote_url_matches_tcp_bind(
+            "http://127.0.0.1:32276/api/v1",
+            bind_addr
+        ));
+        assert!(remote_url_matches_tcp_bind(
+            "http://localhost:32276",
+            bind_addr
+        ));
+        assert!(!remote_url_matches_tcp_bind(
+            "http://127.0.0.1:32277",
+            bind_addr
+        ));
+    }
+
+    #[test]
+    fn remote_url_matches_tcp_bind_accepts_loopback_target_for_unspecified_bind() {
+        let bind_addr = "0.0.0.0:32276".parse().unwrap();
+
+        assert!(remote_url_matches_tcp_bind(
+            "http://127.0.0.1:32276",
+            bind_addr
+        ));
+        assert!(remote_url_matches_tcp_bind(
+            "http://localhost:32276/api/v1",
+            bind_addr
+        ));
+    }
+
+    #[test]
+    fn remote_url_targets_local_host_detects_local_http_urls() {
+        assert!(remote_url_targets_local_host("http://127.0.0.1:32276"));
+        assert!(remote_url_targets_local_host(
+            "http://localhost:32276/api/v1"
+        ));
+        assert!(remote_url_targets_local_host("http://0.0.0.0:32276"));
+        assert!(!remote_url_targets_local_host("https://example.com"));
     }
 }
 

@@ -1095,6 +1095,32 @@ enabled = true
     }
 
     #[tokio::test]
+    async fn dev_token_cookie_subject_extracts_dev_token_auth_method() {
+        let app = subject_router(AuthMode::Strategies(vec![AuthStrategy::Cookie]));
+
+        let mut req = Request::builder()
+            .uri("/subject")
+            .body(Body::empty())
+            .unwrap();
+        req.extensions_mut().insert(SessionCookie {
+            login:       "dev".to_string(),
+            provider:    "dev-token".to_string(),
+            name:        "Development User".to_string(),
+            email:       "dev@localhost".to_string(),
+            avatar_url:  "/logo.svg".to_string(),
+            user_url:    String::new(),
+            provider_id: None,
+            exp:         9_999_999_999,
+        });
+
+        let response = app.oneshot(req).await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = response_json(response).await;
+        assert_eq!(body["login"], "dev");
+        assert_eq!(body["auth_method"], "dev_token");
+    }
+
+    #[tokio::test]
     async fn dev_token_strategy_accepts_valid_bearer() {
         let app = test_router(AuthMode::Strategies(vec![AuthStrategy::DevToken {
             token: "fabro_dev_abababababababababababababababababababababababababababababababab"
