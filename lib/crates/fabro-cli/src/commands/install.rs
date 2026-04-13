@@ -12,6 +12,9 @@ use dialoguer::console::Term;
 use dialoguer::theme::ColorfulTheme;
 use dialoguer::{MultiSelect, Select};
 use fabro_api::types::{CreateSecretRequest, SecretType as ApiSecretType};
+use fabro_auth::{
+    AuthCredential, AuthMethod, codex_oauth_config, credential_id_for, parse_credential_secret,
+};
 use fabro_config::user::SETTINGS_CONFIG_FILENAME;
 use fabro_config::{Storage, envfile, legacy_env};
 use fabro_model::Provider;
@@ -31,7 +34,7 @@ use crate::args::{DoctorArgs, GlobalArgs, InstallArgs, ServerTargetArgs};
 use crate::commands::server::record;
 use crate::gh::GhCli;
 use crate::shared::provider_auth::{
-    prompt_and_validate_key, prompt_confirm, provider_display_name, run_openai_oauth_or_api_key,
+    authenticate_provider, authenticate_provider_with_method, prompt_confirm, provider_display_name,
 };
 use crate::{server_client, user_config};
 
@@ -693,7 +696,7 @@ async fn setup_github_app(
 
 async fn persist_vault_secrets(
     storage_dir: &Path,
-    secrets: &[(String, String)],
+    secrets: &[CreateSecretRequest],
     server_was_running: bool,
 ) -> Result<()> {
     if secrets.is_empty() {
@@ -702,14 +705,14 @@ async fn persist_vault_secrets(
 
     if server_was_running {
         let client = server_client::connect_api_client(storage_dir).await?;
-        for (name, value) in secrets {
+        for secret in secrets {
             client
                 .create_secret()
                 .body(CreateSecretRequest {
-                    name:        name.clone(),
-                    value:       value.clone(),
-                    type_:       ApiSecretType::Environment,
-                    description: None,
+                    name:        secret.name.clone(),
+                    value:       secret.value.clone(),
+                    type_:       secret.type_.clone(),
+                    description: secret.description.clone(),
                 })
                 .send()
                 .await?;
@@ -718,10 +721,43 @@ async fn persist_vault_secrets(
     }
 
     let mut store = Vault::load(Storage::new(storage_dir).secrets_path())?;
-    for (name, value) in secrets {
-        store.set(name, value, SecretType::Environment, None)?;
+    for secret in secrets {
+        validate_vault_secret(secret)?;
+        store.set(
+            &secret.name,
+            &secret.value,
+            local_secret_type(&secret.type_),
+            secret.description.as_deref(),
+        )?;
     }
     Ok(())
+}
+
+fn local_secret_type(secret_type: &ApiSecretType) -> SecretType {
+    match secret_type {
+        ApiSecretType::Environment => SecretType::Environment,
+        ApiSecretType::File => SecretType::File,
+        ApiSecretType::Credential => SecretType::Credential,
+    }
+}
+
+fn validate_vault_secret(secret: &CreateSecretRequest) -> Result<()> {
+    if secret.type_ != ApiSecretType::Credential {
+        return Ok(());
+    }
+
+    parse_credential_secret(&secret.name, &secret.value)
+        .map(|_| ())
+        .map_err(anyhow::Error::msg)
+}
+
+fn credential_secret_request(credential: &AuthCredential) -> Result<CreateSecretRequest> {
+    Ok(CreateSecretRequest {
+        name:        credential_id_for(credential).map_err(anyhow::Error::msg)?,
+        value:       serde_json::to_string(credential)?,
+        type_:       ApiSecretType::Credential,
+        description: None,
+    })
 }
 
 fn persist_server_env_secrets(storage_dir: &Path, secrets: &[(String, String)]) -> Result<()> {
@@ -739,7 +775,7 @@ fn persist_server_env_secrets(storage_dir: &Path, secrets: &[(String, String)]) 
 async fn persist_install_outputs(
     storage_dir: &Path,
     server_env_secrets: &[(String, String)],
-    vault_secrets: &[(String, String)],
+    vault_secrets: &[CreateSecretRequest],
     server_was_running: bool,
 ) -> Result<()> {
     persist_server_env_secrets(storage_dir, server_env_secrets)?;
@@ -841,32 +877,38 @@ pub(crate) async fn run_install(
     fabro_util::printerr!(printer, "  {}", s.dim.apply_to("──────────────────────"));
     fabro_util::printerr!(printer, "");
 
-    let mut vault_pairs: Vec<(String, String)> = Vec::new();
+    let mut vault_secrets: Vec<CreateSecretRequest> = Vec::new();
     let mut server_env_pairs: Vec<(String, String)> = Vec::new();
     let mut configured_providers: Vec<Provider> = Vec::new();
 
     let codex_detected = detect_binary_on_path("codex").await;
-    let mut openai_via_oauth = false;
+    let mut openai_configured = false;
 
     if codex_detected {
         tracing::debug!("Codex binary detected on PATH");
-        let use_oauth = spawn_blocking(|| {
+        let use_device_auth = spawn_blocking(|| {
             prompt_confirm(
-                "OpenAI (Codex) detected. Set up OpenAI via browser login?",
+                "OpenAI (Codex) detected. Set up OpenAI with device code login?",
                 true,
             )
         })
         .await??;
 
-        if use_oauth {
-            let pairs = run_openai_oauth_or_api_key(&s, printer).await?;
-            vault_pairs.extend(pairs);
+        if use_device_auth {
+            let credential = authenticate_provider_with_method(
+                Provider::OpenAi,
+                AuthMethod::CodexDevice(codex_oauth_config()),
+                &s,
+                printer,
+            )
+            .await?;
+            vault_secrets.push(credential_secret_request(&credential)?);
             configured_providers.push(Provider::OpenAi);
-            openai_via_oauth = true;
+            openai_configured = true;
         }
     }
 
-    if !openai_via_oauth {
+    if !openai_configured {
         // First provider — single choice from the top 3
         let primary_providers = [Provider::Anthropic, Provider::OpenAi, Provider::Gemini];
         let primary_labels: Vec<String> = primary_providers
@@ -882,8 +924,8 @@ pub(crate) async fn run_install(
 
         let first_provider = primary_providers[primary_idx];
         {
-            let (env_var, key) = prompt_and_validate_key(first_provider, &s, printer).await?;
-            vault_pairs.push((env_var, key));
+            let credential = authenticate_provider(first_provider, &s, printer).await?;
+            vault_secrets.push(credential_secret_request(&credential)?);
             configured_providers.push(first_provider);
         }
     }
@@ -916,8 +958,8 @@ pub(crate) async fn run_install(
 
         for idx in selected_indices {
             let provider = remaining_providers[idx];
-            let (env_var, key) = prompt_and_validate_key(provider, &s, printer).await?;
-            vault_pairs.push((env_var, key));
+            let credential = authenticate_provider(provider, &s, printer).await?;
+            vault_secrets.push(credential_secret_request(&credential)?);
         }
     }
     fabro_util::printerr!(printer, "");
@@ -953,7 +995,12 @@ pub(crate) async fn run_install(
                 write_github_cli_settings(&mut doc)?;
                 std::fs::write(&user_toml_path, toml::to_string_pretty(&doc)?)?;
                 fabro_util::printerr!(printer, "  {} GitHub CLI configured", s.green.apply_to("✔"));
-                vault_pairs.push(("GITHUB_CLI_TOKEN".to_string(), token));
+                vault_secrets.push(CreateSecretRequest {
+                    name:        "GITHUB_CLI_TOKEN".to_string(),
+                    value:       token,
+                    type_:       ApiSecretType::Environment,
+                    description: None,
+                });
             }
             1 => {
                 let (owner, username) = prompt_github_app_owner(&s).await?;
@@ -1085,7 +1132,7 @@ pub(crate) async fn run_install(
     persist_install_outputs(
         &storage_dir,
         &server_env_pairs,
-        &vault_pairs,
+        &vault_secrets,
         server_was_running,
     )
     .await?;
@@ -1103,7 +1150,7 @@ pub(crate) async fn run_install(
         printer,
         "  {} Saved {} workflow-visible secrets to {}",
         s.green.apply_to("✔"),
-        vault_pairs.len(),
+        vault_secrets.len(),
         Storage::new(&storage_dir).secrets_path().display()
     );
     if server_was_running {
@@ -1530,9 +1577,23 @@ client_id = "client-id"
             ("SESSION_SECRET".to_string(), "session".to_string()),
             ("FABRO_JWT_PUBLIC_KEY".to_string(), "public-key".to_string()),
         ];
-        let vault_pairs = vec![("OPENAI_API_KEY".to_string(), "openai-key".to_string())];
+        let vault_secrets = vec![
+            CreateSecretRequest {
+                name:        "GITHUB_CLI_TOKEN".to_string(),
+                value:       "gh-token".to_string(),
+                type_:       ApiSecretType::Environment,
+                description: None,
+            },
+            credential_secret_request(&AuthCredential {
+                provider: Provider::Anthropic,
+                details:  fabro_auth::AuthDetails::ApiKey {
+                    key: "anthropic-key".to_string(),
+                },
+            })
+            .unwrap(),
+        ];
 
-        persist_install_outputs(dir.path(), &server_env_pairs, &vault_pairs, false)
+        persist_install_outputs(dir.path(), &server_env_pairs, &vault_secrets, false)
             .await
             .unwrap();
 
@@ -1542,7 +1603,9 @@ client_id = "client-id"
         assert!(server_env.contains("FABRO_JWT_PUBLIC_KEY=public-key"));
 
         let vault = Vault::load(Storage::new(dir.path()).secrets_path()).unwrap();
-        assert_eq!(vault.get("OPENAI_API_KEY"), Some("openai-key"));
+        assert_eq!(vault.get("GITHUB_CLI_TOKEN"), Some("gh-token"));
+        let anthropic = vault.get_entry("anthropic").unwrap();
+        assert_eq!(anthropic.secret_type, SecretType::Credential);
         assert_eq!(vault.get("SESSION_SECRET"), None);
     }
 }

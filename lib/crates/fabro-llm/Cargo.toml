@@ -32,6 +32,7 @@ bytes.workspace = true
 tokio-util.workspace = true
 tracing.workspace = true
 fabro-http.workspace = true
+fabro-auth = { path = "../fabro-auth" }
 fabro-model = { path = "../fabro-model" }
 fabro-util = { path = "../fabro-util" }
 

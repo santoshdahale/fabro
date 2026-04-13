@@ -37,12 +37,12 @@ pub use fabro_api::types::{
     SshAccessRequest, SshAccessResponse, StartRunRequest, StatusReason as ApiStatusReason,
     SubmitAnswerRequest, SystemInfoResponse, SystemRunCounts, WriteBlobResponse,
 };
+use fabro_auth::parse_credential_secret;
 use fabro_config::{Storage, resolve_server_from_file};
 use fabro_graphviz::render::GraphFormat;
 use fabro_interview::{
     Answer, ControlInterviewer, Interviewer, Question, QuestionType, WorkerControlEnvelope,
 };
-use fabro_llm::client::Client as LlmClient;
 use fabro_llm::generate::{GenerateParams, generate_object};
 use fabro_llm::model_test::{ModelTestMode, run_model_test_with_client};
 use fabro_llm::types::{
@@ -105,7 +105,7 @@ use tokio_stream::StreamExt;
 use tokio_stream::wrappers::{BroadcastStream, UnboundedReceiverStream};
 use tower::{ServiceExt, service_fn};
 use tower_http::trace::TraceLayer;
-use tracing::{debug, error, info};
+use tracing::{debug, error, info, warn};
 use ulid::Ulid;
 
 use crate::bind::Bind;
@@ -113,7 +113,9 @@ use crate::error::ApiError;
 use crate::jwt_auth::{
     AuthMode, AuthenticatedService, AuthenticatedSubject, authenticate_service_parts,
 };
-use crate::server_secrets::{ProviderCredentials, ServerSecrets};
+use crate::server_secrets::{
+    LlmClientResult, ProviderCredentials, ServerSecrets, auth_issue_message,
+};
 use crate::{demo, diagnostics, run_manifest, settings_view, static_files, web_auth};
 
 pub fn default_page_limit() -> u32 {
@@ -596,7 +598,7 @@ impl AppState {
             .unwrap_or(false)
     }
 
-    pub(crate) async fn build_llm_client(&self) -> Result<LlmClient, String> {
+    pub(crate) async fn build_llm_client(&self) -> Result<LlmClientResult, String> {
         self.provider_credentials.build_llm_client().await
     }
 
@@ -1633,6 +1635,7 @@ fn secret_type_from_api(secret_type: ApiSecretType) -> SecretType {
     match secret_type {
         ApiSecretType::Environment => SecretType::Environment,
         ApiSecretType::File => SecretType::File,
+        ApiSecretType::Credential => SecretType::Credential,
     }
 }
 
@@ -1645,6 +1648,11 @@ async fn create_secret(
     let name = body.name;
     let value = body.value;
     let description = body.description;
+    if secret_type == SecretType::Credential {
+        if let Err(err) = parse_credential_secret(&name, &value) {
+            return ApiError::bad_request(err).into_response();
+        }
+    }
     let state_for_write = Arc::clone(&state);
     let result = spawn_blocking(move || {
         let mut vault = state_for_write.vault.blocking_write();
@@ -3873,6 +3881,7 @@ async fn execute_run_in_process(state: Arc<AppState>, run_id: RunId) {
         artifact_sink: Some(ArtifactSink::Store(state.artifact_store.clone())),
         run_control: None,
         github_app,
+        vault: Some(Arc::clone(&state.vault)),
         on_node: None,
         registry_override,
     };
@@ -5811,8 +5820,8 @@ async fn test_model(
         .into_response();
     }
 
-    let client = match state.build_llm_client().await {
-        Ok(client) => Arc::new(client),
+    let llm_result = match state.build_llm_client().await {
+        Ok(result) => result,
         Err(err) => {
             return ApiError::new(
                 StatusCode::INTERNAL_SERVER_ERROR,
@@ -5821,6 +5830,14 @@ async fn test_model(
             .into_response();
         }
     };
+    if let Some((_, issue)) = llm_result
+        .auth_issues
+        .iter()
+        .find(|(provider, _)| *provider == info.provider)
+    {
+        return ApiError::bad_request(auth_issue_message(info.provider, issue)).into_response();
+    }
+    let client = Arc::new(llm_result.client);
 
     let outcome = run_model_test_with_client(info, mode, client).await;
     Json(serde_json::json!({
@@ -6013,8 +6030,8 @@ async fn create_completion(
     }
 
     // Get or create LLM client (cached in AppState)
-    let client = match state.build_llm_client().await {
-        Ok(client) => client,
+    let llm_result = match state.build_llm_client().await {
+        Ok(result) => result,
         Err(err) => {
             return ApiError::new(
                 StatusCode::INTERNAL_SERVER_ERROR,
@@ -6023,6 +6040,10 @@ async fn create_completion(
             .into_response();
         }
     };
+    for (provider, issue) in &llm_result.auth_issues {
+        warn!(provider = %provider, error = %issue, "LLM provider unavailable due to auth issue");
+    }
+    let client = llm_result.client;
 
     if use_stream {
         // Streaming path: forward all StreamEvents as SSE
@@ -6181,6 +6202,7 @@ mod tests {
     use axum::body::Body;
     use axum::http::Request;
     use fabro_interview::{AnswerValue, ControlInterviewer, Interviewer, Question, QuestionType};
+    use fabro_model::Provider;
     use fabro_types::{InterviewQuestionRecord, InterviewQuestionType, RunBlobId, RunId, fixtures};
     use tower::ServiceExt;
 
@@ -6288,6 +6310,115 @@ type = "http"
             "/tmp/test.pem".to_string(),
             "pem-data".to_string()
         )]);
+    }
+
+    #[tokio::test]
+    async fn create_secret_stores_valid_credential_entries() {
+        let state = create_app_state();
+        let app = build_router(Arc::clone(&state), AuthMode::Disabled);
+        let credential = fabro_auth::AuthCredential {
+            provider: Provider::OpenAi,
+            details:  fabro_auth::AuthDetails::CodexOAuth {
+                tokens:     fabro_auth::OAuthTokens {
+                    access_token:  "access".to_string(),
+                    refresh_token: Some("refresh".to_string()),
+                    expires_at:    chrono::DateTime::parse_from_rfc3339("2030-01-01T00:00:00Z")
+                        .unwrap()
+                        .with_timezone(&chrono::Utc),
+                },
+                config:     fabro_auth::OAuthConfig {
+                    auth_url:     "https://auth.openai.com".to_string(),
+                    token_url:    "https://auth.openai.com/oauth/token".to_string(),
+                    client_id:    "client".to_string(),
+                    scopes:       vec!["openid".to_string()],
+                    redirect_uri: Some("https://auth.openai.com/deviceauth/callback".to_string()),
+                    use_pkce:     true,
+                },
+                account_id: Some("acct_123".to_string()),
+            },
+        };
+
+        let req = Request::builder()
+            .method("POST")
+            .uri(api("/secrets"))
+            .header("content-type", "application/json")
+            .body(Body::from(
+                serde_json::to_string(&serde_json::json!({
+                    "name": "openai_codex",
+                    "value": serde_json::to_string(&credential).unwrap(),
+                    "type": "credential"
+                }))
+                .unwrap(),
+            ))
+            .unwrap();
+
+        let response = app.oneshot(req).await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        assert!(state.vault.read().await.list().is_empty());
+        assert!(state.vault.read().await.get("openai_codex").is_some());
+    }
+
+    #[tokio::test]
+    async fn create_secret_rejects_invalid_credential_json() {
+        let state = create_app_state();
+        let app = build_router(state, AuthMode::Disabled);
+
+        let req = Request::builder()
+            .method("POST")
+            .uri(api("/secrets"))
+            .header("content-type", "application/json")
+            .body(Body::from(
+                serde_json::to_string(&serde_json::json!({
+                    "name": "openai_codex",
+                    "value": "{not-json",
+                    "type": "credential"
+                }))
+                .unwrap(),
+            ))
+            .unwrap();
+
+        let response = app.oneshot(req).await.unwrap();
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn create_secret_rejects_wrong_credential_name() {
+        let state = create_app_state();
+        let app = build_router(state, AuthMode::Disabled);
+
+        let req = Request::builder()
+            .method("POST")
+            .uri(api("/secrets"))
+            .header("content-type", "application/json")
+            .body(Body::from(
+                serde_json::to_string(&serde_json::json!({
+                    "name": "openai",
+                    "value": serde_json::to_string(&serde_json::json!({
+                        "provider": "openai",
+                        "type": "codex_oauth",
+                        "tokens": {
+                            "access_token": "access",
+                            "refresh_token": "refresh",
+                            "expires_at": "2030-01-01T00:00:00Z"
+                        },
+                        "config": {
+                            "auth_url": "https://auth.openai.com",
+                            "token_url": "https://auth.openai.com/oauth/token",
+                            "client_id": "client",
+                            "scopes": ["openid"],
+                            "redirect_uri": "https://auth.openai.com/deviceauth/callback",
+                            "use_pkce": true
+                        }
+                    }))
+                    .unwrap(),
+                    "type": "credential"
+                }))
+                .unwrap(),
+            ))
+            .unwrap();
+
+        let response = app.oneshot(req).await.unwrap();
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
     }
 
     #[tokio::test]

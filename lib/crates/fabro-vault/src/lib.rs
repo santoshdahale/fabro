@@ -8,6 +8,7 @@ pub enum SecretType {
     #[default]
     Environment,
     File,
+    Credential,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -134,6 +135,7 @@ impl Vault {
         let mut data = self
             .entries
             .iter()
+            .filter(|(_, entry)| entry.secret_type != SecretType::Credential)
             .map(|(name, entry)| SecretMetadata {
                 name:        name.clone(),
                 secret_type: entry.secret_type,
@@ -150,12 +152,27 @@ impl Vault {
         self.entries.get(name).map(|entry| entry.value.as_str())
     }
 
+    pub fn get_entry(&self, name: &str) -> Option<&SecretEntry> {
+        self.entries.get(name)
+    }
+
     pub fn snapshot(&self) -> HashMap<String, String> {
         self.entries
             .iter()
             .filter(|(_, entry)| entry.secret_type == SecretType::Environment)
             .map(|(name, entry)| (name.clone(), entry.value.clone()))
             .collect()
+    }
+
+    pub fn credential_entries(&self) -> Vec<(&str, &SecretEntry)> {
+        let mut data = self
+            .entries
+            .iter()
+            .filter(|(_, entry)| entry.secret_type == SecretType::Credential)
+            .map(|(name, entry)| (name.as_str(), entry))
+            .collect::<Vec<_>>();
+        data.sort_by(|a, b| a.0.cmp(b.0));
+        data
     }
 
     pub fn file_secrets(&self) -> Vec<(String, String)> {
@@ -171,7 +188,7 @@ impl Vault {
 
     pub fn validate_name(name: &str, secret_type: SecretType) -> Result<(), Error> {
         match secret_type {
-            SecretType::Environment => Self::validate_env_name(name),
+            SecretType::Environment | SecretType::Credential => Self::validate_env_name(name),
             SecretType::File => Self::validate_file_name(name),
         }
     }
@@ -331,5 +348,77 @@ mod tests {
             "/tmp/key.pem".to_string(),
             "pem".to_string()
         )]);
+    }
+
+    #[test]
+    fn list_hides_credential_entries_loaded_from_disk() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("secrets.json");
+        std::fs::write(
+            &path,
+            serde_json::json!({
+                "OPENAI_API_KEY": {
+                    "value": "env",
+                    "type": "environment",
+                    "created_at": "2026-04-12T00:00:00Z",
+                    "updated_at": "2026-04-12T00:00:00Z"
+                },
+                "openai_codex": {
+                    "value": "{\"provider\":\"openai\"}",
+                    "type": "credential",
+                    "created_at": "2026-04-12T00:00:00Z",
+                    "updated_at": "2026-04-12T00:00:00Z"
+                }
+            })
+            .to_string(),
+        )
+        .unwrap();
+
+        let store = Vault::load(path).unwrap();
+
+        assert_eq!(store.list().len(), 1);
+        assert_eq!(store.list()[0].name, "OPENAI_API_KEY");
+        assert_eq!(store.get("openai_codex"), Some("{\"provider\":\"openai\"}"));
+    }
+
+    #[test]
+    fn get_entry_returns_full_secret_entry() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut store = Vault::load(dir.path().join("secrets.json")).unwrap();
+        store
+            .set(
+                "openai_codex",
+                "credential-json",
+                SecretType::Credential,
+                Some("saved auth"),
+            )
+            .unwrap();
+
+        let entry = store.get_entry("openai_codex").unwrap();
+
+        assert_eq!(entry.value, "credential-json");
+        assert_eq!(entry.secret_type, SecretType::Credential);
+        assert_eq!(entry.description.as_deref(), Some("saved auth"));
+    }
+
+    #[test]
+    fn credential_entries_only_returns_credentials() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut store = Vault::load(dir.path().join("secrets.json")).unwrap();
+        store
+            .set("OPENAI_API_KEY", "env", SecretType::Environment, None)
+            .unwrap();
+        store
+            .set(
+                "openai_codex",
+                "credential-json",
+                SecretType::Credential,
+                None,
+            )
+            .unwrap();
+
+        assert_eq!(store.credential_entries().len(), 1);
+        assert_eq!(store.credential_entries()[0].0, "openai_codex");
+        assert_eq!(store.credential_entries()[0].1.value, "credential-json");
     }
 }

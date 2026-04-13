@@ -1526,6 +1526,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "fabro-auth"
+version = "0.176.2"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "base64",
+ "chrono",
+ "fabro-http",
+ "fabro-model",
+ "fabro-oauth",
+ "fabro-vault",
+ "httpmock",
+ "serde",
+ "serde_json",
+ "shlex",
+ "tempfile",
+ "thiserror 2.0.18",
+ "tokio",
+]
+
+[[package]]
 name = "fabro-checkpoint"
 version = "0.176.2"
 dependencies = [
@@ -1561,6 +1582,7 @@ dependencies = [
  "dotenvy",
  "fabro-agent",
  "fabro-api",
+ "fabro-auth",
  "fabro-checkpoint",
  "fabro-config",
  "fabro-devcontainer",
@@ -1753,6 +1775,7 @@ dependencies = [
  "async-trait",
  "base64",
  "bytes",
+ "fabro-auth",
  "fabro-http",
  "fabro-macros",
  "fabro-model",
@@ -1898,6 +1921,7 @@ dependencies = [
  "dirs",
  "fabro-agent",
  "fabro-api",
+ "fabro-auth",
  "fabro-config",
  "fabro-github",
  "fabro-graphviz",
@@ -2147,6 +2171,7 @@ dependencies = [
  "chrono",
  "dirs",
  "fabro-agent",
+ "fabro-auth",
  "fabro-checkpoint",
  "fabro-config",
  "fabro-core",
@@ -2168,6 +2193,7 @@ dependencies = [
  "fabro-types",
  "fabro-util",
  "fabro-validate",
+ "fabro-vault",
  "futures",
  "git2",
  "hex",

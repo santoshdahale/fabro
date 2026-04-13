@@ -1043,7 +1043,7 @@ async fn run_daytona_cli_test(provider: Provider, model: &str, install_command: 
         install_result.exit_code, install_result.stdout
     );
 
-    let backend = AgentCliBackend::new(model.to_string(), provider);
+    let backend = AgentCliBackend::new_from_env(model.to_string(), provider);
     let node = Node::new("daytona_cli_test");
     let context = Context::new();
     let emitter = Arc::new(Emitter::default());

@@ -16,6 +16,8 @@ use fabro_sandbox::config::WorktreeMode;
 use fabro_types::RunId;
 use fabro_types::settings::run::PullRequestSettings;
 use fabro_validate::{Diagnostic, Severity};
+use fabro_vault::Vault;
+use tokio::sync::RwLock as AsyncRwLock;
 
 use crate::artifact_upload::ArtifactSink;
 use crate::context::Context;
@@ -245,6 +247,7 @@ pub struct InitOptions {
     pub workflow_bundle:   Option<Arc<WorkflowBundle>>,
     pub hooks:             fabro_hooks::HookSettings,
     pub sandbox_env:       SandboxEnvSpec,
+    pub vault:             Option<Arc<AsyncRwLock<Vault>>>,
     pub devcontainer:      Option<DevcontainerSpec>,
     pub git:               Option<GitCheckpointOptions>,
     pub worktree_mode:     Option<WorktreeMode>,

@@ -20,7 +20,8 @@
 
 export const SecretType = {
     ENVIRONMENT: 'environment',
-    FILE: 'file'
+    FILE: 'file',
+    CREDENTIAL: 'credential'
 } as const;
 
 export type SecretType = typeof SecretType[keyof typeof SecretType];

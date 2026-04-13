@@ -4,6 +4,7 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use fabro_agent::Sandbox;
+use fabro_auth::CredentialResolver;
 use fabro_config::RunScratch;
 use fabro_graphviz::graph;
 use fabro_hooks::{HookContext, HookDecision, HookEvent, HookRunner};
@@ -12,9 +13,11 @@ use fabro_sandbox::{
     ReadBeforeWriteSandbox, SandboxEventCallback, SandboxSpec, WorkdirStrategy, WorktreeOptions,
     WorktreeSandbox,
 };
+use fabro_vault::Vault;
 use shlex::try_quote;
 use tokio::process::Command as TokioCommand;
 use tokio::runtime::Handle;
+use tokio::sync::RwLock as AsyncRwLock;
 use tokio::task::spawn_blocking;
 use tokio::time::timeout as tokio_timeout;
 
@@ -279,6 +282,7 @@ async fn build_registry(
     interviewer: Arc<dyn fabro_interview::Interviewer>,
     sandbox_env: &HashMap<String, String>,
     graph: &graph::Graph,
+    vault: Option<Arc<AsyncRwLock<Vault>>>,
 ) -> Result<(Arc<HandlerRegistry>, Option<Client>, bool), Error> {
     let build_no_backend = || Arc::new(default_registry(Arc::clone(&interviewer), || None));
 
@@ -306,11 +310,18 @@ async fn build_registry(
             let provider = spec.provider;
             let fallback_chain = spec.fallback_chain.clone();
             let mcp_servers = spec.mcp_servers.clone();
+            let resolver = vault.map(CredentialResolver::new);
             let registry = Arc::new(default_registry(interviewer, move || {
                 let api = AgentApiBackend::new(model.clone(), provider, fallback_chain.clone())
                     .with_env(env.clone())
                     .with_mcp_servers(mcp_servers.clone());
-                let cli = AgentCliBackend::new(model.clone(), provider).with_env(env.clone());
+                let cli = resolver
+                    .clone()
+                    .map_or_else(
+                        || AgentCliBackend::new_from_env(model.clone(), provider),
+                        |resolver| AgentCliBackend::new(model.clone(), provider, resolver),
+                    )
+                    .with_env(env.clone());
                 Some(Box::new(BackendRouter::new(Box::new(api), cli)))
             }));
             Ok((registry, Some(client), false))
@@ -545,7 +556,14 @@ pub async fn initialize(
             // A caller-supplied registry owns execution behavior for its handlers.
             (registry, None, options.dry_run)
         } else {
-            build_registry(&options.llm, Arc::clone(&options.interviewer), &env, &graph).await?
+            build_registry(
+                &options.llm,
+                Arc::clone(&options.interviewer),
+                &env,
+                &graph,
+                options.vault.clone(),
+            )
+            .await?
         };
     if effective_dry_run {
         use fabro_types::settings::run::{RunExecutionLayer, RunLayer, RunMode};
@@ -838,6 +856,7 @@ mod tests {
                 github_permissions: None,
                 origin_url:         None,
             },
+            vault: None,
             devcontainer: None,
             git: None,
             worktree_mode: None,
@@ -912,6 +931,7 @@ mod tests {
                 github_permissions: None,
                 origin_url:         None,
             },
+            vault: None,
             devcontainer: None,
             git: None,
             worktree_mode: None,
@@ -980,6 +1000,7 @@ mod tests {
                 github_permissions: None,
                 origin_url:         None,
             },
+            vault: None,
             devcontainer: None,
             git: None,
             worktree_mode: None,
@@ -1042,6 +1063,7 @@ mod tests {
                 github_permissions: None,
                 origin_url:         None,
             },
+            vault: None,
             devcontainer: None,
             git: None,
             worktree_mode: None,

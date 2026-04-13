@@ -36,6 +36,7 @@ use fabro_workflow::run_materialization::materialize_run;
 use fabro_workflow::workflow_bundle::{BundledWorkflow, WorkflowBundle};
 
 use crate::server::AppState;
+use crate::server_secrets::auth_issue_message;
 
 #[derive(Clone)]
 pub(crate) struct PreparedManifest {
@@ -548,12 +549,14 @@ async fn run_llm_check(
     let default_provider = provider.as_deref().unwrap_or("anthropic");
 
     match state.build_llm_client().await {
-        Ok(client) => {
-            let configured = client
+        Ok(result) => {
+            let configured = result
+                .client
                 .provider_names()
                 .iter()
                 .map(std::string::ToString::to_string)
                 .collect::<Vec<_>>();
+            let auth_issues = result.auth_issues;
             let mut model_providers = std::collections::BTreeSet::new();
 
             for node in graph.nodes.values() {
@@ -589,19 +592,28 @@ async fn run_llm_check(
             let mut all_ok = true;
             for (model_id, provider_name) in &model_providers {
                 match provider_name.parse::<Provider>() {
-                    Ok(_) => {
+                    Ok(provider) => {
                         let mut status = CheckStatus::Pass;
-                        if !configured.iter().any(|name| name == provider_name) {
+                        let remediation = if let Some((_, issue)) = auth_issues
+                            .iter()
+                            .find(|(candidate, _)| *candidate == provider)
+                        {
                             status = CheckStatus::Warning;
                             all_ok = false;
-                        }
+                            Some(auth_issue_message(provider, issue))
+                        } else if !configured.iter().any(|name| name == provider_name) {
+                            status = CheckStatus::Warning;
+                            all_ok = false;
+                            Some(format!("Provider \"{provider_name}\" is not configured"))
+                        } else {
+                            None
+                        };
                         checks.push(CheckResult {
                             name: "LLM".into(),
                             status,
                             summary: model_id.clone(),
                             details: vec![CheckDetail::new(format!("Provider: {provider_name}"))],
-                            remediation: (status == CheckStatus::Warning)
-                                .then(|| format!("Provider \"{provider_name}\" is not configured")),
+                            remediation,
                         });
                     }
                     Err(err) => {

@@ -4353,6 +4353,7 @@ components:
       enum:
         - environment
         - file
+        - credential
 
     CreateSecretRequest:
       description: Request to store or update a secret.

@@ -217,10 +217,7 @@ fn check_legacy_env(path: Option<PathBuf>) -> CheckResult {
                 "{} is no longer read by fabro",
                 path.display()
             ))],
-            remediation: Some(
-                "Re-enter credentials with `fabro provider login` or `fabro secret set`."
-                    .to_string(),
-            ),
+            remediation: Some("Re-enter credentials with `fabro provider login`.".to_string()),
         },
         None => CheckResult {
             name:        "Legacy .env".to_string(),

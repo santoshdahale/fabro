@@ -92,6 +92,7 @@ pub(crate) async fn execute(
         artifact_sink,
         run_control: Some(run_control),
         github_app,
+        vault: None,
         on_node: None,
         registry_override: None,
     };

@@ -4,6 +4,10 @@ use anyhow::Result;
 use dialoguer::console::Term;
 use dialoguer::theme::ColorfulTheme;
 use dialoguer::{Confirm, Password};
+use fabro_auth::{
+    ApiCredential, ApiKeyHeader, AuthContextRequest, AuthContextResponse, AuthCredential,
+    AuthMethod, codex_oauth_config, strategy_for,
+};
 use fabro_llm::client::Client as LlmClient;
 use fabro_llm::generate::{GenerateParams, generate};
 use fabro_model::{Catalog, Provider};
@@ -11,8 +15,6 @@ use fabro_util::printer::Printer;
 use fabro_util::terminal::Styles;
 use tokio::task::spawn_blocking;
 use tokio::time::timeout;
-
-use super::openai_jwt;
 
 // ---------------------------------------------------------------------------
 // Provider key URLs
@@ -47,86 +49,6 @@ pub(crate) fn provider_display_name(provider: Provider) -> &'static str {
 }
 
 // ---------------------------------------------------------------------------
-// OpenAI OAuth helpers
-// ---------------------------------------------------------------------------
-
-/// Convert OAuth tokens to secret name/value pairs.
-pub(crate) fn openai_oauth_env_pairs(
-    access_token: &str,
-    refresh_token: &str,
-    account_id: Option<&str>,
-) -> Vec<(String, String)> {
-    let mut pairs = vec![
-        ("OPENAI_API_KEY".to_string(), access_token.to_string()),
-        (
-            "OPENAI_REFRESH_TOKEN".to_string(),
-            refresh_token.to_string(),
-        ),
-    ];
-    if let Some(id) = account_id {
-        pairs.push(("CHATGPT_ACCOUNT_ID".to_string(), id.to_string()));
-    }
-    pairs
-}
-
-// ---------------------------------------------------------------------------
-// OpenAI OAuth browser flow with API-key fallback
-// ---------------------------------------------------------------------------
-
-/// Run the OpenAI OAuth browser flow, falling back to manual API key entry on
-/// failure. Returns the env-var pairs to persist.
-pub(crate) async fn run_openai_oauth_or_api_key(
-    s: &Styles,
-    printer: Printer,
-) -> Result<Vec<(String, String)>> {
-    fabro_util::printerr!(
-        printer,
-        "  {}",
-        s.dim.apply_to("Opening browser for OpenAI login...")
-    );
-    match fabro_oauth::run_browser_flow(
-        openai_jwt::DEFAULT_ISSUER,
-        openai_jwt::DEFAULT_CLIENT_ID,
-        "openid profile email offline_access",
-        openai_jwt::OAUTH_PORT,
-        "/auth/callback",
-    )
-    .await
-    {
-        Ok(tokens) => {
-            tracing::info!("OpenAI OAuth browser flow completed");
-            let account_id = tokens
-                .id_token
-                .as_deref()
-                .and_then(openai_jwt::extract_account_id);
-            let refresh_token = tokens
-                .refresh_token
-                .as_deref()
-                .ok_or_else(|| anyhow::anyhow!("OpenAI did not return a refresh token"))?;
-            let pairs =
-                openai_oauth_env_pairs(&tokens.access_token, refresh_token, account_id.as_deref());
-            fabro_util::printerr!(
-                printer,
-                "  {} OpenAI configured via browser login",
-                s.green.apply_to("✔")
-            );
-            Ok(pairs)
-        }
-        Err(e) => {
-            tracing::warn!(error = %e, "OpenAI OAuth browser flow failed");
-            fabro_util::printerr!(printer, "  Browser login failed: {e}");
-            fabro_util::printerr!(
-                printer,
-                "  {}",
-                s.dim.apply_to("Falling back to manual API key entry.")
-            );
-            let (env_var, key) = prompt_and_validate_key(Provider::OpenAi, s, printer).await?;
-            Ok(vec![(env_var, key)])
-        }
-    }
-}
-
-// ---------------------------------------------------------------------------
 // Interactive prompts
 // ---------------------------------------------------------------------------
 
@@ -148,14 +70,23 @@ pub(crate) fn prompt_password(prompt: &str) -> Result<String> {
 // ---------------------------------------------------------------------------
 
 pub(crate) async fn validate_api_key(provider: Provider, api_key: &str) -> Result<(), String> {
-    let env_var = provider.api_key_env_vars()[0];
-    let client = LlmClient::from_lookup(|name| {
-        if name == env_var {
-            Some(api_key.to_string())
-        } else {
-            None
+    let auth_header = if provider == Provider::Anthropic {
+        ApiKeyHeader::Custom {
+            name:  "x-api-key".to_string(),
+            value: api_key.to_string(),
         }
-    })
+    } else {
+        ApiKeyHeader::Bearer(api_key.to_string())
+    };
+    let client = LlmClient::from_credentials(vec![ApiCredential {
+        provider,
+        auth_header,
+        extra_headers: std::collections::HashMap::new(),
+        base_url: None,
+        codex_mode: false,
+        org_id: None,
+        project_id: None,
+    }])
     .await
     .map_err(|e| e.to_string())?;
 
@@ -213,6 +144,112 @@ pub(crate) async fn prompt_and_validate_key(
     }
 }
 
+pub(crate) async fn pick_auth_method(provider: Provider) -> Result<AuthMethod> {
+    if provider != Provider::OpenAi {
+        return Ok(AuthMethod::ApiKey);
+    }
+
+    let use_device_auth =
+        spawn_blocking(|| prompt_confirm("Log in with OpenAI account (device code)?", true))
+            .await??;
+    if use_device_auth {
+        Ok(AuthMethod::CodexDevice(codex_oauth_config()))
+    } else {
+        Ok(AuthMethod::ApiKey)
+    }
+}
+
+pub(crate) async fn authenticate_provider(
+    provider: Provider,
+    s: &Styles,
+    printer: Printer,
+) -> Result<AuthCredential> {
+    let method = pick_auth_method(provider).await?;
+    authenticate_provider_with_method(provider, method, s, printer).await
+}
+
+pub(crate) async fn authenticate_provider_with_method(
+    provider: Provider,
+    method: AuthMethod,
+    s: &Styles,
+    printer: Printer,
+) -> Result<AuthCredential> {
+    let mut strategy = strategy_for(provider, method);
+    let request = strategy.init().await?;
+    present_to_user(&request, s, printer)?;
+    let response = await_user_response(&request, s, printer).await?;
+    strategy.complete(response).await
+}
+
+pub(crate) fn present_to_user(
+    request: &AuthContextRequest,
+    s: &Styles,
+    printer: Printer,
+) -> Result<()> {
+    match request {
+        AuthContextRequest::ApiKey {
+            provider,
+            env_var_names,
+        } => {
+            let env_var = env_var_names
+                .first()
+                .map(String::as_str)
+                .unwrap_or("API_KEY");
+            let url = provider_key_url(*provider);
+            fabro_util::printerr!(
+                printer,
+                "  {}",
+                s.dim.apply_to(format!("Get your API key at: {url}"))
+            );
+            fabro_util::printerr!(
+                printer,
+                "  {}",
+                s.dim.apply_to(format!("Expected variable name: {env_var}"))
+            );
+        }
+        AuthContextRequest::DeviceCode {
+            user_code,
+            verification_uri,
+            expires_in,
+        } => {
+            fabro_util::printerr!(printer, "  Open this URL in your browser:");
+            fabro_util::printerr!(printer, "    {verification_uri}");
+            fabro_util::printerr!(printer, "  Enter this one-time code:");
+            fabro_util::printerr!(printer, "    {}", s.bold.apply_to(user_code));
+            fabro_util::printerr!(
+                printer,
+                "  {}",
+                s.dim
+                    .apply_to(format!("Code expires in {} minutes", expires_in / 60))
+            );
+        }
+    }
+    Ok(())
+}
+
+pub(crate) async fn await_user_response(
+    request: &AuthContextRequest,
+    s: &Styles,
+    printer: Printer,
+) -> Result<AuthContextResponse> {
+    match request {
+        AuthContextRequest::ApiKey { provider, .. } => {
+            let (_, key) = prompt_and_validate_key(*provider, s, printer).await?;
+            Ok(AuthContextResponse::ApiKey { key })
+        }
+        AuthContextRequest::DeviceCode { .. } => {
+            let ready = spawn_blocking(|| {
+                prompt_confirm("Continue after completing sign-in in the browser?", true)
+            })
+            .await??;
+            if !ready {
+                return Err(anyhow::anyhow!("device code login cancelled"));
+            }
+            Ok(AuthContextResponse::DeviceCodeConfirmed)
+        }
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -220,33 +257,6 @@ pub(crate) async fn prompt_and_validate_key(
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    // -- OpenAI OAuth env pairs --
-
-    #[test]
-    fn openai_oauth_env_pairs_sets_api_key() {
-        let pairs = openai_oauth_env_pairs("tok", "ref", None);
-        assert!(pairs.contains(&("OPENAI_API_KEY".to_string(), "tok".to_string())));
-    }
-
-    #[test]
-    fn openai_oauth_env_pairs_sets_refresh_token() {
-        let pairs = openai_oauth_env_pairs("tok", "ref", None);
-        assert!(pairs.contains(&("OPENAI_REFRESH_TOKEN".to_string(), "ref".to_string())));
-    }
-
-    #[test]
-    fn openai_oauth_env_pairs_count() {
-        let pairs = openai_oauth_env_pairs("tok", "ref", None);
-        assert_eq!(pairs.len(), 2);
-    }
-
-    #[test]
-    fn openai_oauth_env_pairs_with_account_id() {
-        let pairs = openai_oauth_env_pairs("tok", "ref", Some("acct_123"));
-        assert!(pairs.contains(&("CHATGPT_ACCOUNT_ID".to_string(), "acct_123".to_string())));
-        assert_eq!(pairs.len(), 3);
-    }
 
     // -- Provider key URLs --
 

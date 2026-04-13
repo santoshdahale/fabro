@@ -25,7 +25,9 @@ use fabro_types::settings::run::{
     PullRequestSettings, RunMode, RunModelSettings as ResolvedRunModelSettings,
     RunSettings as ResolvedRunSettings, TlsMode as ResolvedTlsMode,
 };
+use fabro_vault::Vault;
 use tokio::runtime::Handle;
+use tokio::sync::RwLock as AsyncRwLock;
 
 use crate::artifact_upload::ArtifactSink;
 use crate::context::Context;
@@ -76,6 +78,7 @@ struct RunSession {
     workflow_path:     Option<PathBuf>,
     workflow_bundle:   Option<Arc<WorkflowBundle>>,
     run_control:       Option<Arc<RunControlState>>,
+    vault:             Option<Arc<AsyncRwLock<Vault>>>,
 }
 
 pub struct StartServices {
@@ -88,6 +91,7 @@ pub struct StartServices {
     pub artifact_sink:     Option<ArtifactSink>,
     pub run_control:       Option<Arc<RunControlState>>,
     pub github_app:        Option<fabro_github::GitHubCredentials>,
+    pub vault:             Option<Arc<AsyncRwLock<Vault>>>,
     pub on_node:           crate::OnNodeCallback,
     pub registry_override: Option<Arc<HandlerRegistry>>,
 }
@@ -428,6 +432,7 @@ impl RunSession {
             pr_model: model,
             workflow_path,
             workflow_bundle,
+            vault: services.vault,
         })
     }
 }
@@ -701,6 +706,7 @@ impl RunSession {
             workflow_bundle: self.workflow_bundle,
             hooks: self.hooks,
             sandbox_env: self.sandbox_env,
+            vault: self.vault,
             devcontainer: self.devcontainer,
             git: self.git,
             worktree_mode: self.worktree_mode,
@@ -1048,6 +1054,7 @@ mod tests {
             artifact_sink: None,
             run_control: None,
             github_app: None,
+            vault: None,
             on_node: None,
             registry_override: Some(registry),
         }

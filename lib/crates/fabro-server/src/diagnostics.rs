@@ -18,6 +18,7 @@ use tokio::process::Command;
 use tokio::time::timeout;
 
 use crate::server::AppState;
+use crate::server_secrets::auth_issue_message;
 
 fn http_client_or_check(
     name: &str,
@@ -196,29 +197,8 @@ pub async fn run_all(state: &AppState) -> DiagnosticsReport {
 }
 
 async fn check_llm_providers(state: &AppState) -> CheckResult {
-    let mut configured = Vec::new();
-    for provider in Provider::ALL {
-        if state
-            .provider_credentials
-            .has_any(provider.api_key_env_vars())
-            .await
-        {
-            configured.push(*provider);
-        }
-    }
-
-    if configured.is_empty() {
-        return CheckResult {
-            name:        "LLM Providers".to_string(),
-            status:      CheckStatus::Error,
-            summary:     "none configured".to_string(),
-            details:     Vec::new(),
-            remediation: Some("Set at least one provider API key".to_string()),
-        };
-    }
-
-    let client = match state.build_llm_client().await {
-        Ok(client) => client,
+    let result = match state.build_llm_client().await {
+        Ok(result) => result,
         Err(err) => {
             return CheckResult {
                 name:        "LLM Providers".to_string(),
@@ -229,13 +209,29 @@ async fn check_llm_providers(state: &AppState) -> CheckResult {
             };
         }
     };
+    if result.client.provider_names().is_empty() && result.auth_issues.is_empty() {
+        return CheckResult {
+            name:        "LLM Providers".to_string(),
+            status:      CheckStatus::Error,
+            summary:     "none configured".to_string(),
+            details:     Vec::new(),
+            remediation: Some("Set at least one provider API key".to_string()),
+        };
+    }
 
     let mut details = Vec::new();
     let mut failed = Vec::new();
-    for provider in configured {
+    for (provider, issue) in &result.auth_issues {
+        failed.push(provider.to_string());
+        details.push(CheckDetail::new(auth_issue_message(*provider, issue)));
+    }
+    for provider_name in result.client.provider_names() {
+        let Ok(provider) = provider_name.parse::<Provider>() else {
+            continue;
+        };
         let result = timeout(
             Duration::from_secs(30),
-            probe_llm_provider(&client, provider),
+            probe_llm_provider(&result.client, provider),
         )
         .await;
         match result {
@@ -257,7 +253,7 @@ async fn check_llm_providers(state: &AppState) -> CheckResult {
         CheckResult {
             name: "LLM Providers".to_string(),
             status: CheckStatus::Pass,
-            summary: format!("{} configured", details.len()),
+            summary: format!("{} configured", result.client.provider_names().len()),
             details,
             remediation: None,
         }
@@ -265,7 +261,7 @@ async fn check_llm_providers(state: &AppState) -> CheckResult {
         CheckResult {
             name: "LLM Providers".to_string(),
             status: CheckStatus::Warning,
-            summary: "connectivity issues".to_string(),
+            summary: "some providers require attention".to_string(),
             details,
             remediation: Some(format!("Connectivity issues with: {}", failed.join(", "))),
         }
