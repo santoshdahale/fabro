@@ -4313,16 +4313,11 @@ components:
       type: object
       required:
         - status
-        - version
       properties:
         status:
           type: string
           description: Health status indicator.
           example: ok
-        version:
-          type: string
-          description: Server version string.
-          example: "0.176.2"
 
     SecretType:
       description: The way a secret is consumed by the sandbox.

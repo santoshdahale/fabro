@@ -1113,7 +1113,6 @@ async fn not_implemented() -> Response {
 async fn health() -> Response {
     Json(serde_json::json!({
         "status": "ok",
-        "version": FABRO_VERSION,
     }))
     .into_response()
 }

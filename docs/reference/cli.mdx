@@ -224,6 +224,18 @@ fabro rm my-workflow --force
 | `<RUN>...` | Run IDs or workflow names to remove (required, repeatable) |
 | `-f, --force` | Force removal of active runs |
 
+## `fabro version`
+
+Show client and server build identity side-by-side, including version, build metadata, and server uptime.
+
+```bash
+fabro version
+fabro version --server http://127.0.0.1:4110
+fabro version --json
+```
+
+Use this when you want to check CLI/server parity. Unlike `fabro --version`, this queries the server. Unlike `fabro system info`, this stays focused on version/build identity rather than operational runtime details.
+
 ## `fabro system info`
 
 Show server runtime information including version, uptime, and run counts.

@@ -254,6 +254,10 @@ async fn main_inner() -> (String, Result<()>) {
                 .await?;
                 std::process::exit(exit_code);
             }
+            Commands::Version(args) => {
+                commands::version::version_command(&args, &cli_settings, &cli_layer, printer)
+                    .await?;
+            }
             Commands::Discord => {
                 if process_local_json {
                     shared::print_json_pretty(&serde_json::json!({

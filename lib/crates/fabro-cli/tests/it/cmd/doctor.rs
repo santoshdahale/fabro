@@ -84,4 +84,8 @@ async fn twin_doctor() {
         stdout.to_lowercase().contains("openai connectivity: ok"),
         "expected verbose doctor output to include openai probe success, got: {stdout}"
     );
+    assert!(
+        stdout.contains("Version parity"),
+        "expected doctor output to include version parity check, got: {stdout}"
+    );
 }

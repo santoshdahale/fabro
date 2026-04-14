@@ -63,6 +63,7 @@ mod top_level;
 mod uninstall;
 mod upgrade;
 mod validate;
+mod version;
 mod wait;
 mod workflow;
 mod workflow_create;

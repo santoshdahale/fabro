@@ -192,6 +192,18 @@ fn check_version_parity(server_version: &str) -> CheckResult {
     }
 }
 
+fn skipped_version_parity(reason: &str) -> CheckResult {
+    CheckResult {
+        name:        "Version parity".to_string(),
+        status:      CheckStatus::Warning,
+        summary:     "skipped".to_string(),
+        details:     vec![CheckDetail::new(format!(
+            "Could not retrieve server version: {reason}"
+        ))],
+        remediation: None,
+    }
+}
+
 fn convert_diagnostics_status(status: api_types::DiagnosticsCheckStatus) -> CheckStatus {
     match status {
         api_types::DiagnosticsCheckStatus::Pass => CheckStatus::Pass,
@@ -372,47 +384,46 @@ pub(crate) async fn run_doctor(
         }
     };
 
-    let health = match server.api().get_health().send().await {
-        Ok(response) => response.into_inner(),
-        Err(err) => {
-            report.sections.push(CheckSection {
-                title:  "Server".to_string(),
-                checks: vec![CheckResult {
-                    name:        "Fabro server".to_string(),
-                    status:      CheckStatus::Error,
-                    summary:     "health check failed".to_string(),
-                    details:     vec![CheckDetail::new(err.to_string())],
-                    remediation: Some(
-                        "Check that the server is reachable and responding to /health.".to_string(),
-                    ),
-                }],
-            });
+    if let Err(err) = server.api().get_health().send().await {
+        report.sections.push(CheckSection {
+            title:  "Server".to_string(),
+            checks: vec![CheckResult {
+                name:        "Fabro server".to_string(),
+                status:      CheckStatus::Error,
+                summary:     "health check failed".to_string(),
+                details:     vec![CheckDetail::new(err.to_string())],
+                remediation: Some(
+                    "Check that the server is reachable and responding to /health.".to_string(),
+                ),
+            }],
+        });
 
-            if let Some(spinner) = spinner {
-                spinner.finish_and_clear();
-            }
-
-            if json {
-                print_json_pretty(&report)?;
-            } else {
-                render_report(&report, &styles, verbose, printer);
-            }
-            return Ok(1);
+        if let Some(spinner) = spinner {
+            spinner.finish_and_clear();
         }
-    };
 
-    report.sections[0]
-        .checks
-        .push(check_version_parity(&health.version));
+        if json {
+            print_json_pretty(&report)?;
+        } else {
+            render_report(&report, &styles, verbose, printer);
+        }
+        return Ok(1);
+    }
 
     match server.api().run_diagnostics().send().await {
         Ok(response) => {
             let diagnostics = response.into_inner();
+            report.sections[0]
+                .checks
+                .push(check_version_parity(&diagnostics.version));
             report
                 .sections
                 .extend(convert_diagnostics_sections(diagnostics.sections));
         }
         Err(err) => {
+            report.sections[0]
+                .checks
+                .push(skipped_version_parity(&err.to_string()));
             report.sections.push(CheckSection {
                 title:  "Server".to_string(),
                 checks: vec![CheckResult {
@@ -566,6 +577,18 @@ mod tests {
     fn check_version_parity_warns_on_mismatch() {
         let result = check_version_parity("0.0.0-test");
         assert_eq!(result.status, CheckStatus::Warning);
+    }
+
+    #[test]
+    fn version_parity_skipped_when_diagnostics_unavailable() {
+        let result = skipped_version_parity("boom");
+        assert_eq!(result.name, "Version parity");
+        assert_eq!(result.status, CheckStatus::Warning);
+        assert_eq!(result.summary, "skipped");
+        assert_eq!(
+            result.details[0].text,
+            "Could not retrieve server version: boom"
+        );
     }
 
     #[test]

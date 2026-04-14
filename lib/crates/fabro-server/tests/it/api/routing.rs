@@ -54,6 +54,10 @@ async fn root_and_health_stay_at_root() {
     assert_eq!(health_response.status(), StatusCode::OK);
     let health_body = body_json(health_response.into_body()).await;
     assert_eq!(health_body["status"], "ok");
+    assert!(
+        health_body.get("version").is_none(),
+        "health endpoint should not expose version"
+    );
 }
 
 #[tokio::test]

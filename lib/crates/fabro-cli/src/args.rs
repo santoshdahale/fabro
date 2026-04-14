@@ -636,6 +636,12 @@ pub(crate) struct SystemInfoArgs {
     pub(crate) connection: ServerConnectionArgs,
 }
 
+#[derive(Args, Debug, Clone, Default)]
+pub(crate) struct VersionArgs {
+    #[command(flatten)]
+    pub(crate) target: ServerTargetArgs,
+}
+
 #[derive(Args)]
 pub(crate) struct RunsPruneArgs {
     #[command(flatten)]
@@ -980,6 +986,8 @@ pub(crate) enum Commands {
     Server(ServerNamespace),
     /// Check environment and integration health
     Doctor(DoctorArgs),
+    /// Show client and server version information
+    Version(VersionArgs),
     /// Set up the Fabro environment (LLMs, certs, GitHub)
     Install(InstallArgs),
     /// Uninstall Fabro from this machine
@@ -1061,6 +1069,7 @@ impl Commands {
                 ServerCommand::Serve(_) => "server __serve",
             },
             Self::Doctor(_) => "doctor",
+            Self::Version(_) => "version",
             Self::Repo(ns) => match &ns.command {
                 RepoCommand::Init(_) => "repo init",
                 RepoCommand::Deinit => "repo deinit",

@@ -20,4 +20,5 @@ pub(crate) mod system;
 pub(crate) mod uninstall;
 pub(crate) mod upgrade;
 pub(crate) mod validate;
+pub(crate) mod version;
 pub(crate) mod workflow;

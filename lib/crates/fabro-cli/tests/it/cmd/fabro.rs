@@ -31,6 +31,7 @@ fn help() {
       model       List and test LLM models
       server      Server operations
       doctor      Check environment and integration health
+      version     Show client and server version information
       install     Set up the Fabro environment (LLMs, certs, GitHub)
       uninstall   Uninstall Fabro from this machine
       pr          Pull request operations
