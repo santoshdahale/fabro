@@ -56,8 +56,7 @@ fn list() {
       (none)
 
     Project Workflows (workflows)
-
-      NAME        DESCRIPTION
-      my_test_wf  A test workflow
+    NAME        DESCRIPTION     
+     my_test_wf  A test workflow
     ");
 }

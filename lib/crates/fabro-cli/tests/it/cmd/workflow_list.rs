@@ -65,13 +65,11 @@ fn workflow_list_shows_project_and_user_sections() {
     2 workflow(s) found
 
     User Workflows (~/.fabro/workflows)
-
-      NAME           DESCRIPTION
-      user-beta      User beta goal
+    NAME       DESCRIPTION    
+     user-beta  User beta goal
 
     Project Workflows (.fabro/workflows)
-
-      NAME           DESCRIPTION
-      project-alpha  Project alpha goal
+    NAME           DESCRIPTION        
+     project-alpha  Project alpha goal
     ");
 }
