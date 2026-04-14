@@ -188,9 +188,9 @@ fn github_integration_table(doc: &mut toml::Value) -> Result<&mut toml::Table> {
         .context("settings.toml [server.integrations.github] is not a table")
 }
 
-fn write_github_cli_settings(doc: &mut toml::Value) -> Result<()> {
+fn write_token_settings(doc: &mut toml::Value) -> Result<()> {
     let github = github_integration_table(doc)?;
-    github.insert("strategy".into(), toml::Value::String("gh_cli".to_string()));
+    github.insert("strategy".into(), toml::Value::String("token".to_string()));
     github.remove("app_id");
     github.remove("slug");
     github.remove("client_id");
@@ -303,20 +303,20 @@ Non-interactive usage:
   fabro install --non-interactive \
     --llm-provider anthropic \
     --llm-api-key-env ANTHROPIC_API_KEY \
-    --github-strategy gh_cli \
+    --github-strategy token \
     --github-username brynary
 
   printf '%s\n' "$ANTHROPIC_API_KEY" | fabro install --non-interactive \
     --llm-provider anthropic \
     --llm-api-key-stdin \
-    --github-strategy gh_cli \
+    --github-strategy token \
     --github-username brynary
 
 Hidden non-interactive flags:
   --llm-provider <PROVIDER>
   --llm-api-key-stdin
   --llm-api-key-env <ENV_VAR>
-  --github-strategy <gh_cli|app>
+  --github-strategy <token|app>
   --github-username <USERNAME>
   --overwrite-settings
   --keep-existing-settings
@@ -339,7 +339,7 @@ struct LlmInstallSelection {
 
 #[derive(Debug)]
 enum GitHubInstallSelection {
-    GhCli,
+    Token,
     App {
         owner:    GitHubAppOwner,
         username: Option<String>,
@@ -487,7 +487,7 @@ impl InstallInputSource for InteractiveInstallInputSource {
         .await??;
 
         match strategy {
-            0 => Ok(GitHubInstallSelection::GhCli),
+            0 => Ok(GitHubInstallSelection::Token),
             1 => {
                 let (owner, username) = prompt_github_app_owner(s).await?;
                 Ok(GitHubInstallSelection::App { owner, username })
@@ -557,7 +557,7 @@ impl NonInteractiveInstallInputSource {
         );
 
         match self.args.github_strategy {
-            Some(InstallGitHubStrategyArg::GhCli) => {}
+            Some(InstallGitHubStrategyArg::Token) => {}
             Some(InstallGitHubStrategyArg::App) => {
                 bail!("GitHub App setup is not supported with --non-interactive")
             }
@@ -626,7 +626,7 @@ impl InstallInputSource for NonInteractiveInstallInputSource {
         _printer: Printer,
     ) -> Result<GitHubInstallSelection> {
         match self.args.github_strategy {
-            Some(InstallGitHubStrategyArg::GhCli) => Ok(GitHubInstallSelection::GhCli),
+            Some(InstallGitHubStrategyArg::Token) => Ok(GitHubInstallSelection::Token),
             Some(InstallGitHubStrategyArg::App) => {
                 bail!("GitHub App setup is not supported with --non-interactive")
             }
@@ -1190,7 +1190,7 @@ pub(crate) async fn run_install(
     fabro_util::printerr!(printer, "");
 
     match input_source.choose_github_install(&s, printer).await? {
-        GitHubInstallSelection::GhCli => {
+        GitHubInstallSelection::Token => {
             let token = fabro_github::gh_auth_token()
                 .await
                 .map_err(|err| anyhow!("{err}. Run `gh auth login` and rerun `fabro install`."))?;
@@ -1201,11 +1201,15 @@ pub(crate) async fn run_install(
             } else {
                 toml::from_str(&existing).context("failed to parse existing settings.toml")?
             };
-            write_github_cli_settings(&mut doc)?;
+            write_token_settings(&mut doc)?;
             std::fs::write(&user_toml_path, toml::to_string_pretty(&doc)?)?;
-            fabro_util::printerr!(printer, "  {} GitHub CLI configured", s.green.apply_to("✔"));
+            fabro_util::printerr!(
+                printer,
+                "  {} GitHub token configured",
+                s.green.apply_to("✔")
+            );
             vault_secrets.push(CreateSecretRequest {
-                name:        "GITHUB_CLI_TOKEN".to_string(),
+                name:        "GITHUB_TOKEN".to_string(),
                 value:       token,
                 type_:       ApiSecretType::Environment,
                 description: None,
@@ -1566,7 +1570,7 @@ name = "custom"
     }
 
     #[test]
-    fn write_github_cli_settings_uses_server_integrations_github() {
+    fn write_token_settings_uses_server_integrations_github() {
         let mut doc: toml::Value = toml::from_str(
             r#"
 _version = 1
@@ -1580,7 +1584,7 @@ client_id = "client-id"
         )
         .unwrap();
 
-        write_github_cli_settings(&mut doc).unwrap();
+        write_token_settings(&mut doc).unwrap();
 
         let github = doc
             .get("server")
@@ -1593,7 +1597,7 @@ client_id = "client-id"
 
         assert_eq!(
             github.get("strategy").and_then(toml::Value::as_str),
-            Some("gh_cli")
+            Some("token")
         );
         assert!(!github.contains_key("app_id"));
         assert!(!github.contains_key("slug"));
@@ -1700,7 +1704,7 @@ client_id = "client-id"
         ];
         let vault_secrets = vec![
             CreateSecretRequest {
-                name:        "GITHUB_CLI_TOKEN".to_string(),
+                name:        "GITHUB_TOKEN".to_string(),
                 value:       "gh-token".to_string(),
                 type_:       ApiSecretType::Environment,
                 description: None,
@@ -1793,7 +1797,7 @@ client_id = "client-id"
             llm_provider: Some(Provider::Anthropic),
             llm_api_key_stdin: true,
             llm_api_key_env: Some("ANTHROPIC_API_KEY".to_string()),
-            github_strategy: Some(InstallGitHubStrategyArg::GhCli),
+            github_strategy: Some(InstallGitHubStrategyArg::Token),
             github_username: Some("brynary".to_string()),
             ..InstallNonInteractiveArgs::default()
         });
@@ -1809,7 +1813,7 @@ client_id = "client-id"
         let source = NonInteractiveInstallInputSource {
             args: InstallNonInteractiveArgs {
                 llm_api_key_env: Some("ANTHROPIC_API_KEY".to_string()),
-                github_strategy: Some(InstallGitHubStrategyArg::GhCli),
+                github_strategy: Some(InstallGitHubStrategyArg::Token),
                 github_username: Some("brynary".to_string()),
                 ..InstallNonInteractiveArgs::default()
             },
@@ -1846,7 +1850,7 @@ client_id = "client-id"
             args: InstallNonInteractiveArgs {
                 llm_provider: Some(Provider::Anthropic),
                 llm_api_key_env: Some("ANTHROPIC_API_KEY".to_string()),
-                github_strategy: Some(InstallGitHubStrategyArg::GhCli),
+                github_strategy: Some(InstallGitHubStrategyArg::Token),
                 ..InstallNonInteractiveArgs::default()
             },
         };
@@ -1864,7 +1868,7 @@ client_id = "client-id"
             args: InstallNonInteractiveArgs {
                 llm_provider: Some(Provider::Anthropic),
                 llm_api_key_env: Some("ANTHROPIC_API_KEY".to_string()),
-                github_strategy: Some(InstallGitHubStrategyArg::GhCli),
+                github_strategy: Some(InstallGitHubStrategyArg::Token),
                 keep_existing_settings: true,
                 ..InstallNonInteractiveArgs::default()
             },
@@ -1898,7 +1902,7 @@ client_id = "client-id"
             args: InstallNonInteractiveArgs {
                 llm_provider: Some(Provider::Anthropic),
                 llm_api_key_env: Some("ANTHROPIC_API_KEY".to_string()),
-                github_strategy: Some(InstallGitHubStrategyArg::GhCli),
+                github_strategy: Some(InstallGitHubStrategyArg::Token),
                 github_username: Some("brynary".to_string()),
                 ..InstallNonInteractiveArgs::default()
             },

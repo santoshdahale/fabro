@@ -12,7 +12,7 @@ pub(super) async fn merge_command(
 ) -> Result<()> {
     let (record, _run_id) = super::load_pr_record(&args.server, &args.run_id, printer).await?;
 
-    let creds = super::load_github_credentials_required(printer).await?;
+    let creds = super::load_github_credentials_required(printer)?;
 
     fabro_github::merge_pull_request(
         &creds,

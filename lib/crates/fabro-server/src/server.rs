@@ -640,9 +640,10 @@ impl AppState {
                     },
                 )))
             }
-            GithubIntegrationStrategy::GhCli => {
+            GithubIntegrationStrategy::Token => {
                 let token = self
-                    .vault_or_env("GITHUB_CLI_TOKEN")
+                    .vault_or_env("GITHUB_TOKEN")
+                    .or_else(|| self.vault_or_env("GH_TOKEN"))
                     .as_deref()
                     .map(str::trim)
                     .filter(|token| !token.is_empty())
@@ -650,7 +651,7 @@ impl AppState {
                 match token {
                     Some(token) => Ok(Some(fabro_github::GitHubCredentials::Token(token))),
                     None => Err(
-                        "gh_cli strategy requires a stored token — run fabro install on the server host or manually provision GITHUB_CLI_TOKEN"
+                        "GITHUB_TOKEN not configured — run fabro install or set GITHUB_TOKEN"
                             .to_string(),
                     ),
                 }
@@ -1832,13 +1833,13 @@ async fn get_github_repo(
                 Err(err) => return ApiError::new(StatusCode::BAD_GATEWAY, err).into_response(),
             }
         }
-        GithubIntegrationStrategy::GhCli => match state.github_credentials(github_settings) {
+        GithubIntegrationStrategy::Token => match state.github_credentials(github_settings) {
             Ok(Some(fabro_github::GitHubCredentials::Token(token))) => token,
-            Ok(Some(_)) => unreachable!("gh_cli strategy should not return app credentials"),
+            Ok(Some(_)) => unreachable!("token strategy should not return app credentials"),
             Ok(None) => {
                 return ApiError::new(
                     StatusCode::SERVICE_UNAVAILABLE,
-                    "GITHUB_CLI_TOKEN is not configured",
+                    "GITHUB_TOKEN is not configured",
                 )
                 .into_response();
             }
@@ -1868,7 +1869,7 @@ async fn get_github_repo(
     {
         Ok(response) if response.status().is_success() => response,
         Ok(response)
-            if github_settings.strategy == GithubIntegrationStrategy::GhCli
+            if github_settings.strategy == GithubIntegrationStrategy::Token
                 && matches!(
                     response.status(),
                     fabro_http::StatusCode::FORBIDDEN | fabro_http::StatusCode::NOT_FOUND
@@ -1889,12 +1890,12 @@ async fn get_github_repo(
                 .into_response();
         }
         Ok(response)
-            if github_settings.strategy == GithubIntegrationStrategy::GhCli
+            if github_settings.strategy == GithubIntegrationStrategy::Token
                 && response.status() == fabro_http::StatusCode::UNAUTHORIZED =>
         {
             return ApiError::new(
                 StatusCode::SERVICE_UNAVAILABLE,
-                "Stored GitHub CLI token is invalid — run fabro install or update GITHUB_CLI_TOKEN",
+                "Stored GitHub token is invalid — run fabro install or update GITHUB_TOKEN",
             )
             .into_response();
         }

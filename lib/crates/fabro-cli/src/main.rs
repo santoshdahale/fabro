@@ -380,7 +380,7 @@ mod tests {
     }
 
     #[test]
-    fn parse_install_non_interactive_accepts_gh_cli_strategy() {
+    fn parse_install_non_interactive_accepts_token_strategy() {
         let cli = Cli::try_parse_from([
             "fabro",
             "install",
@@ -390,7 +390,7 @@ mod tests {
             "--llm-api-key-env",
             "ANTHROPIC_API_KEY",
             "--github-strategy",
-            "gh_cli",
+            "token",
             "--github-username",
             "brynary",
         ])
@@ -400,7 +400,7 @@ mod tests {
                 assert!(args.non_interactive);
                 assert_eq!(
                     args.scripted.github_strategy,
-                    Some(InstallGitHubStrategyArg::GhCli)
+                    Some(InstallGitHubStrategyArg::Token)
                 );
             }
             _ => panic!("unexpected command variant"),

@@ -283,25 +283,22 @@ async fn probe_llm_provider(client: &LlmClient, provider: Provider) -> Result<()
 
 async fn check_github_app(state: &AppState) -> CheckResult {
     let settings = state.server_settings();
-    if settings.integrations.github.strategy == GithubIntegrationStrategy::GhCli {
+    if settings.integrations.github.strategy == GithubIntegrationStrategy::Token {
         let token = match state.github_credentials(&settings.integrations.github) {
             Ok(Some(fabro_github::GitHubCredentials::Token(token))) => token,
-            Ok(Some(_)) => unreachable!("gh_cli strategy should not return app credentials"),
+            Ok(Some(_)) => unreachable!("token strategy should not return app credentials"),
             Ok(None) => {
                 return CheckResult {
-                    name:        "GitHub CLI".to_string(),
+                    name:        "GitHub Token".to_string(),
                     status:      CheckStatus::Warning,
                     summary:     "not configured".to_string(),
                     details:     Vec::new(),
-                    remediation: Some(
-                        "Run fabro install on the server host to store GITHUB_CLI_TOKEN"
-                            .to_string(),
-                    ),
+                    remediation: Some("Run fabro install or set GITHUB_TOKEN".to_string()),
                 };
             }
             Err(err) => {
                 return CheckResult {
-                    name:        "GitHub CLI".to_string(),
+                    name:        "GitHub Token".to_string(),
                     status:      CheckStatus::Error,
                     summary:     "missing token".to_string(),
                     details:     vec![CheckDetail::new(err.clone())],
@@ -310,7 +307,7 @@ async fn check_github_app(state: &AppState) -> CheckResult {
             }
         };
 
-        let http = match http_client_or_check("GitHub CLI", CheckStatus::Error) {
+        let http = match http_client_or_check("GitHub Token", CheckStatus::Error) {
             Ok(http) => http,
             Err(result) => return result,
         };
@@ -326,7 +323,7 @@ async fn check_github_app(state: &AppState) -> CheckResult {
 
         return match probe {
             Ok(Ok(response)) if response.status().is_success() => CheckResult {
-                name:        "GitHub CLI".to_string(),
+                name:        "GitHub Token".to_string(),
                 status:      CheckStatus::Pass,
                 summary:     "configured".to_string(),
                 details:     Vec::new(),
@@ -334,42 +331,39 @@ async fn check_github_app(state: &AppState) -> CheckResult {
             },
             Ok(Ok(response)) if response.status() == fabro_http::StatusCode::UNAUTHORIZED => {
                 CheckResult {
-                    name:        "GitHub CLI".to_string(),
+                    name:        "GitHub Token".to_string(),
                     status:      CheckStatus::Error,
                     summary:     "token invalid".to_string(),
                     details:     vec![CheckDetail::new(format!(
                         "GitHub returned {}",
                         response.status()
                     ))],
-                    remediation: Some(
-                        "Run fabro install on the server host to refresh GITHUB_CLI_TOKEN"
-                            .to_string(),
-                    ),
+                    remediation: Some("Run fabro install or update GITHUB_TOKEN".to_string()),
                 }
             }
             Ok(Ok(response)) => CheckResult {
-                name:        "GitHub CLI".to_string(),
+                name:        "GitHub Token".to_string(),
                 status:      CheckStatus::Error,
                 summary:     "connectivity error".to_string(),
                 details:     vec![CheckDetail::new(format!(
                     "GitHub returned {}",
                     response.status()
                 ))],
-                remediation: Some("Check GitHub connectivity and the stored CLI token".to_string()),
+                remediation: Some("Check GitHub connectivity and GITHUB_TOKEN".to_string()),
             },
             Ok(Err(err)) => CheckResult {
-                name:        "GitHub CLI".to_string(),
+                name:        "GitHub Token".to_string(),
                 status:      CheckStatus::Error,
                 summary:     "connectivity error".to_string(),
                 details:     vec![CheckDetail::new(err.to_string())],
-                remediation: Some("Check GitHub connectivity and the stored CLI token".to_string()),
+                remediation: Some("Check GitHub connectivity and GITHUB_TOKEN".to_string()),
             },
             Err(_) => CheckResult {
-                name:        "GitHub CLI".to_string(),
+                name:        "GitHub Token".to_string(),
                 status:      CheckStatus::Error,
                 summary:     "timeout".to_string(),
                 details:     vec![CheckDetail::new("GitHub probe timed out".to_string())],
-                remediation: Some("Check GitHub connectivity and the stored CLI token".to_string()),
+                remediation: Some("Check GitHub connectivity and GITHUB_TOKEN".to_string()),
             },
         };
     }

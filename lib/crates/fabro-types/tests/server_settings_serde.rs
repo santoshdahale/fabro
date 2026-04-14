@@ -8,7 +8,7 @@ fn settings_layer_round_trips_github_integration_strategy() {
         "server": {
             "integrations": {
                 "github": {
-                    "strategy": "gh_cli",
+                    "strategy": "token",
                     "app_id": "{{ env.GITHUB_APP_ID }}"
                 }
             }

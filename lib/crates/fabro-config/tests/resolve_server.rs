@@ -159,7 +159,7 @@ strategy = "app"
 }
 
 #[test]
-fn defaults_github_integration_strategy_to_gh_cli() {
+fn defaults_github_integration_strategy_to_token() {
     let file = parse(
         r"
 _version = 1
@@ -174,6 +174,6 @@ enabled = true
 
     assert_eq!(
         settings.integrations.github.strategy,
-        GithubIntegrationStrategy::GhCli
+        GithubIntegrationStrategy::Token
     );
 }

@@ -1677,7 +1677,7 @@ mod settings {
                 "integrations": {
                     "github": {
                         "enabled": false,
-                        "strategy": "gh_cli",
+                        "strategy": "token",
                         "app_id": "12345",
                         "client_id": "Iv1.abc123",
                         "slug": "fabro-dev",

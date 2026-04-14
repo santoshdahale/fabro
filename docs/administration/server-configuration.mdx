@@ -179,11 +179,11 @@ Customize the git author identity used for checkpoint commits. When not set, def
 
 ### `[server.integrations.github]` section
 
-Configure GitHub integration auth. `strategy = "gh_cli"` is the default and uses a stored `GITHUB_CLI_TOKEN` from the vault. `strategy = "app"` enables the GitHub App flow, browser OAuth, and webhooks.
+Configure GitHub integration auth. `strategy = "token"` is the default and uses a stored `GITHUB_TOKEN` from the vault (with `GH_TOKEN` as a fallback). `strategy = "app"` enables the GitHub App flow, browser OAuth, and webhooks.
 
 ```toml title="settings.toml"
 [server.integrations.github]
-strategy = "gh_cli"
+strategy = "token"
 ```
 
 For GitHub App mode, set `strategy = "app"` and include `app_id`, `client_id`, and `slug`. Webhook delivery is configured under `[server.integrations.github.webhooks]`:
@@ -272,7 +272,7 @@ Fabro resolves these from `process env -> server.env`.
 
 | Variable | Description |
 |---|---|
-| `GITHUB_CLI_TOKEN` | Token captured from `gh auth token` and stored by `fabro install` when `strategy = "gh_cli"` |
+| `GITHUB_TOKEN` | GitHub personal access token, stored by `fabro install` when `strategy = "token"`. Also accepts `GH_TOKEN` as a fallback. |
 
 ### GitHub App extras (optional)
 

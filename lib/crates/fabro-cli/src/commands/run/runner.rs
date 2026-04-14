@@ -78,8 +78,14 @@ pub(crate) async fn execute(
     spawn_worker_control_stream(Arc::clone(&interviewer), Arc::clone(&cancel_token))?;
     let run_control = RunControlState::new();
     install_signal_handlers(Arc::clone(&run_control), Arc::clone(&cancel_token))?;
-    let github_app = maybe_build_github_credentials(&run_record.settings).await?;
     let vault = load_worker_vault(storage_dir.as_deref())?;
+    let github_app = {
+        let vault_guard = match &vault {
+            Some(arc) => Some(arc.read().await),
+            None => None,
+        };
+        maybe_build_github_credentials(&run_record.settings, vault_guard.as_deref())?
+    };
     let services = StartServices {
         run_id,
         cancel_token: Some(Arc::clone(&cancel_token)),
@@ -490,8 +496,9 @@ fn update_worker_title_from_event(event: &RunEvent) {
     }
 }
 
-async fn maybe_build_github_credentials(
+fn maybe_build_github_credentials(
     settings: &SettingsLayer,
+    vault: Option<&fabro_vault::Vault>,
 ) -> Result<Option<fabro_github::GitHubCredentials>> {
     let resolved_run = fabro_config::resolve_run_from_file(settings).ok();
     let resolved_server = fabro_config::resolve_server_from_file(settings).ok();
@@ -513,12 +520,11 @@ async fn maybe_build_github_credentials(
         .map(InterpString::as_source);
 
     if required_github_credentials {
-        return build_github_credentials(strategy, app_id.as_deref()).await;
+        return build_github_credentials(strategy, app_id.as_deref(), vault);
     }
 
     if pull_request_enabled {
-        return Ok(build_github_credentials(strategy, app_id.as_deref())
-            .await
+        return Ok(build_github_credentials(strategy, app_id.as_deref(), vault)
             .ok()
             .flatten());
     }

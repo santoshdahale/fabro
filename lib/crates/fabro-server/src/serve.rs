@@ -347,7 +347,7 @@ where
 
     // Optionally start webhook listener
     let webhook_manager = match resolved_server_settings.integrations.github.strategy {
-        GithubIntegrationStrategy::GhCli => None,
+        GithubIntegrationStrategy::Token => None,
         GithubIntegrationStrategy::App => {
             let webhook_app_id = resolved_server_settings
                 .integrations
@@ -773,7 +773,7 @@ _version = 1
 enabled = true
 
 [server.integrations.github]
-strategy = "gh_cli"
+strategy = "token"
 "#,
         );
 

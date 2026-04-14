@@ -18,7 +18,7 @@ description: "Run Fabro workflows in sandboxed Daytona cloud environments"
 ## Prerequisites
 
 - A `DAYTONA_API_KEY` environment variable (get one from [app.daytona.io](https://app.daytona.io))
-- GitHub access configured via the default `gh_cli` strategy or a [GitHub App](/integrations/github) (required for private repository cloning and checkpoint pushing)
+- GitHub access configured via the default `token` strategy or a [GitHub App](/integrations/github) (required for private repository cloning and checkpoint pushing)
 
 ## Configuration
 
@@ -99,7 +99,7 @@ If a snapshot is configured by name but doesn't exist and no `dockerfile` is pro
 
 ## Private repositories
 
-Fabro automatically clones the current repository into the sandbox at `/home/daytona/workspace`. Public repositories work without extra configuration. Private repositories require GitHub access. In `gh_cli` mode, Fabro uses the stored CLI token directly. In `app` mode, Fabro uses short-lived Installation Access Tokens scoped to the specific repository.
+Fabro automatically clones the current repository into the sandbox at `/home/daytona/workspace`. Public repositories work without extra configuration. Private repositories require GitHub access. In `token` mode, Fabro uses the stored token directly. In `app` mode, Fabro uses short-lived Installation Access Tokens scoped to the specific repository.
 
 If the clone fails without GitHub access configured, Fabro suggests running the setup flow:
 

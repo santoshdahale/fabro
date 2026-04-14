@@ -1278,8 +1278,8 @@ pub(crate) struct DoctorArgs {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
 pub(crate) enum InstallGitHubStrategyArg {
-    #[value(name = "gh_cli", alias = "gh-cli")]
-    GhCli,
+    #[value(name = "token")]
+    Token,
     App,
 }
 

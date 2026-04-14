@@ -5,6 +5,7 @@ mod merge;
 mod view;
 
 use anyhow::{Context, Result, anyhow};
+use fabro_config::Storage;
 use fabro_github::GitHubCredentials;
 use fabro_types::PullRequestRecord;
 use fabro_types::settings::InterpString;
@@ -14,8 +15,10 @@ use crate::args::{GlobalArgs, PrCommand, PrNamespace, ServerTargetArgs};
 use crate::command_context::CommandContext;
 use crate::server_runs::ServerSummaryLookup;
 use crate::shared::github::build_github_credentials;
+use crate::user_config;
 
-const GITHUB_CREDENTIALS_REQUIRED: &str = "GitHub credentials required — run `gh auth login` or configure a GitHub App with `fabro install`";
+const GITHUB_CREDENTIALS_REQUIRED: &str =
+    "GitHub credentials required — run `fabro install` or set GITHUB_TOKEN";
 
 pub(crate) async fn dispatch(
     ns: PrNamespace,
@@ -31,7 +34,7 @@ pub(crate) async fn dispatch(
     }
 }
 
-async fn load_github_credentials_required(printer: Printer) -> Result<GitHubCredentials> {
+fn load_github_credentials_required(printer: Printer) -> Result<GitHubCredentials> {
     let ctx = CommandContext::base(printer)?;
     let server_settings =
         fabro_config::resolve_server_from_file(ctx.machine_settings()).map_err(|errors| {
@@ -44,6 +47,9 @@ async fn load_github_credentials_required(printer: Printer) -> Result<GitHubCred
                     .join("\n")
             )
         })?;
+    let vault = user_config::storage_dir(ctx.machine_settings())
+        .ok()
+        .and_then(|dir| fabro_vault::Vault::load(Storage::new(&dir).secrets_path()).ok());
     let creds = build_github_credentials(
         server_settings.integrations.github.strategy,
         server_settings
@@ -53,8 +59,8 @@ async fn load_github_credentials_required(printer: Printer) -> Result<GitHubCred
             .as_ref()
             .map(InterpString::as_source)
             .as_deref(),
+        vault.as_ref(),
     )
-    .await
     .map_err(|_| anyhow!(GITHUB_CREDENTIALS_REQUIRED))?;
     creds.context(GITHUB_CREDENTIALS_REQUIRED)
 }
