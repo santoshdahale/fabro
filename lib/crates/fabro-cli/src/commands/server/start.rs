@@ -92,12 +92,11 @@ async fn ensure_server_running_with_bind(
         config:              Some(config_path.to_path_buf()),
     };
 
-    let bind_request = match bind_request {
-        Some(bind_request) => bind_request,
-        None => {
-            let settings = load_settings_config(Some(config_path))?;
-            serve::resolve_bind_request_from_settings(&settings, None)?
-        }
+    let bind_request = if let Some(bind_request) = bind_request {
+        bind_request
+    } else {
+        let settings = load_settings_config(Some(config_path))?;
+        serve::resolve_bind_request_from_settings(&settings, None)?
     };
 
     match execute_daemon(
