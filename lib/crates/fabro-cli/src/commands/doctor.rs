@@ -73,9 +73,9 @@ pub(crate) fn check_config(
     }
 }
 
-fn check_legacy_env(path: Option<PathBuf>) -> CheckResult {
+fn check_legacy_env(path: Option<PathBuf>) -> Option<CheckResult> {
     match path {
-        Some(path) => CheckResult {
+        Some(path) => Some(CheckResult {
             name:        "Legacy .env".to_string(),
             status:      CheckStatus::Warning,
             summary:     "legacy secrets file detected".to_string(),
@@ -84,14 +84,8 @@ fn check_legacy_env(path: Option<PathBuf>) -> CheckResult {
                 path.display()
             ))],
             remediation: Some("Re-enter credentials with `fabro provider login`.".to_string()),
-        },
-        None => CheckResult {
-            name:        "Legacy .env".to_string(),
-            status:      CheckStatus::Pass,
-            summary:     "not present".to_string(),
-            details:     Vec::new(),
-            remediation: None,
-        },
+        }),
+        None => None,
     }
 }
 
@@ -278,20 +272,24 @@ pub(crate) async fn run_doctor(
         .unwrap_or_else(|_| fabro_util::Home::from_env().storage_dir());
     let storage_dir = probe_storage_dir(&storage_dir_path);
 
+    let mut local_checks = vec![
+        check_config(
+            settings_config_path
+                .exists()
+                .then_some(settings_config_path),
+            &legacy_config_paths,
+        ),
+        check_storage_dir(&storage_dir),
+    ];
+    if let Some(legacy_env_check) = check_legacy_env(legacy_env_path) {
+        local_checks.push(legacy_env_check);
+    }
+
     let mut report = CheckReport {
         title:    "Fabro Doctor".to_string(),
         sections: vec![CheckSection {
             title:  "Local".to_string(),
-            checks: vec![
-                check_config(
-                    settings_config_path
-                        .exists()
-                        .then_some(settings_config_path),
-                    &legacy_config_paths,
-                ),
-                check_storage_dir(&storage_dir),
-                check_legacy_env(legacy_env_path),
-            ],
+            checks: local_checks,
         }],
     };
 
@@ -453,8 +451,21 @@ mod tests {
     #[test]
     fn check_legacy_env_warning_when_present() {
         let result = check_legacy_env(Some(PathBuf::from("/home/user/.fabro/.env")));
-        assert_eq!(result.status, CheckStatus::Warning);
-        assert!(result.summary.contains("legacy secrets file"));
+        assert_eq!(
+            result.as_ref().map(|check| check.status),
+            Some(CheckStatus::Warning)
+        );
+        assert!(
+            result
+                .as_ref()
+                .is_some_and(|check| check.summary.contains("legacy secrets file"))
+        );
+    }
+
+    #[test]
+    fn check_legacy_env_is_omitted_when_absent() {
+        let result = check_legacy_env(None);
+        assert!(result.is_none());
     }
 
     // -- check_storage_dir --
