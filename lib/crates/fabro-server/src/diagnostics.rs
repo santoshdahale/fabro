@@ -422,7 +422,7 @@ fn check_sandbox(state: &AppState) -> CheckResult {
         CheckResult {
             name:        "Sandbox".to_string(),
             status:      CheckStatus::Warning,
-            summary:     "not configured".to_string(),
+            summary:     "recommended, not configured".to_string(),
             details:     Vec::new(),
             remediation: Some("Set DAYTONA_API_KEY to enable cloud sandbox execution".to_string()),
         }
@@ -432,15 +432,15 @@ fn check_sandbox(state: &AppState) -> CheckResult {
 async fn check_brave_search(state: &AppState) -> CheckResult {
     let Some(api_key) = state.vault_or_env("BRAVE_SEARCH_API_KEY") else {
         return CheckResult {
-            name:        "Brave Search".to_string(),
+            name:        "Web Search (Brave)".to_string(),
             status:      CheckStatus::Warning,
-            summary:     "not configured".to_string(),
+            summary:     "optional, not configured".to_string(),
             details:     Vec::new(),
             remediation: Some("Set BRAVE_SEARCH_API_KEY to enable web search".to_string()),
         };
     };
 
-    let http = match http_client_or_check("Brave Search", CheckStatus::Warning) {
+    let http = match http_client_or_check("Web Search (Brave)", CheckStatus::Warning) {
         Ok(http) => http,
         Err(result) => return result,
     };
@@ -456,31 +456,33 @@ async fn check_brave_search(state: &AppState) -> CheckResult {
 
     match probe {
         Ok(Ok(response)) if response.status().is_success() => CheckResult {
-            name:        "Brave Search".to_string(),
+            name:        "Web Search (Brave)".to_string(),
             status:      CheckStatus::Pass,
             summary:     "configured and reachable".to_string(),
             details:     Vec::new(),
             remediation: None,
         },
         Ok(Ok(response)) => CheckResult {
-            name:        "Brave Search".to_string(),
+            name:        "Web Search (Brave)".to_string(),
             status:      CheckStatus::Warning,
             summary:     format!("HTTP {}", response.status()),
             details:     Vec::new(),
             remediation: Some("Check BRAVE_SEARCH_API_KEY and network connectivity".to_string()),
         },
         Ok(Err(err)) => CheckResult {
-            name:        "Brave Search".to_string(),
+            name:        "Web Search (Brave)".to_string(),
             status:      CheckStatus::Warning,
             summary:     "connectivity error".to_string(),
             details:     vec![CheckDetail::new(err.clone())],
             remediation: Some(err),
         },
         Err(_) => CheckResult {
-            name:        "Brave Search".to_string(),
+            name:        "Web Search (Brave)".to_string(),
             status:      CheckStatus::Warning,
             summary:     "timeout".to_string(),
-            details:     vec![CheckDetail::new("Brave Search probe timed out".to_string())],
+            details:     vec![CheckDetail::new(
+                "Web Search (Brave) probe timed out".to_string(),
+            )],
             remediation: Some("Check BRAVE_SEARCH_API_KEY and network connectivity".to_string()),
         },
     }
