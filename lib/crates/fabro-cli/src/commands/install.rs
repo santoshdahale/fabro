@@ -260,9 +260,10 @@ fn prompt_input(prompt: &str) -> Result<String> {
         .interact_on(&Term::stderr())?)
 }
 
-fn prompt_select(prompt: &str, items: &[String]) -> Result<usize> {
+fn prompt_select(prompt: &str, items: &[String], default: usize) -> Result<usize> {
     Ok(Select::with_theme(&ColorfulTheme::default())
         .with_prompt(prompt)
+        .default(default)
         .items(items)
         .interact_on(&Term::stderr())?)
 }
@@ -483,7 +484,7 @@ impl InstallInputSource for InteractiveInstallInputSource {
                 .collect();
             let primary_idx: usize = spawn_blocking({
                 let labels = primary_labels.clone();
-                move || prompt_select("Choose your first LLM provider", &labels)
+                move || prompt_select("Choose your first LLM provider", &labels, 0)
             })
             .await??;
 
@@ -536,7 +537,7 @@ impl InstallInputSource for InteractiveInstallInputSource {
         ];
         let strategy = spawn_blocking({
             let options = strategy_options.clone();
-            move || prompt_select("How should Fabro authenticate with GitHub?", &options)
+            move || prompt_select("How should Fabro authenticate with GitHub?", &options, 0)
         })
         .await??;
 
@@ -830,7 +831,7 @@ async fn prompt_github_app_owner(_s: &Styles) -> Result<(GitHubAppOwner, Option<
 
     let selected: usize = spawn_blocking({
         let items = items.clone();
-        move || prompt_select("Where should the GitHub App be created?", &items)
+        move || prompt_select("Where should the GitHub App be created?", &items, 0)
     })
     .await??;
 
@@ -1463,7 +1464,6 @@ async fn run_install_inner(
             None => {}
         }
 
-        fabro_util::printerr!(printer, "");
         toml::to_string_pretty(&doc)?
     };
 
@@ -1511,12 +1511,6 @@ async fn run_install_inner(
             ("FABRO_DEV_TOKEN".to_string(), dev_token),
         ];
         server_env_pairs.extend(generated_server_env_pairs);
-        fabro_util::printerr!(printer, "");
-
-        fabro_util::printerr!(printer, "  To start Fabro, run these commands:");
-        fabro_util::printerr!(printer, "");
-        fabro_util::printerr!(printer, "    fabro server start");
-        fabro_util::printerr!(printer, "");
     }
 
     persist_install_outputs(
@@ -1548,9 +1542,7 @@ async fn run_install_inner(
         "  {} Saved {} runtime secrets to {}",
         s.green.apply_to("✔"),
         server_env_pairs.len(),
-        Storage::new(&storage_dir)
-            .server_state()
-            .env_path()
+        fabro_util::path::contract_tilde(&Storage::new(&storage_dir).server_state().env_path())
             .display()
     );
     fabro_util::printerr!(
@@ -1558,13 +1550,13 @@ async fn run_install_inner(
         "  {} Saved {} workflow-visible secrets to {}",
         s.green.apply_to("✔"),
         vault_secrets.len(),
-        Storage::new(&storage_dir).secrets_path().display()
+        fabro_util::path::contract_tilde(&Storage::new(&storage_dir).secrets_path()).display()
     );
     fabro_util::printerr!(
         printer,
         "  {} Wrote {}",
         s.green.apply_to("✔"),
-        config_path.display()
+        fabro_util::path::contract_tilde(&config_path).display()
     );
     if server_was_running {
         fabro_util::printerr!(
@@ -1572,6 +1564,14 @@ async fn run_install_inner(
             "  Warning: the local fabro server was already running. Restart it to pick up the new server.env values."
         );
     }
+    fabro_util::printerr!(printer, "");
+    fabro_util::printerr!(printer, "  To start Fabro, run these commands:");
+    fabro_util::printerr!(printer, "");
+    fabro_util::printerr!(
+        printer,
+        "    {}",
+        s.bold_cyan.apply_to("fabro server start")
+    );
     fabro_util::printerr!(printer, "");
 
     // Verify setup
