@@ -2060,7 +2060,10 @@ client_id = "client-id"
             &vault_secrets,
             false,
             |_| {
-                let client = fabro_api::Client::new(&server.base_url());
+                let client = fabro_api::Client::new_with_client(
+                    &server.base_url(),
+                    fabro_test::test_http_client(),
+                );
                 Box::pin(async move { Ok(client) })
             },
             {
