@@ -61,11 +61,17 @@ impl Cli {
 #[expect(clippy::print_stderr, reason = "fatal error reporting before exit")]
 #[tokio::main]
 async fn main() {
+    let raw_args: Vec<String> = std::env::args().collect();
+    let subcommand = raw_args.get(1).map(String::as_str);
+    let subcommand_arg = raw_args.get(2).map(String::as_str);
+    if subcommand == Some("__render-graph") && !matches!(subcommand_arg, Some("--help" | "-h")) {
+        std::process::exit(commands::render_graph::execute());
+    }
+
     tel_panic::install_panic_hook();
     fabro_telemetry::init_cli();
 
     let start = std::time::Instant::now();
-    let raw_args: Vec<String> = std::env::args().collect();
 
     let (command_name, result) = Box::pin(main_inner()).await;
     let duration_ms = u64::try_from(start.elapsed().as_millis()).unwrap();
@@ -368,6 +374,7 @@ async fn main_inner() -> (String, Result<()>) {
                 let _ = std::fs::remove_file(&path);
                 result?;
             }
+            Commands::RenderGraph => unreachable!("__render-graph handled before CLI bootstrap"),
             #[cfg(debug_assertions)]
             Commands::TestPanic { message } => {
                 let event = tel_panic::build_event(&message);
@@ -697,6 +704,15 @@ mod tests {
                 assert_eq!(args.run_id, "01ARZ3NDEKTSV4RRFFQ69G5FAV".parse().unwrap());
                 assert!(matches!(args.mode, args::RunWorkerMode::Resume));
             }
+            _ => panic!("unexpected command variant"),
+        }
+    }
+
+    #[test]
+    fn parse_render_graph_command() {
+        let cli = Cli::try_parse_from(["fabro", "__render-graph"]).expect("should parse");
+        match *cli.command {
+            Commands::RenderGraph => {}
             _ => panic!("unexpected command variant"),
         }
     }

@@ -34,6 +34,7 @@ fabro-retro = { path = "../fabro-retro" }
 fabro-sandbox = { path = "../fabro-sandbox", features = ["daytona"] }
 fabro-checkpoint = { path = "../fabro-checkpoint" }
 fabro-graphviz = { path = "../fabro-graphviz" }
+fabro-graphviz-sys = { path = "../fabro-graphviz-sys" }
 fabro-validate = { path = "../fabro-validate" }
 fabro-workflow = { path = "../fabro-workflow" }
 fabro-server = { path = "../fabro-server" }

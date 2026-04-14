@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use std::process::Stdio;
 use std::str::FromStr;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex, RwLock};
+use std::sync::{Arc, LazyLock, Mutex, RwLock};
 use std::time::{Duration, Instant};
 
 use axum::body::Body;
@@ -96,7 +96,7 @@ use tokio::fs;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::{ChildStderr, ChildStdin, Command};
 use tokio::sync::broadcast::error::RecvError;
-use tokio::sync::{Notify, RwLock as AsyncRwLock, broadcast, mpsc, oneshot};
+use tokio::sync::{Notify, RwLock as AsyncRwLock, Semaphore, broadcast, mpsc, oneshot};
 use tokio::task::spawn_blocking;
 use tokio::time::{sleep, timeout};
 use tokio_stream::StreamExt;
@@ -258,6 +258,23 @@ const ARTIFACT_UPLOAD_TOKEN_SCOPE: &str = "stage_artifacts:upload";
 const ARTIFACT_UPLOAD_TOKEN_TTL_SECS: u64 = 24 * 60 * 60;
 const MAX_SINGLE_ARTIFACT_BYTES: u64 = 10 * 1024 * 1024;
 const MAX_MULTIPART_ARTIFACTS: usize = 100;
+const RENDER_ERROR_PREFIX: &[u8] = b"RENDER_ERROR:";
+const GRAPHVIZ_RENDER_CONCURRENCY_LIMIT: usize = 4;
+
+static GRAPHVIZ_RENDER_SEMAPHORE: LazyLock<Semaphore> =
+    LazyLock::new(|| Semaphore::new(GRAPHVIZ_RENDER_CONCURRENCY_LIMIT));
+
+#[derive(Debug, thiserror::Error)]
+enum RenderSubprocessError {
+    #[error("failed to spawn render subprocess: {0}")]
+    SpawnFailed(String),
+    #[error("render subprocess crashed: {0}")]
+    ChildCrashed(String),
+    #[error("render subprocess returned invalid output: {0}")]
+    ProtocolViolation(String),
+    #[error("{0}")]
+    RenderFailed(String),
+}
 const MAX_MULTIPART_REQUEST_BYTES: u64 = 50 * 1024 * 1024;
 const MAX_MULTIPART_MANIFEST_BYTES: usize = 256 * 1024;
 
@@ -6181,19 +6198,160 @@ async fn create_completion(
     }
 }
 
-/// Render DOT source to a styled SVG image via `render_dot` on a blocking
-/// thread.
-pub(crate) async fn render_graph_bytes(dot_source: &str) -> Response {
-    use fabro_graphviz::render::render_dot;
+fn render_graph_subprocess_exe(
+    exe_override: Option<&std::path::Path>,
+) -> Result<PathBuf, RenderSubprocessError> {
+    match exe_override {
+        Some(path) => Ok(path.to_path_buf()),
+        None => {
+            if let Some(path) = std::env::var_os("CARGO_BIN_EXE_fabro").map(PathBuf::from) {
+                return Ok(path);
+            }
 
-    let source = dot_source.to_owned();
-    match spawn_blocking(move || render_dot(&source)).await {
-        Ok(Ok(bytes)) => {
+            let current = std::env::current_exe()
+                .map_err(|err| RenderSubprocessError::SpawnFailed(err.to_string()))?;
+            let current_name = current.file_stem().and_then(|name| name.to_str());
+            if current_name == Some("fabro") {
+                return Ok(current);
+            }
+
+            let candidate = current
+                .parent()
+                .and_then(|parent| parent.parent())
+                .map(|parent| parent.join(if cfg!(windows) { "fabro.exe" } else { "fabro" }));
+            if let Some(candidate) = candidate.filter(|path| path.is_file()) {
+                return Ok(candidate);
+            }
+
+            Ok(current)
+        }
+    }
+}
+
+fn render_subprocess_failure(
+    status: &std::process::ExitStatus,
+    stderr: &[u8],
+) -> RenderSubprocessError {
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::ExitStatusExt;
+
+        if let Some(signal) = status.signal() {
+            let stderr = String::from_utf8_lossy(stderr).trim().to_string();
+            let detail = if stderr.is_empty() {
+                format!("terminated by signal {signal}")
+            } else {
+                format!("terminated by signal {signal}: {stderr}")
+            };
+            return RenderSubprocessError::ChildCrashed(detail);
+        }
+    }
+
+    let stderr = String::from_utf8_lossy(stderr).trim().to_string();
+    let detail = match status.code() {
+        Some(code) if stderr.is_empty() => format!("exited with status {code}"),
+        Some(code) => format!("exited with status {code}: {stderr}"),
+        None if stderr.is_empty() => "child exited unsuccessfully".to_string(),
+        None => format!("child exited unsuccessfully: {stderr}"),
+    };
+    RenderSubprocessError::ChildCrashed(detail)
+}
+
+async fn render_dot_subprocess(
+    styled_source: &str,
+    exe_override: Option<&std::path::Path>,
+) -> Result<Vec<u8>, RenderSubprocessError> {
+    let _permit = GRAPHVIZ_RENDER_SEMAPHORE
+        .acquire()
+        .await
+        .map_err(|err| RenderSubprocessError::SpawnFailed(err.to_string()))?;
+    let exe = render_graph_subprocess_exe(exe_override)?;
+    let mut cmd = Command::new(exe);
+    cmd.arg("__render-graph")
+        .env("FABRO_TELEMETRY", "off")
+        .env_remove("FABRO_JSON")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+
+    let mut child = cmd
+        .spawn()
+        .map_err(|err| RenderSubprocessError::SpawnFailed(err.to_string()))?;
+    let mut stdin = child.stdin.take().ok_or_else(|| {
+        RenderSubprocessError::SpawnFailed("render subprocess stdin was not piped".to_string())
+    })?;
+    if let Err(err) = stdin.write_all(styled_source.as_bytes()).await {
+        drop(stdin);
+        let output = child
+            .wait_with_output()
+            .await
+            .map_err(|wait_err| RenderSubprocessError::SpawnFailed(wait_err.to_string()))?;
+        return Err(RenderSubprocessError::ChildCrashed(format!(
+            "failed writing DOT to child stdin: {err}; {}",
+            render_subprocess_failure(&output.status, &output.stderr)
+        )));
+    }
+    drop(stdin);
+
+    let output = child
+        .wait_with_output()
+        .await
+        .map_err(|err| RenderSubprocessError::SpawnFailed(err.to_string()))?;
+
+    if !output.status.success() {
+        return Err(render_subprocess_failure(&output.status, &output.stderr));
+    }
+
+    if let Some(error) = output.stdout.strip_prefix(RENDER_ERROR_PREFIX) {
+        return Err(RenderSubprocessError::RenderFailed(
+            String::from_utf8_lossy(error).trim().to_string(),
+        ));
+    }
+
+    if output.stdout.starts_with(b"<?xml") || output.stdout.starts_with(b"<svg") {
+        return Ok(output.stdout);
+    }
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    Err(RenderSubprocessError::ProtocolViolation(format!(
+        "stdout did not contain SVG or error protocol (stdout: {:?}, stderr: {:?})",
+        stdout.trim(),
+        stderr.trim()
+    )))
+}
+
+async fn render_graph_response(
+    dot_source: &str,
+    exe_override: Option<&std::path::Path>,
+) -> Response {
+    use fabro_graphviz::render::{inject_dot_style_defaults, postprocess_svg};
+
+    let styled_source = inject_dot_style_defaults(dot_source);
+    match render_dot_subprocess(&styled_source, exe_override).await {
+        Ok(raw) => {
+            let bytes = postprocess_svg(raw);
             (StatusCode::OK, [("content-type", "image/svg+xml")], bytes).into_response()
         }
-        Ok(Err(e)) => ApiError::new(StatusCode::BAD_REQUEST, e.to_string()).into_response(),
-        Err(e) => ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
+        Err(RenderSubprocessError::RenderFailed(err)) => {
+            ApiError::new(StatusCode::BAD_REQUEST, err).into_response()
+        }
+        Err(err) => {
+            ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response()
+        }
     }
+}
+
+pub(crate) async fn render_graph_bytes(dot_source: &str) -> Response {
+    render_graph_response(dot_source, None).await
+}
+
+#[cfg(test)]
+async fn render_graph_bytes_with_exe_override(
+    dot_source: &str,
+    exe_override: Option<&std::path::Path>,
+) -> Response {
+    render_graph_response(dot_source, exe_override).await
 }
 
 async fn get_graph(
@@ -6230,6 +6388,10 @@ async fn get_graph(
 
 #[cfg(test)]
 mod tests {
+    #[cfg(unix)]
+    use std::os::unix::fs::PermissionsExt;
+    #[cfg(unix)]
+    use std::path::{Path, PathBuf};
     #[cfg(unix)]
     use std::process::Stdio;
 
@@ -7832,6 +7994,70 @@ slug = "fabro"
             "expected SVG content, got: {}",
             &svg[..svg.len().min(200)]
         );
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn render_graph_bytes_returns_bad_request_for_render_error_protocol() {
+        let (_dir, script_path) = write_test_executable(
+            "#!/bin/sh\nprintf 'RENDER_ERROR:failed to parse DOT source'\nexit 0\n",
+        );
+
+        let response =
+            render_graph_bytes_with_exe_override("not valid dot {{{", Some(&script_path)).await;
+
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    }
+
+    #[cfg(unix)]
+    fn write_test_executable(script: &str) -> (tempfile::TempDir, PathBuf) {
+        let dir = tempfile::tempdir().expect("temp dir should exist");
+        let path = dir.path().join("fake-fabro");
+        std::fs::write(&path, script).expect("script should be written");
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755))
+            .expect("script should be executable");
+        (dir, path)
+    }
+
+    #[cfg(unix)]
+    async fn render_graph_with_override(dot_source: &str, exe_path: &Path) -> Response {
+        render_graph_bytes_with_exe_override(dot_source, Some(exe_path)).await
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn render_dot_subprocess_returns_child_crashed_for_nonzero_exit() {
+        let (_dir, script_path) = write_test_executable("#!/bin/sh\nexit 1\n");
+
+        let result = render_dot_subprocess("digraph { a -> b }", Some(&script_path)).await;
+
+        assert!(matches!(
+            result,
+            Err(RenderSubprocessError::ChildCrashed(_))
+        ));
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn render_graph_bytes_returns_internal_server_error_for_child_crash() {
+        let (_dir, script_path) = write_test_executable("#!/bin/sh\nexit 1\n");
+
+        let response = render_graph_with_override("digraph { a -> b }", &script_path).await;
+
+        assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn render_dot_subprocess_returns_protocol_violation_for_garbage_stdout() {
+        let (_dir, script_path) = write_test_executable("#!/bin/sh\nprintf 'garbage'\nexit 0\n");
+
+        let result = render_dot_subprocess("digraph { a -> b }", Some(&script_path)).await;
+
+        assert!(matches!(
+            result,
+            Err(RenderSubprocessError::ProtocolViolation(_))
+        ));
     }
 
     #[tokio::test]

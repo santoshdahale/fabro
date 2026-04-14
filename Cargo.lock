@@ -1588,6 +1588,7 @@ dependencies = [
  "fabro-devcontainer",
  "fabro-github",
  "fabro-graphviz",
+ "fabro-graphviz-sys",
  "fabro-hooks",
  "fabro-http",
  "fabro-interview",

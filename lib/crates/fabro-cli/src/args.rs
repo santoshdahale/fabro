@@ -1023,6 +1023,9 @@ pub(crate) enum Commands {
         /// Path to the JSON event file
         path: PathBuf,
     },
+    /// Render a DOT graph to SVG (internal)
+    #[command(name = "__render-graph", hide = true)]
+    RenderGraph,
     /// Build a panic event and write JSON to stdout (internal testing)
     #[cfg(debug_assertions)]
     #[command(name = "__test_panic", hide = true)]
@@ -1100,6 +1103,7 @@ impl Commands {
             },
             Self::SendAnalytics { .. } => "__send_analytics",
             Self::SendPanic { .. } => "__send_panic",
+            Self::RenderGraph => "__render-graph",
             #[cfg(debug_assertions)]
             Self::TestPanic { .. } => "__test_panic",
         }

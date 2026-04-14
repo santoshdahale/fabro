@@ -29,6 +29,7 @@ mod preflight;
 mod provider;
 mod provider_login;
 mod ps;
+mod render_graph;
 mod repo;
 mod repo_deinit;
 mod repo_init;
