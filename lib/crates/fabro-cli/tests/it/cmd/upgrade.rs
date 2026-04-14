@@ -15,7 +15,7 @@ fn help() {
 
     Options:
           --json               Output as JSON [env: FABRO_JSON=]
-          --version <VERSION>  Target version (e.g. "0.5.0" or "v0.5.0")
+          --version <VERSION>  Target version (e.g. "0.5.0", "v0.5.0", or "v0.177.0-alpha.1")
           --debug              Enable DEBUG-level logging (default is INFO) [env: FABRO_DEBUG=]
           --force              Upgrade even if already on the target version
           --dry-run            Preview what would happen without making changes
@@ -60,5 +60,75 @@ fn upgrade_already_on_current_version_short_circuits() {
     ----- stdout -----
     ----- stderr -----
     Already on version [VERSION]
+    ");
+}
+
+#[test]
+fn upgrade_dry_run_prefers_latest_stable_release_for_gh_backend() {
+    let context = test_context!();
+    let fake_bin = context.temp_dir.join("fake-bin");
+    std::fs::create_dir_all(&fake_bin).unwrap();
+
+    let fake_gh = fake_bin.join("gh");
+    std::fs::write(
+        &fake_gh,
+        r#"#!/bin/sh
+set -eu
+
+case "$1" in
+  --version)
+    echo "gh version 2.89.0"
+    ;;
+  auth)
+    test "$2" = "status"
+    ;;
+  api)
+    test "$2" = "repos/fabro-sh/fabro/releases/latest"
+    test "$3" = "--jq"
+    test "$4" = ".tag_name"
+    echo "v0.176.3"
+    ;;
+  release)
+    test "$2" = "view"
+    echo "v0.177.0-alpha.1"
+    ;;
+  *)
+    echo "unexpected gh invocation: $*" >&2
+    exit 1
+    ;;
+esac
+"#,
+    )
+    .unwrap();
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+
+        std::fs::set_permissions(&fake_gh, std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
+
+    let mut filters = context.filters();
+    filters.push((
+        regex::escape(env!("CARGO_PKG_VERSION")),
+        "[VERSION]".to_string(),
+    ));
+    filters.push((
+        "(aarch64-apple-darwin|x86_64-unknown-linux-gnu|aarch64-unknown-linux-gnu)".to_string(),
+        "[TARGET]".to_string(),
+    ));
+
+    let path = format!("{}:{}", fake_bin.display(), std::env::var("PATH").unwrap());
+    let mut cmd = context.command();
+    cmd.env("PATH", path).args(["upgrade", "--dry-run"]);
+
+    fabro_snapshot!(filters, cmd, @"
+    success: true
+    exit_code: 0
+    ----- stdout -----
+    ----- stderr -----
+    Would upgrade fabro from [VERSION] to 0.176.3
+      tag: v0.176.3
+      target: [TARGET]
     ");
 }

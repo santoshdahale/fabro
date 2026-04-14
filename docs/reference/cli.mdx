@@ -748,13 +748,16 @@ Download and install a newer version of Fabro from GitHub releases. Verifies the
 fabro upgrade
 fabro upgrade --dry-run
 fabro upgrade --version 0.6.0
+fabro upgrade --version v0.177.0-alpha.1
 ```
 
 | Flag | Description |
 |---|---|
-| `--version <VERSION>` | Target version (e.g. `0.5.0` or `v0.5.0`). Defaults to the latest release. |
+| `--version <VERSION>` | Target version (e.g. `0.5.0`, `v0.5.0`, or `v0.177.0-alpha.1`). Defaults to the latest stable release. |
 | `--force` | Upgrade even if already on the target version |
 | `--dry-run` | Preview what would happen without making changes |
+
+Plain `fabro upgrade` tracks the latest stable release. Use `--version` to install an explicitly named pre-release.
 
 Fabro refuses to downgrade unless you specify an explicit `--version`. A daily background check notifies you when a new version is available — disable it with `upgrade_check = false` in [`settings.toml`](/reference/user-configuration#upgrade_check) or the `--no-upgrade-check` global flag.
 

@@ -840,7 +840,7 @@ pub(crate) struct ExecArgs {
 
 #[derive(Args)]
 pub(crate) struct UpgradeArgs {
-    /// Target version (e.g. "0.5.0" or "v0.5.0")
+    /// Target version (e.g. "0.5.0", "v0.5.0", or "v0.177.0-alpha.1")
     #[arg(long)]
     pub(crate) version: Option<String>,
 

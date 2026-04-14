@@ -37,21 +37,17 @@ impl Backend {
             Self::Gh => {
                 let output = TokioCommand::new("gh")
                     .args([
-                        "release",
-                        "view",
-                        "--repo",
-                        GITHUB_REPO,
-                        "--json",
-                        "tagName",
-                        "-q",
-                        ".tagName",
+                        "api",
+                        &format!("repos/{GITHUB_REPO}/releases/latest"),
+                        "--jq",
+                        ".tag_name",
                     ])
                     .output()
                     .await
-                    .context("failed to run `gh release view`")?;
+                    .context("failed to run `gh api repos/.../releases/latest`")?;
                 if !output.status.success() {
                     let stderr = String::from_utf8_lossy(&output.stderr);
-                    bail!("gh release view failed: {stderr}");
+                    bail!("gh api repos/.../releases/latest failed: {stderr}");
                 }
                 Ok(String::from_utf8(output.stdout)?.trim().to_string())
             }

@@ -67,8 +67,13 @@ ASSET="fabro-${TARGET}.tar.gz"
 TMPDIR="$(mktemp -d)"
 trap 'rm -rf "$TMPDIR"' EXIT
 
+TAG="$(gh api "repos/${REPO}/releases/latest" --jq '.tag_name')"
+if [ -z "$TAG" ]; then
+  error "Could not resolve the latest stable release tag"
+fi
+
 dim "Downloading fabro for ${TARGET}..."
-gh release download --repo "$REPO" --pattern "$ASSET" --dir "$TMPDIR" --clobber
+gh release download "$TAG" --repo "$REPO" --pattern "$ASSET" --dir "$TMPDIR" --clobber
 
 dim "Extracting..."
 tar xzf "${TMPDIR}/${ASSET}" -C "$TMPDIR"

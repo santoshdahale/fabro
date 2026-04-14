@@ -32,9 +32,11 @@ jobs:
         with:
           persist-credentials: false
 
-      - uses: dtolnay/rust-toolchain@631a55b12751854ce901bb631d5902ceb48146f7 # stable
-        with:
-          targets: ${{ matrix.target }}
+      - name: Set up Rust
+        run: |
+          rustup toolchain install stable --profile minimal --no-self-update
+          rustup default stable
+          rustup target add ${{ matrix.target }}
 
       - name: Build
         run: cargo build --target ${{ matrix.target }} --release
@@ -77,12 +79,19 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           TAG_NAME: ${{ github.ref_name }}
-        run: gh release create "$TAG_NAME" target/distrib/* --generate-notes
+        run: |
+          PRERELEASE_FLAG=""
+          if [[ "$TAG_NAME" == *-* ]]; then
+            PRERELEASE_FLAG="--prerelease"
+          fi
+          gh release create "$TAG_NAME" target/distrib/* --generate-notes $PRERELEASE_FLAG
 
   update-homebrew:
     name: Update Homebrew Formula
     needs: release
+    if: ${{ !contains(github.ref_name, '-') }}
     runs-on: ubuntu-latest
+    environment: release
     permissions:
       contents: read
     steps:
