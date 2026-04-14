@@ -394,9 +394,9 @@ fn settings_local_merges_cli_and_project_defaults() {
     assert_eq!(cfg["workflow"]["graph"].as_str(), Some("workflow.fabro"));
     assert_eq!(cfg["run"]["execution"]["approval"].as_str(), Some("prompt"));
     assert_eq!(cfg["run"]["sandbox"]["provider"].as_str(), Some("daytona"));
-    assert_eq!(run_model_name(&cfg).as_deref(), Some("project-model"));
-    assert_eq!(run_model_provider(&cfg).as_deref(), Some("openai"));
-    assert_eq!(run_goal_inline(&cfg).as_deref(), None);
+    assert_eq!(run_model_name(&cfg), Some("project-model"));
+    assert_eq!(run_model_provider(&cfg), Some("openai"));
+    assert_eq!(run_goal_inline(&cfg), None);
 
     // v2 R22: run.inputs replaces the inherited map wholesale rather than
     // merging by key, so the project layer wipes out the CLI layer's inputs.
@@ -438,9 +438,9 @@ fn settings_local_workflow_name_applies_run_overlay_and_deep_merges() {
         .clone();
 
     let cfg = parse_settings(&output);
-    assert_eq!(run_goal_inline(&cfg).as_deref(), Some("demo goal"));
-    assert_eq!(run_model_name(&cfg).as_deref(), Some("run-model"));
-    assert_eq!(run_model_provider(&cfg).as_deref(), Some("anthropic"));
+    assert_eq!(run_goal_inline(&cfg), Some("demo goal"));
+    assert_eq!(run_model_name(&cfg), Some("run-model"));
+    assert_eq!(run_model_provider(&cfg), Some("anthropic"));
 
     // v2 R22: run.inputs replaces wholesale, so the workflow layer wins
     // over project and cli.
@@ -701,7 +701,7 @@ shared = "legacy"
         .stderr(predicate::str::contains("ignoring legacy config file"));
 
     let cfg = parse_settings(&assert.get_output().stdout);
-    assert_eq!(run_model_name(&cfg).as_deref(), Some("project-model"));
+    assert_eq!(run_model_name(&cfg), Some("project-model"));
     let vars = run_inputs(&cfg);
     assert_eq!(
         vars.get("shared").and_then(serde_json::Value::as_str),
@@ -862,8 +862,8 @@ shared = "cli"
     assert_eq!(cfg["project"]["directory"].as_str(), Some("."));
     assert_eq!(cfg["workflow"]["graph"].as_str(), Some("workflow.fabro"));
     assert_eq!(cfg["run"]["execution"]["approval"].as_str(), Some("prompt"));
-    assert_eq!(run_model_name(&cfg).as_deref(), Some("server-model"));
-    assert_eq!(run_model_provider(&cfg).as_deref(), Some("openai"));
+    assert_eq!(run_model_name(&cfg), Some("server-model"));
+    assert_eq!(run_model_provider(&cfg), Some("openai"));
     assert_eq!(server_storage_root(&cfg), "/srv/fabro-server");
     assert_eq!(cfg["cli"]["output"]["verbosity"].as_str(), Some("normal"));
 

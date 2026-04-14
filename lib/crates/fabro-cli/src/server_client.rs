@@ -1072,6 +1072,36 @@ async fn ensure_raw_response_success(response: fabro_http::Response) -> Result<(
     bail!("request failed with status {status}: {body}");
 }
 
+fn is_not_found_error<E>(err: &progenitor_client::Error<E>) -> bool
+where
+    E: serde::Serialize + std::fmt::Debug,
+{
+    match err {
+        progenitor_client::Error::ErrorResponse(response) => {
+            response.status() == fabro_http::StatusCode::NOT_FOUND
+        }
+        progenitor_client::Error::UnexpectedResponse(response) => {
+            response.status() == fabro_http::StatusCode::NOT_FOUND
+        }
+        _ => false,
+    }
+}
+fn convert_type<TInput, TOutput>(value: TInput) -> Result<TOutput>
+where
+    TInput: serde::Serialize,
+    TOutput: DeserializeOwned,
+{
+    serde_json::from_value(serde_json::to_value(value)?).map_err(Into::into)
+}
+
+fn non_zero_u64_from_u32(value: u32) -> Option<NonZeroU64> {
+    NonZeroU64::new(u64::from(value))
+}
+
+fn non_zero_u64_from_usize(value: usize) -> Option<NonZeroU64> {
+    u64::try_from(value).ok().and_then(NonZeroU64::new)
+}
+
 #[cfg(test)]
 mod tests {
     use std::sync::{LazyLock, Mutex};
@@ -1140,7 +1170,7 @@ mod tests {
             .record_path();
         record::write_server_record(&record_path, &record::ServerRecord {
             pid:            std::process::id(),
-            bind:           fabro_server::bind::Bind::Unix(temp_home.path().join("fabro.sock")),
+            bind:           Bind::Unix(temp_home.path().join("fabro.sock")),
             log_path:       storage.path().join("server.log"),
             dev_token_path: Some(token_path),
             started_at:     chrono::Utc::now(),
@@ -1198,34 +1228,4 @@ mod tests {
         assert!(remote_url_targets_local_host("http://0.0.0.0:32276"));
         assert!(!remote_url_targets_local_host("https://example.com"));
     }
-}
-
-fn is_not_found_error<E>(err: &progenitor_client::Error<E>) -> bool
-where
-    E: serde::Serialize + std::fmt::Debug,
-{
-    match err {
-        progenitor_client::Error::ErrorResponse(response) => {
-            response.status() == fabro_http::StatusCode::NOT_FOUND
-        }
-        progenitor_client::Error::UnexpectedResponse(response) => {
-            response.status() == fabro_http::StatusCode::NOT_FOUND
-        }
-        _ => false,
-    }
-}
-fn convert_type<TInput, TOutput>(value: TInput) -> Result<TOutput>
-where
-    TInput: serde::Serialize,
-    TOutput: DeserializeOwned,
-{
-    serde_json::from_value(serde_json::to_value(value)?).map_err(Into::into)
-}
-
-fn non_zero_u64_from_u32(value: u32) -> Option<NonZeroU64> {
-    NonZeroU64::new(u64::from(value))
-}
-
-fn non_zero_u64_from_usize(value: usize) -> Option<NonZeroU64> {
-    u64::try_from(value).ok().and_then(NonZeroU64::new)
 }
