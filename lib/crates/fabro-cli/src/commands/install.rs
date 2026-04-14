@@ -25,7 +25,7 @@ use fabro_types::settings::{CliSettings, SettingsLayer};
 use fabro_util::printer::Printer;
 use fabro_util::terminal::Styles;
 use fabro_util::version::FABRO_VERSION;
-use fabro_util::{dev_token, session_secret};
+use fabro_util::{dev_token, path, session_secret};
 use futures::future::BoxFuture;
 use rand::Rng;
 use ring::rand::SystemRandom;
@@ -1536,21 +1536,20 @@ async fn run_install_inner(
         "  {} Saved {} runtime secrets to {}",
         s.green.apply_to("✔"),
         server_env_pairs.len(),
-        fabro_util::path::contract_tilde(&Storage::new(&storage_dir).server_state().env_path())
-            .display()
+        path::contract_tilde(&Storage::new(&storage_dir).server_state().env_path()).display()
     );
     fabro_util::printerr!(
         printer,
         "  {} Saved {} workflow-visible secrets to {}",
         s.green.apply_to("✔"),
         vault_secrets.len(),
-        fabro_util::path::contract_tilde(&Storage::new(&storage_dir).secrets_path()).display()
+        path::contract_tilde(&Storage::new(&storage_dir).secrets_path()).display()
     );
     fabro_util::printerr!(
         printer,
         "  {} Wrote {}",
         s.green.apply_to("✔"),
-        fabro_util::path::contract_tilde(&config_path).display()
+        path::contract_tilde(&config_path).display()
     );
     if server_was_running {
         fabro_util::printerr!(
