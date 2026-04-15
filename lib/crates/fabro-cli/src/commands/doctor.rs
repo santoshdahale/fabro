@@ -410,6 +410,17 @@ pub(crate) async fn run_doctor(
         return Ok(1);
     }
 
+    report.sections.push(CheckSection {
+        title:  "Server".to_string(),
+        checks: vec![CheckResult {
+            name:        "Location".to_string(),
+            status:      CheckStatus::Pass,
+            summary:     server.base_url().to_string(),
+            details:     vec![],
+            remediation: None,
+        }],
+    });
+
     match server.api().run_diagnostics().send().await {
         Ok(response) => {
             let diagnostics = response.into_inner();
