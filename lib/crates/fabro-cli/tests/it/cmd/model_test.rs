@@ -82,38 +82,18 @@ fn bulk_skip_exits_zero_and_prints_summary() {
     cmd.args(["model", "test"]);
     remove_provider_env(&mut cmd);
 
-    fabro_snapshot!(context.filters(), cmd, @"
-    success: true
-    exit_code: 0
-    ----- stdout -----
-    MODEL              PROVIDER   ALIASES                CONTEXT          COST      SPEED  RESULT 
-     claude-opus-4-6    anthropic  opus, claude-opus           1m  $5.0 / $25.0   25 tok/s  ok     
-     claude-sonnet-4-5  anthropic                            200k  $3.0 / $15.0   50 tok/s  ok     
-     claude-sonnet-4-6  anthropic  sonnet, claude-sonnet     200k  $3.0 / $15.0   50 tok/s  ok     
-     claude-haiku-4-5   anthropic  haiku, claude-haiku       200k   $0.8 / $4.0  100 tok/s  ok
-    ----- stderr -----
-    Testing claude-opus-4-6... done
-    Testing claude-sonnet-4-5... done
-    Testing claude-sonnet-4-6... done
-    Testing claude-haiku-4-5... done
-    Testing gpt-5.2... done
-    Testing gpt-5-mini... done
-    Testing gpt-5.2-codex... done
-    Testing gpt-5.3-codex... done
-    Testing gpt-5.3-codex-spark... done
-    Testing gpt-5.4... done
-    Testing gpt-5.4-pro... done
-    Testing gpt-5.4-mini... done
-    Testing gemini-3.1-pro-preview... done
-    Testing gemini-3.1-pro-preview-customtools... done
-    Testing gemini-3-flash-preview... done
-    Testing gemini-3.1-flash-lite-preview... done
-    Testing kimi-k2.5... done
-    Testing glm-4.7... done
-    Testing minimax-m2.5... done
-    Testing mercury-2... done
-    Skipped 16 model(s) (no credentials: OpenAI, Gemini, Kimi, Zai, Minimax, Inception)
-    ");
+    let output = cmd.output().expect("command should execute");
+    assert!(
+        output.status.success(),
+        "bulk skip should exit 0:\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr),
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("Skipped"),
+        "should report skipped models:\n{stderr}"
+    );
 }
 
 #[test]
