@@ -65,6 +65,11 @@ enum GitWorkflowKind {
     Noop,
 }
 
+/// Returns the repo-relative path to a test fixture.
+///
+/// Prefer `TestContext::install_fixture` for tests that run `fabro run`,
+/// since config discovery walks from the workflow file's parent directory
+/// and can find the repo's `.fabro/project.toml`.
 pub(crate) fn fixture(name: &str) -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
         .join(format!("../../../test/{name}"))
@@ -115,7 +120,7 @@ fn run_success_in(context: &TestContext, args: &[&str], cwd: &Path) -> Output {
 }
 
 pub(crate) fn setup_completed_dry_run(context: &TestContext) -> RunSetup {
-    let workflow = fixture("simple.fabro");
+    let workflow = context.install_fixture("simple.fabro");
     run_completed_dry_run(context, &workflow)
 }
 
@@ -160,7 +165,7 @@ fn run_completed_dry_run(context: &TestContext, workflow: &Path) -> RunSetup {
 }
 
 pub(crate) fn setup_created_dry_run(context: &TestContext) -> RunSetup {
-    let workflow = fixture("simple.fabro");
+    let workflow = context.install_fixture("simple.fabro");
     run_created_dry_run(context, &workflow)
 }
 
@@ -228,7 +233,7 @@ fn fast_simple_workflow(context: &TestContext) -> PathBuf {
     reason = "This sync integration helper polls run artifacts after spawning a detached CLI process."
 )]
 pub(crate) fn setup_detached_dry_run(context: &TestContext) -> RunSetup {
-    let workflow = fixture("simple.fabro");
+    let workflow = context.install_fixture("simple.fabro");
     let run_id = unique_run_id();
     let mut cmd = context.run_cmd();
     cmd.current_dir(&context.temp_dir);

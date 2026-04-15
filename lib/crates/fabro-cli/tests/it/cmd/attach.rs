@@ -9,7 +9,7 @@ use serde_json::Value;
 use super::support::{
     output_stdout, resolve_run, server_endpoint, wait_for_status, write_gated_workflow,
 };
-use crate::support::{example_fixture, fabro_json_snapshot, run_output_filters, unique_run_id};
+use crate::support::{fabro_json_snapshot, run_output_filters, unique_run_id};
 
 const SHARED_DAEMON_TIMEOUT: Duration = Duration::from_secs(30);
 
@@ -121,6 +121,7 @@ fn wait_for_output_signal(
 fn attach_replays_completed_detached_run() {
     let context = test_context!();
     let run_id = unique_run_id();
+    let workflow = context.install_fixture("simple.fabro");
 
     context
         .command()
@@ -132,7 +133,7 @@ fn attach_replays_completed_detached_run() {
             "--detach",
             "--run-id",
             run_id.as_str(),
-            example_fixture("simple.fabro").to_str().unwrap(),
+            workflow.to_str().unwrap(),
         ])
         .assert()
         .success();

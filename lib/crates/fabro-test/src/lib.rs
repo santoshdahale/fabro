@@ -1105,6 +1105,25 @@ impl TestContext {
         self
     }
 
+    /// Copy a fixture file from the repo `test/` directory into `temp_dir`,
+    /// isolating the test from the repo's `.fabro/project.toml`.
+    ///
+    /// Returns the path to the copied file inside `temp_dir`.
+    pub fn install_fixture(&self, name: &str) -> PathBuf {
+        let src =
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(format!("../../../test/{name}"));
+        let src = src
+            .canonicalize()
+            .unwrap_or_else(|_| panic!("fixture {name} not found at {}", src.display()));
+        let dest = self.temp_dir.join(name);
+        if let Some(parent) = dest.parent() {
+            std::fs::create_dir_all(parent).expect("failed to create parent dirs");
+        }
+        std::fs::copy(&src, &dest)
+            .unwrap_or_else(|_| panic!("failed to copy fixture {name} to {}", dest.display()));
+        dest
+    }
+
     /// Initialize a git repository in `temp_dir`.
     #[expect(
         clippy::disallowed_methods,

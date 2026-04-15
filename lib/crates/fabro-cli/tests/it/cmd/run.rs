@@ -7,7 +7,7 @@ use httpmock::MockServer;
 use serde_json::Value;
 
 use super::support::{output_stderr, wait_for_event_names};
-use crate::support::{example_fixture, fabro_json_snapshot, run_output_filters, unique_run_id};
+use crate::support::{fabro_json_snapshot, run_output_filters, unique_run_id};
 
 fn run_status_response(run_id: &str, status: &str) -> serde_json::Value {
     serde_json::json!({
@@ -185,6 +185,7 @@ fn detach_uses_explicit_server_target_and_prints_remote_run_id() {
             .body(run_status_response(run_id.as_str(), "queued").to_string());
     });
 
+    let workflow = context.install_fixture("simple.fabro");
     let output = context
         .run_cmd()
         .args([
@@ -193,7 +194,7 @@ fn detach_uses_explicit_server_target_and_prints_remote_run_id() {
             "--detach",
             "--dry-run",
             "--auto-approve",
-            example_fixture("simple.fabro").to_str().unwrap(),
+            workflow.to_str().unwrap(),
         ])
         .output()
         .expect("command should execute");
@@ -239,13 +240,14 @@ fn detach_uses_configured_server_target_without_server_flag() {
         ),
     );
 
+    let workflow = context.install_fixture("simple.fabro");
     let output = context
         .run_cmd()
         .args([
             "--detach",
             "--dry-run",
             "--auto-approve",
-            example_fixture("simple.fabro").to_str().unwrap(),
+            workflow.to_str().unwrap(),
         ])
         .output()
         .expect("command should execute");
@@ -358,6 +360,7 @@ digraph VaultWorkerLlm {
 #[test]
 fn detach_rejects_storage_dir_flag() {
     let context = test_context!();
+    let workflow = context.install_fixture("simple.fabro");
     let output = context
         .run_cmd()
         .args([
@@ -367,7 +370,7 @@ fn detach_rejects_storage_dir_flag() {
             "--dry-run",
             "--auto-approve",
             "--no-retro",
-            example_fixture("simple.fabro").to_str().unwrap(),
+            workflow.to_str().unwrap(),
         ])
         .output()
         .expect("command should execute");
@@ -417,6 +420,7 @@ fn detach_cli_server_target_overrides_configured_server_target() {
         ),
     );
 
+    let workflow = context.install_fixture("simple.fabro");
     let output = context
         .run_cmd()
         .args([
@@ -425,7 +429,7 @@ fn detach_cli_server_target_overrides_configured_server_target() {
             "--detach",
             "--dry-run",
             "--auto-approve",
-            example_fixture("simple.fabro").to_str().unwrap(),
+            workflow.to_str().unwrap(),
         ])
         .output()
         .expect("command should execute");
@@ -521,6 +525,7 @@ fn remote_foreground_run_consumes_paginated_events_and_prints_server_backed_summ
             .body(remote_run_state_response().to_string());
     });
 
+    let workflow = context.install_fixture("simple.fabro");
     let output = context
         .run_cmd()
         .args([
@@ -528,7 +533,7 @@ fn remote_foreground_run_consumes_paginated_events_and_prints_server_backed_summ
             &format!("{}/api/v1", server.base_url()),
             "--dry-run",
             "--auto-approve",
-            example_fixture("simple.fabro").to_str().unwrap(),
+            workflow.to_str().unwrap(),
         ])
         .output()
         .expect("command should execute");
@@ -630,16 +635,17 @@ include = ["assets/**"]
 #[test]
 fn dry_run_simple() {
     let context = test_context!();
+    let workflow = context.install_fixture("simple.fabro");
     let mut cmd = context.run_cmd();
     cmd.args(["--dry-run", "--auto-approve"]);
-    cmd.arg(example_fixture("simple.fabro"));
+    cmd.arg(&workflow);
     fabro_snapshot!(run_output_filters(&context), cmd, @"
     success: true
     exit_code: 0
     ----- stdout -----
     ----- stderr -----
     Workflow: Simple (4 nodes, 3 edges)
-    Graph: [FIXTURES]/simple.fabro
+    Graph: [TEMP_DIR]/simple.fabro
     Goal: Run tests and report results
 
         Run: [ULID]
@@ -671,10 +677,11 @@ fn dry_run_with_goal_file_reads_contents_into_goal() {
     let goal_path = goal_dir.path().join("goal.md");
     std::fs::write(&goal_path, "Ship the rate-limiting feature end to end.\n").unwrap();
 
+    let workflow = context.install_fixture("simple.fabro");
     let mut cmd = context.run_cmd();
     cmd.args(["--dry-run", "--auto-approve", "--goal-file"]);
     cmd.arg(&goal_path);
-    cmd.arg(example_fixture("simple.fabro"));
+    cmd.arg(&workflow);
 
     let output = cmd.output().expect("run command should execute");
     assert!(
@@ -698,10 +705,11 @@ fn dry_run_rejects_goal_and_goal_file_together() {
     let goal_path = goal_dir.path().join("goal.md");
     std::fs::write(&goal_path, "never read").unwrap();
 
+    let workflow = context.install_fixture("simple.fabro");
     let mut cmd = context.run_cmd();
     cmd.args(["--dry-run", "--goal", "inline override", "--goal-file"]);
     cmd.arg(&goal_path);
-    cmd.arg(example_fixture("simple.fabro"));
+    cmd.arg(&workflow);
     let output = cmd.output().expect("run command should execute");
     assert!(
         !output.status.success(),
@@ -720,6 +728,7 @@ fn dry_run_rejects_goal_and_goal_file_together() {
 fn dry_run_persists_event_history_in_store() {
     let context = test_context!();
     let run_id = unique_run_id();
+    let workflow = context.install_fixture("simple.fabro");
 
     context
         .command()
@@ -731,7 +740,7 @@ fn dry_run_persists_event_history_in_store() {
             "local",
             "--run-id",
             run_id.as_str(),
-            example_fixture("simple.fabro").to_str().unwrap(),
+            workflow.to_str().unwrap(),
         ])
         .assert()
         .success();
@@ -818,6 +827,7 @@ fn dry_run_persists_event_history_in_store() {
 fn run_id_passthrough_uses_provided_ulid() {
     let context = test_context!();
     let run_id = unique_run_id();
+    let workflow = context.install_fixture("simple.fabro");
 
     context
         .command()
@@ -827,7 +837,7 @@ fn run_id_passthrough_uses_provided_ulid() {
             "--auto-approve",
             "--run-id",
             run_id.as_str(),
-            example_fixture("simple.fabro").to_str().unwrap(),
+            workflow.to_str().unwrap(),
         ])
         .assert()
         .success();
@@ -902,12 +912,13 @@ fn json_run_requires_manual_input_for_human_gates_without_auto_approve() {
 #[test]
 fn detach_prints_ulid_and_exits() {
     let context = test_context!();
+    let workflow = context.install_fixture("simple.fabro");
     let mut cmd = context.run_cmd();
     cmd.args([
         "--detach",
         "--dry-run",
         "--auto-approve",
-        example_fixture("simple.fabro").to_str().unwrap(),
+        workflow.to_str().unwrap(),
     ]);
     fabro_snapshot!(context.filters(), cmd, @"
     success: true
@@ -922,6 +933,7 @@ fn detach_prints_ulid_and_exits() {
 fn detach_creates_run_dir_with_detach_log() {
     let context = test_context!();
     let run_id = unique_run_id();
+    let workflow = context.install_fixture("simple.fabro");
 
     context
         .run_cmd()
@@ -931,7 +943,7 @@ fn detach_creates_run_dir_with_detach_log() {
             "--auto-approve",
             "--run-id",
             run_id.as_str(),
-            example_fixture("simple.fabro").to_str().unwrap(),
+            workflow.to_str().unwrap(),
         ])
         .assert()
         .success();

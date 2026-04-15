@@ -4,7 +4,7 @@ use fabro_test::test_context;
 use serde_json::Value;
 
 use super::{fixture, run_state, timeout_for};
-use crate::support::{example_fixture, fabro_json_snapshot, unique_run_id};
+use crate::support::{fabro_json_snapshot, unique_run_id};
 
 #[fabro_macros::e2e_test()]
 fn local_run_lifecycle() {
@@ -107,6 +107,7 @@ fn local_run_lifecycle() {
 fn dry_run_create_start_attach_works_with_default_run_lookup() {
     let context = test_context!();
     let run_id = unique_run_id();
+    let workflow = context.install_fixture("simple.fabro");
 
     context
         .command()
@@ -116,7 +117,7 @@ fn dry_run_create_start_attach_works_with_default_run_lookup() {
             "--auto-approve",
             "--run-id",
             run_id.as_str(),
-            example_fixture("simple.fabro").to_str().unwrap(),
+            workflow.to_str().unwrap(),
         ])
         .assert()
         .success();
@@ -154,6 +155,7 @@ fn dry_run_create_start_attach_works_with_default_run_lookup() {
 fn dry_run_detach_attach_works_with_default_run_lookup() {
     let context = test_context!();
     let run_id = unique_run_id();
+    let workflow = context.install_fixture("simple.fabro");
 
     context
         .command()
@@ -164,7 +166,7 @@ fn dry_run_detach_attach_works_with_default_run_lookup() {
             "--auto-approve",
             "--run-id",
             run_id.as_str(),
-            example_fixture("simple.fabro").to_str().unwrap(),
+            workflow.to_str().unwrap(),
         ])
         .assert()
         .success();

@@ -1,20 +1,21 @@
 use fabro_test::{fabro_snapshot, test_context};
 
-use crate::support::{example_fixture, run_output_filters};
+use crate::support::run_output_filters;
 
 #[test]
 fn dry_run_branching() {
     let context = test_context!();
+    let workflow = context.install_fixture("branching.fabro");
     let mut cmd = context.run_cmd();
     cmd.args(["--dry-run", "--auto-approve"]);
-    cmd.arg(example_fixture("branching.fabro"));
+    cmd.arg(&workflow);
     fabro_snapshot!(run_output_filters(&context), cmd, @"
     success: true
     exit_code: 0
     ----- stdout -----
     ----- stderr -----
     Workflow: Branch (6 nodes, 6 edges)
-    Graph: [FIXTURES]/branching.fabro
+    Graph: [TEMP_DIR]/branching.fabro
     Goal: Implement and validate a feature
 
     warning [node: implement]: Node 'implement' has goal_gate=true but no retry_target or fallback_retry_target (goal_gate_has_retry)
@@ -41,16 +42,17 @@ fn dry_run_branching() {
 #[test]
 fn dry_run_conditions() {
     let context = test_context!();
+    let workflow = context.install_fixture("conditions.fabro");
     let mut cmd = context.run_cmd();
     cmd.args(["--dry-run", "--auto-approve"]);
-    cmd.arg(example_fixture("conditions.fabro"));
+    cmd.arg(&workflow);
     fabro_snapshot!(run_output_filters(&context), cmd, @"
     success: true
     exit_code: 0
     ----- stdout -----
     ----- stderr -----
     Workflow: Conditions (5 nodes, 5 edges)
-    Graph: [FIXTURES]/conditions.fabro
+    Graph: [TEMP_DIR]/conditions.fabro
     Goal: Test condition evaluation with OR and parentheses
 
         Run: [ULID]
@@ -74,16 +76,17 @@ fn dry_run_conditions() {
 #[test]
 fn dry_run_parallel() {
     let context = test_context!();
+    let workflow = context.install_fixture("parallel.fabro");
     let mut cmd = context.run_cmd();
     cmd.args(["--dry-run", "--auto-approve"]);
-    cmd.arg(example_fixture("parallel.fabro"));
+    cmd.arg(&workflow);
     fabro_snapshot!(run_output_filters(&context), cmd, @"
     success: true
     exit_code: 0
     ----- stdout -----
     ----- stderr -----
     Workflow: Parallel (7 nodes, 7 edges)
-    Graph: [FIXTURES]/parallel.fabro
+    Graph: [TEMP_DIR]/parallel.fabro
     Goal: Test parallel and fan-in execution
 
         Run: [ULID]
@@ -108,16 +111,17 @@ fn dry_run_parallel() {
 #[test]
 fn dry_run_styled() {
     let context = test_context!();
+    let workflow = context.install_fixture("styled.fabro");
     let mut cmd = context.run_cmd();
     cmd.args(["--dry-run", "--auto-approve"]);
-    cmd.arg(example_fixture("styled.fabro"));
+    cmd.arg(&workflow);
     fabro_snapshot!(run_output_filters(&context), cmd, @"
     success: true
     exit_code: 0
     ----- stdout -----
     ----- stderr -----
     Workflow: Styled (5 nodes, 4 edges)
-    Graph: [FIXTURES]/styled.fabro
+    Graph: [TEMP_DIR]/styled.fabro
     Goal: Build a styled pipeline
 
         Run: [ULID]
@@ -142,16 +146,17 @@ fn dry_run_styled() {
 #[test]
 fn dry_run_legacy_tool() {
     let context = test_context!();
+    let workflow = context.install_fixture("legacy_tool.fabro");
     let mut cmd = context.run_cmd();
     cmd.args(["--dry-run", "--auto-approve"]);
-    cmd.arg(example_fixture("legacy_tool.fabro"));
+    cmd.arg(&workflow);
     fabro_snapshot!(run_output_filters(&context), cmd, @"
     success: true
     exit_code: 0
     ----- stdout -----
     ----- stderr -----
     Workflow: LegacyTool (3 nodes, 2 edges)
-    Graph: [FIXTURES]/legacy_tool.fabro
+    Graph: [TEMP_DIR]/legacy_tool.fabro
     Goal: Verify backwards compatibility with old tool naming
 
         Run: [ULID]

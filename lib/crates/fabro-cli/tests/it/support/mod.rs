@@ -1,5 +1,3 @@
-use std::path::{Path, PathBuf};
-
 use assert_cmd::Command;
 use fabro_store::EventEnvelope;
 use fabro_test::TestContext;
@@ -43,13 +41,6 @@ macro_rules! fabro_json_snapshot {
 }
 
 pub(crate) use fabro_json_snapshot;
-
-pub(crate) fn example_fixture(name: &str) -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join(format!("../../../test/{name}"))
-        .canonicalize()
-        .expect("fixture path should exist")
-}
 
 pub(crate) fn run_output_filters(context: &TestContext) -> Vec<(String, String)> {
     let mut filters = context.filters();
