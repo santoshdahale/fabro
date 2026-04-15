@@ -1,6 +1,6 @@
 import { ChevronRightIcon } from "@heroicons/react/20/solid";
 import { Link, Outlet, useLocation, useParams } from "react-router";
-import { apiJson } from "../api";
+import { apiJsonOrNull } from "../api";
 import type { RunSettings, WorkflowDetailResponse as ApiWorkflowDetail } from "../lib/workflow-api";
 
 export interface WorkflowEntry {
@@ -222,15 +222,24 @@ const tabs = [
 export const handle = { hideHeader: true };
 
 export async function loader({ request, params }: any) {
-  const apiWorkflow = await apiJson<ApiWorkflowDetail>(`/workflows/${params.name}`, { request });
-  const workflow: WorkflowEntry = {
-    name: apiWorkflow.name,
-    slug: apiWorkflow.slug,
-    description: apiWorkflow.description,
-    filename: apiWorkflow.filename,
-    settings: apiWorkflow.settings,
-    graph: apiWorkflow.graph,
-  };
+  const apiWorkflow = await apiJsonOrNull<ApiWorkflowDetail>(`/workflows/${params.name}`, { request });
+  const workflow: WorkflowEntry = apiWorkflow
+    ? {
+        name: apiWorkflow.name,
+        slug: apiWorkflow.slug,
+        description: apiWorkflow.description,
+        filename: apiWorkflow.filename,
+        settings: apiWorkflow.settings,
+        graph: apiWorkflow.graph,
+      }
+    : workflowData[params.name] ?? {
+        name: params.name,
+        slug: params.name,
+        description: "",
+        filename: `${params.name}.fabro`,
+        settings: {},
+        graph: "",
+      };
   return { workflow };
 }
 

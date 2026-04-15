@@ -37,8 +37,7 @@ const columnConfig: {
 }[] = [
   { id: "working", name: "Working", accent: "bg-teal-500", iconColor: "text-teal-500", iconType: "branch", actions: ["Watch", "Steer"] },
   { id: "pending", name: "Pending", accent: "bg-amber", iconColor: "text-amber", iconType: "branch", actions: ["Answer Question"] },
-  { id: "review", name: "Verify", accent: "bg-mint", iconColor: "text-mint", iconType: "pr", actions: ["Resolve"] },
-  { id: "merge", name: "Merge", accent: "bg-teal-300", iconColor: "text-teal-300", iconType: "pr", actions: ["Merge"] },
+  { id: "merge", name: "Complete", accent: "bg-teal-300", iconColor: "text-teal-300", iconType: "pr", actions: ["Merge"] },
 ];
 
 export async function loader({ request }: any) {
@@ -395,7 +394,7 @@ type Column = {
 function BoardColumn({ column }: { column: Column }) {
   const Icon = iconMap[column.iconType];
   return (
-    <div className="flex min-w-[280px] flex-1 flex-col">
+    <div className="flex min-w-0 flex-col">
       <div className="mb-4 flex items-center gap-3">
         <div className={`h-2.5 w-2.5 rounded-full ${column.accent}`} />
         <h3 className="text-sm font-semibold tracking-wide text-fg-2">
@@ -593,7 +592,7 @@ export default function Runs({ loaderData }: any) {
         </div>
 
         {view === "columns" ? (
-          <div className="flex gap-5 overflow-x-auto pb-4">
+          <div className="grid grid-cols-3 gap-5 pb-4">
             {filteredColumns.map((col) => (
               <BoardColumn key={col.id} column={col} />
             ))}

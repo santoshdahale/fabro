@@ -35,6 +35,7 @@ type RouteModule = {
   default: React.ComponentType<any>;
   loader?: RouteObject["loader"];
   action?: RouteObject["action"];
+  handle?: RouteObject["handle"];
   ErrorBoundary?: React.ComponentType<any>;
 };
 
@@ -56,6 +57,7 @@ function route(
     path,
     loader: module.loader,
     action: module.action,
+    handle: module.handle,
     Component: withRouteModule(module),
     ErrorBoundary: module.ErrorBoundary,
     ...extra,
@@ -67,6 +69,7 @@ function indexRoute(module: RouteModule): RouteObject {
     index: true,
     loader: module.loader,
     action: module.action,
+    handle: module.handle,
     Component: withRouteModule(module),
     ErrorBoundary: module.ErrorBoundary,
   };

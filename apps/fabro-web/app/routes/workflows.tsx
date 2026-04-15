@@ -13,7 +13,7 @@ import {
   WrenchIcon,
 } from "@heroicons/react/24/outline";
 import { Link } from "react-router";
-import { apiJson } from "../api";
+import { apiJsonOrNull } from "../api";
 import { timeAgo, timeUntil } from "../lib/time";
 import type { PaginatedWorkflowListResponse } from "../lib/workflow-api";
 
@@ -105,7 +105,8 @@ interface WorkflowData {
 }
 
 export async function loader({ request }: any) {
-  const { data: apiWorkflows } = await apiJson<PaginatedWorkflowListResponse>("/workflows", { request });
+  const result = await apiJsonOrNull<PaginatedWorkflowListResponse>("/workflows", { request });
+  const apiWorkflows = result?.data ?? [];
   const workflows: WorkflowData[] = apiWorkflows.map((w) => ({
     name: w.name,
     slug: w.slug,
