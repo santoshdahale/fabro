@@ -3,6 +3,7 @@ import { CheckCircleIcon, ArrowPathIcon, PauseCircleIcon, XCircleIcon } from "@h
 import { DocumentTextIcon, MapIcon } from "@heroicons/react/24/outline";
 import { CollapsibleFile } from "../components/collapsible-file";
 import { apiJson } from "../api";
+import { isVisibleStage } from "../data/runs";
 import { formatDurationSecs } from "../lib/format";
 import type { PaginatedRunStageList } from "@qltysh/fabro-api-client";
 import type { RunSettings } from "../lib/workflow-api";
@@ -31,7 +32,7 @@ export async function loader({ request, params }: any) {
     apiJson<PaginatedRunStageList>(`/runs/${params.id}/stages`, { request }),
     apiJson<RunSettings>(`/runs/${params.id}/settings`, { request }),
   ]);
-  const stages: Stage[] = apiStages.map((s) => ({
+  const stages: Stage[] = apiStages.filter((s) => isVisibleStage(s.id)).map((s) => ({
     id: s.id,
     name: s.name,
     status: s.status as StageStatus,

@@ -151,6 +151,21 @@
   --diffs-fg-number-deletion-override: rgba(232, 107, 107, 0.5);
 }
 
+/* ── Server-rendered SVG graph overrides ── */
+/* The server injects @media (prefers-color-scheme: dark) but the app uses
+   .dark/.light classes, so we apply dark-mode colors via the class. */
+
+.dark .graph-svg text { fill: #c6d4e0; }
+.dark .graph-svg [stroke="#357f9e"] { stroke: #67B2D7; }
+.dark .graph-svg [stroke="#666666"] { stroke: #5a7a94; }
+.dark .graph-svg polygon[fill="#357f9e"] { fill: #67B2D7; }
+.dark .graph-svg polygon[fill="#666666"] { fill: #5a7a94; }
+.dark .graph-svg ellipse[fill="#ffffff"],
+.dark .graph-svg polygon[fill="#ffffff"] { fill: #1a2b3c; }
+.dark .graph-svg ellipse[stroke="#357f9e"],
+.dark .graph-svg polygon[stroke="#357f9e"] { stroke: #67B2D7; }
+.dark .graph-svg [fill="#1a1a1a"] { fill: #c6d4e0; }
+
 .light {
   --diffs-bg-buffer-override: #ffffff;
   --diffs-bg-context-override: #f8fafc;

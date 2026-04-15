@@ -144,6 +144,13 @@ export function isRunStatus(s: string): s is RunStatus {
   return knownRunStatuses.has(s);
 }
 
+/** Graph control nodes hidden from stage lists in the UI. */
+const hiddenStageIds = new Set(["start", "exit"]);
+
+export function isVisibleStage(id: string): boolean {
+  return !hiddenStageIds.has(id);
+}
+
 export const ciConfig: Record<CiStatus, { label: string; dot: string; text: string }> = {
   passing: { label: "Passing", dot: "bg-mint", text: "text-mint" },
   failing: { label: "Changes needed", dot: "bg-coral", text: "text-coral" },

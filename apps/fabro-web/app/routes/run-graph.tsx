@@ -6,6 +6,7 @@ import { DocumentTextIcon, MapIcon } from "@heroicons/react/24/outline";
 import { useTheme } from "../lib/theme";
 import { getGraphTheme } from "../lib/graph-theme";
 import { apiFetch, apiJsonOrNull } from "../api";
+import { isVisibleStage } from "../data/runs";
 import { formatDurationSecs } from "../lib/format";
 import type { PaginatedRunStageList } from "@qltysh/fabro-api-client";
 
@@ -26,7 +27,7 @@ export async function loader({ request, params }: any) {
     apiJsonOrNull<PaginatedRunStageList>(`/runs/${params.id}/stages`, { request }),
     apiFetch(`/runs/${params.id}/graph`, { request }),
   ]);
-  const stages: Stage[] = (stagesResult?.data ?? []).map((s) => ({
+  const stages: Stage[] = (stagesResult?.data ?? []).filter((s) => isVisibleStage(s.id)).map((s) => ({
     id: s.id,
     name: s.name,
     dotId: s.dot_id ?? s.id,
@@ -208,12 +209,27 @@ export default function RunGraph({ loaderData }: any) {
     let cancelled = false;
 
     async function render() {
-      const { instance } = await import("@viz-js/viz");
-      const viz = await instance();
-      if (cancelled) return;
-
       try {
-        const svg = viz.renderSVGElement(buildDot(direction, graphTheme));
+        let svg: SVGSVGElement;
+
+        if (graphSvg) {
+          // Use server-rendered SVG from the real graph endpoint.
+          const parser = new DOMParser();
+          const doc = parser.parseFromString(graphSvg, "image/svg+xml");
+          const parsed = doc.documentElement;
+          if (!(parsed instanceof SVGSVGElement)) {
+            setError("Invalid SVG from server");
+            return;
+          }
+          svg = parsed;
+        } else {
+          // Fall back to hardcoded demo graph rendered client-side.
+          const { instance } = await import("@viz-js/viz");
+          const viz = await instance();
+          if (cancelled) return;
+          svg = viz.renderSVGElement(buildDot(direction, graphTheme));
+        }
+
         stripGraphTitle(svg);
         annotateRunningNodes(svg, graphTheme, stages);
 
@@ -229,7 +245,7 @@ export default function RunGraph({ loaderData }: any) {
     setPan({ x: 0, y: 0 });
     render();
     return () => { cancelled = true; };
-  }, [direction, graphTheme]);
+  }, [direction, graphTheme, graphSvg]);
 
   const onPointerDown = useCallback((e: React.PointerEvent) => {
     if ((e.target as HTMLElement).closest("button")) return;
@@ -325,7 +341,7 @@ export default function RunGraph({ loaderData }: any) {
       </nav>
 
       <div className="min-w-0 flex-1">
-        <div className="relative rounded-md border border-line bg-panel-alt/40">
+        <div className="graph-svg relative rounded-md border border-line bg-panel-alt/40">
           <div className="absolute right-3 top-3 z-10 flex items-center gap-2">
             <div className="flex items-center gap-0.5 rounded-md border border-line bg-panel/90 p-0.5">
               <button

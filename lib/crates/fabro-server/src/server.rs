@@ -32,10 +32,11 @@ pub use fabro_api::types::{
     PruneRunEntry, PruneRunsRequest, PruneRunsResponse, QuestionType as ApiQuestionType,
     RenderWorkflowGraphDirection, RenderWorkflowGraphRequest, RunArtifactEntry,
     RunArtifactListResponse, RunBilling, RunBillingStage, RunBillingTotals,
-    RunControlAction as ApiRunControlAction, RunError, RunManifest, RunStatus, RunStatusResponse,
-    SandboxFileEntry, SandboxFileListResponse, SecretType as ApiSecretType, ServerSettings,
-    SshAccessRequest, SshAccessResponse, StartRunRequest, StatusReason as ApiStatusReason,
-    SubmitAnswerRequest, SystemFeatures, SystemInfoResponse, SystemRunCounts, WriteBlobResponse,
+    RunControlAction as ApiRunControlAction, RunError, RunManifest, RunStage, RunStatus,
+    RunStatusResponse, SandboxFileEntry, SandboxFileListResponse, SecretType as ApiSecretType,
+    ServerSettings, SshAccessRequest, SshAccessResponse, StageStatus as ApiStageStatus,
+    StartRunRequest, StatusReason as ApiStatusReason, SubmitAnswerRequest, SystemFeatures,
+    SystemInfoResponse, SystemRunCounts, WriteBlobResponse,
 };
 use fabro_auth::parse_credential_secret;
 use fabro_config::{Storage, resolve_server_from_file};
@@ -1080,7 +1081,7 @@ fn real_routes() -> Router<Arc<AppState>> {
         .route("/runs/{id}/pause", post(pause_run))
         .route("/runs/{id}/unpause", post(unpause_run))
         .route("/runs/{id}/graph", get(get_graph))
-        .route("/runs/{id}/stages", get(not_implemented))
+        .route("/runs/{id}/stages", get(list_run_stages))
         .route("/runs/{id}/artifacts", get(list_run_artifacts))
         .route("/runs/{id}/stages/{stageId}/turns", get(not_implemented))
         .route(
@@ -2057,6 +2058,104 @@ async fn get_aggregate_billing(
         by_model,
     };
     (StatusCode::OK, Json(response)).into_response()
+}
+
+async fn list_run_stages(
+    _auth: AuthenticatedService,
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+    Query(_pagination): Query<PaginationParams>,
+) -> Response {
+    let id = match parse_run_id_path(&id) {
+        Ok(id) => id,
+        Err(response) => return response,
+    };
+
+    // Try live run first.
+    let (checkpoint, run_is_active) = {
+        let runs = state.runs.lock().expect("runs lock poisoned");
+        match runs.get(&id) {
+            Some(managed_run) => {
+                let active = !matches!(
+                    managed_run.status,
+                    RunStatus::Completed | RunStatus::Failed | RunStatus::Cancelled
+                );
+                (managed_run.checkpoint.clone(), active)
+            }
+            None => (None, false),
+        }
+    };
+
+    // Fall back to stored run.
+    let (checkpoint, run_is_active) = if checkpoint.is_some() {
+        (checkpoint, run_is_active)
+    } else {
+        match state.store.open_run_reader(&id).await {
+            Ok(run_store) => match run_store.state().await {
+                Ok(run_state) => {
+                    let active = run_state
+                        .status
+                        .as_ref()
+                        .map_or(false, |s| !s.status.is_terminal());
+                    (run_state.checkpoint, active)
+                }
+                Err(_) => (None, false),
+            },
+            Err(_) => return ApiError::not_found("Run not found.").into_response(),
+        }
+    };
+
+    let Some(checkpoint) = checkpoint else {
+        return (
+            StatusCode::OK,
+            Json(ListResponse::new(Vec::<RunStage>::new())),
+        )
+            .into_response();
+    };
+
+    // Get durations from events.
+    let stage_durations = match state.store.open_run_reader(&id).await {
+        Ok(run_store) => match run_store.list_events().await {
+            Ok(events) => fabro_workflow::extract_stage_durations_from_events(&events),
+            Err(_) => HashMap::new(),
+        },
+        Err(_) => HashMap::new(),
+    };
+
+    let mut stages = Vec::new();
+    for node_id in &checkpoint.completed_nodes {
+        let duration_ms = stage_durations.get(node_id).copied().unwrap_or(0);
+        let status = match checkpoint.node_outcomes.get(node_id) {
+            Some(outcome) => match outcome.status {
+                fabro_types::outcome::StageStatus::Success
+                | fabro_types::outcome::StageStatus::PartialSuccess => ApiStageStatus::Completed,
+                fabro_types::outcome::StageStatus::Fail => ApiStageStatus::Failed,
+                fabro_types::outcome::StageStatus::Skipped => ApiStageStatus::Cancelled,
+                fabro_types::outcome::StageStatus::Retry => ApiStageStatus::Pending,
+            },
+            None => ApiStageStatus::Completed,
+        };
+        stages.push(RunStage {
+            id: node_id.clone(),
+            name: node_id.clone(),
+            status,
+            duration_secs: Some(duration_ms as f64 / 1000.0),
+            dot_id: Some(node_id.clone()),
+        });
+    }
+
+    // Add current node as running if the run is still active.
+    if run_is_active && !checkpoint.completed_nodes.contains(&checkpoint.current_node) {
+        stages.push(RunStage {
+            id:            checkpoint.current_node.clone(),
+            name:          checkpoint.current_node.clone(),
+            status:        ApiStageStatus::Running,
+            duration_secs: None,
+            dot_id:        Some(checkpoint.current_node.clone()),
+        });
+    }
+
+    (StatusCode::OK, Json(ListResponse::new(stages))).into_response()
 }
 
 async fn get_run_billing(
@@ -6411,13 +6510,12 @@ async fn get_graph(
     };
     let live_dot_source = {
         let runs = state.runs.lock().expect("runs lock poisoned");
-        match runs.get(&id) {
-            Some(managed_run) => managed_run.dot_source.clone(),
-            None => return ApiError::not_found("Run not found.").into_response(),
-        }
+        runs.get(&id).map(|managed_run| managed_run.dot_source.clone())
     };
-    if !live_dot_source.is_empty() {
-        return render_graph_bytes(&live_dot_source).await;
+    if let Some(dot) = &live_dot_source {
+        if !dot.is_empty() {
+            return render_graph_bytes(dot).await;
+        }
     }
 
     match state.store.open_run_reader(&id).await {

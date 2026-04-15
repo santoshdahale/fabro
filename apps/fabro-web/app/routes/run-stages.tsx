@@ -1,13 +1,12 @@
-import { useState } from "react";
 import { Link, useParams } from "react-router";
-import { ChevronRightIcon } from "@heroicons/react/20/solid";
 import { CheckCircleIcon, ArrowPathIcon, PauseCircleIcon, XCircleIcon } from "@heroicons/react/24/solid";
 import { DocumentTextIcon, MapIcon, CommandLineIcon, ChatBubbleLeftIcon } from "@heroicons/react/24/outline";
-import { ToolRow, ToolBlock } from "../components/tool-use";
+import { ToolBlock } from "../components/tool-use";
 import type { ToolUse } from "../components/tool-use";
-import { apiJson } from "../api";
+import { apiJson, apiJsonOrNull } from "../api";
+import { isVisibleStage } from "../data/runs";
 import { formatDurationSecs } from "../lib/format";
-import type { PaginatedRunStageList, StageTurn as ApiStageTurn, PaginatedStageTurnList } from "@qltysh/fabro-api-client";
+import type { PaginatedRunStageList, StageTurn as ApiStageTurn, PaginatedStageTurnList, PaginatedEventList } from "@qltysh/fabro-api-client";
 
 export const handle = { wide: true };
 
@@ -20,21 +19,113 @@ interface Stage {
   duration: string;
 }
 
+type TurnType =
+  | { kind: "system"; content: string }
+  | { kind: "assistant"; content: string }
+  | { kind: "tool"; tools: ToolUse[] };
+
+interface RawEvent {
+  node_id?: string;
+  event: string;
+  properties?: Record<string, unknown>;
+  text?: string;
+  tool_name?: string;
+  tool_call_id?: string;
+  arguments?: unknown;
+  output?: unknown;
+  is_error?: boolean;
+}
+
+function turnsFromEvents(events: RawEvent[], stageId: string): TurnType[] {
+  const stageEvents = events.filter((e) => e.node_id === stageId);
+  const turns: TurnType[] = [];
+  // Collect tool pairs: started → completed
+  const pendingTools = new Map<string, { toolName: string; input: string }>();
+
+  for (const e of stageEvents) {
+    switch (e.event) {
+      case "stage.prompt":
+        turns.push({ kind: "system", content: e.properties?.text as string ?? e.text ?? "" });
+        break;
+      case "agent.message":
+        turns.push({ kind: "assistant", content: e.properties?.text as string ?? e.text ?? "" });
+        break;
+      case "agent.tool.started": {
+        const callId = e.properties?.tool_call_id as string ?? e.tool_call_id ?? "";
+        pendingTools.set(callId, {
+          toolName: e.properties?.tool_name as string ?? e.tool_name ?? "",
+          input: typeof (e.properties?.arguments ?? e.arguments) === "string"
+            ? (e.properties?.arguments ?? e.arguments) as string
+            : JSON.stringify(e.properties?.arguments ?? e.arguments ?? ""),
+        });
+        break;
+      }
+      case "agent.tool.completed": {
+        const callId = e.properties?.tool_call_id as string ?? e.tool_call_id ?? "";
+        const started = pendingTools.get(callId);
+        const output = e.properties?.output ?? e.output ?? "";
+        const result = typeof output === "string" ? output : JSON.stringify(output);
+        const tool: ToolUse = {
+          id: callId,
+          toolName: started?.toolName ?? e.properties?.tool_name as string ?? e.tool_name ?? "",
+          input: started?.input ?? "",
+          result,
+          isError: (e.properties?.is_error ?? e.is_error) === true,
+        };
+        pendingTools.delete(callId);
+        turns.push({ kind: "tool", tools: [tool] });
+        break;
+      }
+    }
+  }
+  return turns;
+}
+
 export async function loader({ request, params }: any) {
   const { data: apiStages } = await apiJson<PaginatedRunStageList>(`/runs/${params.id}/stages`, { request });
-  const stages: Stage[] = apiStages.map((s) => ({
+  const stages: Stage[] = apiStages.filter((s) => isVisibleStage(s.id)).map((s) => ({
     id: s.id,
     name: s.name,
     status: s.status as StageStatus,
     duration: s.duration_secs != null ? formatDurationSecs(s.duration_secs) : "--",
   }));
 
-  // Fetch turns for the selected stage (first stage if none specified)
   const selectedStageId = params.stageId ?? stages[0]?.id;
-  let turns: ApiStageTurn[] = [];
+
+  // Try demo turns endpoint first, fall back to events.
+  let turns: TurnType[] = [];
   if (selectedStageId) {
-    const { data } = await apiJson<PaginatedStageTurnList>(`/runs/${params.id}/stages/${selectedStageId}/turns`, { request });
-    turns = data;
+    const turnsResult = await apiJsonOrNull<PaginatedStageTurnList>(
+      `/runs/${params.id}/stages/${selectedStageId}/turns`,
+      { request },
+    );
+    if (turnsResult?.data?.length) {
+      turns = turnsResult.data.map((t: ApiStageTurn): TurnType => {
+        if (t.kind === "tool" && t.tools) {
+          return {
+            kind: "tool",
+            tools: t.tools.map((tu) => ({
+              id: tu.id,
+              toolName: tu.tool_name,
+              input: tu.input,
+              result: tu.result,
+              isError: tu.is_error,
+              durationMs: tu.duration_ms,
+            })),
+          };
+        }
+        return { kind: t.kind as "system" | "assistant", content: t.content ?? "" };
+      });
+    } else {
+      // Fetch events and build turns from them.
+      const eventsResult = await apiJsonOrNull<PaginatedEventList>(
+        `/runs/${params.id}/events?limit=1000`,
+        { request },
+      );
+      if (eventsResult?.data) {
+        turns = turnsFromEvents(eventsResult.data as unknown as RawEvent[], selectedStageId);
+      }
+    }
   }
 
   return { stages, turns };
@@ -47,13 +138,6 @@ const statusConfig: Record<StageStatus, { icon: typeof CheckCircleIcon; color: s
   failed: { icon: XCircleIcon, color: "text-coral" },
   cancelled: { icon: XCircleIcon, color: "text-fg-muted" },
 };
-
-type TurnType =
-  | { kind: "system"; content: string }
-  | { kind: "assistant"; content: string }
-  | { kind: "tool"; tools: ToolUse[] };
-
-// selectedStage is resolved from the URL param in RunStages below
 
 function SystemBlock({ content }: { content: string }) {
   return (
@@ -85,27 +169,10 @@ function AssistantBlock({ content }: { content: string }) {
 
 export default function RunStages({ loaderData }: any) {
   const { id, stageId } = useParams();
-  const { stages, turns: apiTurns } = loaderData;
+  const { stages, turns } = loaderData;
 
-  const mappedTurns: TurnType[] = apiTurns.map((t) => {
-    if (t.kind === "tool" && t.tools) {
-      return {
-        kind: "tool" as const,
-        tools: t.tools.map((tu) => ({
-          id: tu.id,
-          toolName: tu.tool_name,
-          input: tu.input,
-          result: tu.result,
-          isError: tu.is_error,
-          durationMs: tu.duration_ms,
-        })),
-      };
-    }
-    return { kind: t.kind as "system" | "assistant", content: t.content ?? "" };
-  });
-
-  const selectedStage = stages.find((s) => s.id === stageId) ?? stages[0];
-  const selectedConfig = statusConfig[selectedStage.status];
+  const selectedStage = stages.find((s: Stage) => s.id === stageId) ?? stages[0];
+  const selectedConfig = selectedStage ? statusConfig[selectedStage.status] : statusConfig.pending;
   const SelectedIcon = selectedConfig.icon;
 
   return (
@@ -170,7 +237,7 @@ export default function RunStages({ loaderData }: any) {
           <span className="font-mono text-xs text-fg-muted">{selectedStage.duration}</span>
         </div>
 
-        {mappedTurns.map((turn, i) => {
+        {turns.map((turn: TurnType, i: number) => {
           switch (turn.kind) {
             case "system":
               return <SystemBlock key={`turn-${i}`} content={turn.content} />;
