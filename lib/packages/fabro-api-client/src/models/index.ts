@@ -134,6 +134,7 @@ export * from './start-run-request';
 export * from './status-reason';
 export * from './store-run-summary';
 export * from './submit-answer-request';
+export * from './system-features';
 export * from './system-info-response';
 export * from './system-run-counts';
 export * from './system-stage-turn';

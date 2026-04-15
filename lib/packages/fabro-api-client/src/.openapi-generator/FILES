@@ -153,6 +153,7 @@ models/start-run-request.ts
 models/status-reason.ts
 models/store-run-summary.ts
 models/submit-answer-request.ts
+models/system-features.ts
 models/system-info-response.ts
 models/system-run-counts.ts
 models/system-stage-turn.ts

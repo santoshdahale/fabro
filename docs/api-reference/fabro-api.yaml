@@ -4114,6 +4114,19 @@ components:
         sandbox_provider:
           type: string
           description: Effective sandbox provider for launched runs.
+        features:
+          $ref: "#/components/schemas/SystemFeatures"
+
+    SystemFeatures:
+      description: Server-level capability flags.
+      type: object
+      properties:
+        session_sandboxes:
+          type: boolean
+          description: Whether session sandboxes are enabled.
+        retros:
+          type: boolean
+          description: Whether workflow retros are enabled.
 
     SystemRunCounts:
       description: Counts of known runs in the active server process.

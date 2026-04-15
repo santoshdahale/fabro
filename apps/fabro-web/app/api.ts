@@ -79,7 +79,6 @@ export async function getAuthMe(): Promise<{
   };
   provider: string;
   demoMode: boolean;
-  features: { session_sandboxes: boolean; retros: boolean };
 }> {
   const response = await fetch("/api/v1/auth/me", { credentials: "include" });
   if (response.status === 401) {
@@ -89,4 +88,10 @@ export async function getAuthMe(): Promise<{
     throw new Response(null, { status: response.status, statusText: response.statusText });
   }
   return response.json();
+}
+
+export async function getSystemInfo(): Promise<{
+  features: { session_sandboxes: boolean; retros: boolean };
+}> {
+  return apiJson("/system/info");
 }

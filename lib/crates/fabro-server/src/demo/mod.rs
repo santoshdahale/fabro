@@ -574,7 +574,8 @@ pub(crate) async fn get_system_info(
             "storage_dir": "/demo/fabro/storage",
             "uptime_secs": 42,
             "runs": { "total": 3, "active": 1 },
-            "sandbox_provider": "local"
+            "sandbox_provider": "local",
+            "features": { "session_sandboxes": false, "retros": false }
         })),
     )
         .into_response()

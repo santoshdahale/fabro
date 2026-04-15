@@ -122,6 +122,8 @@ async fn get_system_info_returns_runtime_fields() {
     assert_eq!(body["runs"]["total"], 0);
     assert_eq!(body["runs"]["active"], 0);
     assert!(body["uptime_secs"].as_i64().is_some());
+    assert_eq!(body["features"]["session_sandboxes"], false);
+    assert_eq!(body["features"]["retros"], true);
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

@@ -35,7 +35,7 @@ pub use fabro_api::types::{
     RunControlAction as ApiRunControlAction, RunError, RunManifest, RunStatus, RunStatusResponse,
     SandboxFileEntry, SandboxFileListResponse, SecretType as ApiSecretType, ServerSettings,
     SshAccessRequest, SshAccessResponse, StartRunRequest, StatusReason as ApiStatusReason,
-    SubmitAnswerRequest, SystemInfoResponse, SystemRunCounts, WriteBlobResponse,
+    SubmitAnswerRequest, SystemFeatures, SystemInfoResponse, SystemRunCounts, WriteBlobResponse,
 };
 use fabro_auth::parse_credential_secret;
 use fabro_config::{Storage, resolve_server_from_file};
@@ -1235,8 +1235,22 @@ async fn get_system_info(
             active: Some(to_i64(active_runs)),
         }),
         sandbox_provider: Some(system_sandbox_provider(&settings)),
+        features:         Some(system_features(&settings)),
     };
     (StatusCode::OK, Json(response)).into_response()
+}
+
+fn system_features(settings: &SettingsLayer) -> SystemFeatures {
+    let session_sandboxes = fabro_config::resolve_features_from_file(settings)
+        .map(|s| s.session_sandboxes)
+        .unwrap_or(false);
+    let retros = fabro_config::resolve_run_from_file(settings)
+        .map(|s| s.execution.retros)
+        .unwrap_or(false);
+    SystemFeatures {
+        session_sandboxes: Some(session_sandboxes),
+        retros:            Some(retros),
+    }
 }
 
 async fn get_system_df(
@@ -8504,7 +8518,8 @@ level = "debug"
         let body = body_json(response.into_body()).await;
         assert_eq!(body["pending_control"].as_str(), Some("pause"));
 
-        // Verify the run appears on the board (store has Submitted status → "pending" column)
+        // Verify the run appears on the board (store has Submitted status → "pending"
+        // column)
         let req = Request::builder()
             .method("GET")
             .uri(api("/boards/runs"))
@@ -9090,8 +9105,10 @@ timeout = "30s"
         let columns = body["columns"].as_array().expect("columns should be array");
         assert!(columns.len() > 0);
         assert!(columns.iter().any(|c| c["id"].as_str() == Some("waiting")));
-        assert!(columns
-            .iter()
-            .any(|c| c["id"].as_str() == Some("succeeded")));
+        assert!(
+            columns
+                .iter()
+                .any(|c| c["id"].as_str() == Some("succeeded"))
+        );
     }
 }

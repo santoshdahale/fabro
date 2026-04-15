@@ -16,7 +16,7 @@ import {
   MagnifyingGlassIcon,
   XMarkIcon,
 } from "@heroicons/react/24/outline";
-import { getAuthMe } from "../api";
+import { getSystemInfo } from "../api";
 
 export const handle = { hideHeader: true, wide: true };
 
@@ -25,7 +25,7 @@ export function meta({}: any) {
 }
 
 export async function loader({ request }: any) {
-  const { features } = await getAuthMe();
+  const { features } = await getSystemInfo();
   return { features };
 }
 

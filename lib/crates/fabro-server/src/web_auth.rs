@@ -8,7 +8,7 @@ use axum::{Extension, Json, Router};
 use cookie::time::Duration;
 use cookie::{Cookie, CookieJar, Key, SameSite};
 use fabro_types::RunAuthMethod;
-use fabro_types::settings::{InterpString, ServerAuthMethod, SettingsLayer};
+use fabro_types::settings::{InterpString, ServerAuthMethod};
 use fabro_util::dev_token::validate_dev_token_format;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -61,7 +61,6 @@ struct AuthMeResponse {
     provider:  String,
     #[serde(rename = "demoMode")]
     demo_mode: bool,
-    features:  serde_json::Value,
 }
 
 #[derive(Serialize)]
@@ -174,19 +173,6 @@ fn append_jar_delta(headers: &mut HeaderMap, jar: &CookieJar) {
 
 fn json_response(status: StatusCode, body: serde_json::Value) -> Response {
     (status, Json(body)).into_response()
-}
-
-fn features_json(settings: &SettingsLayer) -> serde_json::Value {
-    let session_sandboxes = fabro_config::resolve_features_from_file(settings)
-        .map(|settings| settings.session_sandboxes)
-        .unwrap_or(false);
-    let retros = fabro_config::resolve_run_from_file(settings)
-        .map(|settings| settings.execution.retros)
-        .unwrap_or(false);
-    json!({
-        "session_sandboxes": session_sandboxes,
-        "retros": retros,
-    })
 }
 
 fn resolve_interp(value: &InterpString) -> anyhow::Result<String> {
@@ -618,11 +604,6 @@ async fn auth_me(State(state): State<Arc<AppState>>, headers: HeaderMap) -> Resp
         return json_response(StatusCode::UNAUTHORIZED, json!({"error": "Unauthorized"}));
     };
 
-    let settings = state
-        .settings
-        .read()
-        .expect("settings lock poisoned")
-        .clone();
     let demo_mode = parse_cookie_header(&headers)
         .get("fabro-demo")
         .is_some_and(|cookie| cookie.value() == "1");
@@ -636,7 +617,6 @@ async fn auth_me(State(state): State<Arc<AppState>>, headers: HeaderMap) -> Resp
         },
         provider: session_provider(session.auth_method).to_string(),
         demo_mode,
-        features: features_json(&settings),
     })
     .into_response()
 }
