@@ -1,5 +1,5 @@
-import { useState, useCallback, useRef } from "react";
-import { Link } from "react-router";
+import { useState, useCallback, useEffect, useRef } from "react";
+import { Link, useRevalidator } from "react-router";
 import { ChevronDownIcon, ChevronRightIcon, MagnifyingGlassIcon } from "@heroicons/react/24/outline";
 import {
   DndContext,
@@ -523,6 +523,38 @@ export default function Runs({ loaderData }: any) {
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const [columns, setColumns] = useState(initialColumns);
   const lowerQuery = query.toLowerCase();
+  const revalidator = useRevalidator();
+
+  const STATUS_EVENTS = new Set([
+    "run.submitted", "run.starting", "run.running",
+    "run.paused", "run.completed", "run.failed",
+  ]);
+
+  useEffect(() => {
+    const source = new EventSource("/api/v1/attach");
+    let debounceTimer: ReturnType<typeof setTimeout> | undefined;
+
+    source.onmessage = (msg) => {
+      try {
+        const payload = JSON.parse(msg.data);
+        if (STATUS_EVENTS.has(payload.event)) {
+          clearTimeout(debounceTimer);
+          debounceTimer = setTimeout(() => revalidator.revalidate(), 500);
+        }
+      } catch {
+        // ignore malformed events
+      }
+    };
+
+    return () => {
+      clearTimeout(debounceTimer);
+      source.close();
+    };
+  }, []);
+
+  useEffect(() => {
+    setColumns(initialColumns);
+  }, [initialColumns]);
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
