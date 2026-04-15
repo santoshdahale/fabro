@@ -1130,6 +1130,7 @@ pub(crate) enum PrCommand {
     /// Create a pull request from a completed run
     Create(PrCreateArgs),
     /// List pull requests from workflow runs
+    #[command(alias = "ls")]
     List(PrListArgs),
     /// View pull request details
     View(PrViewArgs),
@@ -1148,6 +1149,7 @@ pub(crate) struct ArtifactNamespace {
 #[derive(Subcommand)]
 pub(crate) enum ArtifactCommand {
     /// List artifacts for a workflow run
+    #[command(alias = "ls")]
     List(ArtifactListArgs),
     /// Copy artifacts from a workflow run
     Cp(ArtifactCpArgs),
@@ -1279,6 +1281,7 @@ pub(crate) struct WorkflowNamespace {
 #[derive(Subcommand)]
 pub(crate) enum WorkflowCommand {
     /// List available workflows
+    #[command(alias = "ls")]
     List(WorkflowListArgs),
     /// Create a new workflow
     Create(WorkflowCreateArgs),
