@@ -1,7 +1,7 @@
 import { useEffect } from "react";
 import { ChevronDownIcon, ChevronRightIcon } from "@heroicons/react/20/solid";
 import { Menu, MenuButton, MenuItem, MenuItems } from "@headlessui/react";
-import { Link, Outlet, useFetcher, useLocation } from "react-router";
+import { Link, Outlet, useFetcher, useLocation, useRevalidator } from "react-router";
 import { mapRunSummaryToRunItem, runStatusDisplay, isRunStatus } from "../data/runs";
 import type { RunSummaryResponse } from "../data/runs";
 import { apiJson } from "../api";
@@ -59,6 +59,11 @@ export function meta({ data }: any) {
   return [{ title: run ? `${run.title} — Fabro` : "Run — Fabro" }];
 }
 
+const RUN_EVENTS = new Set([
+  "stage.started", "stage.completed", "stage.failed",
+  "run.completed", "run.failed", "run.running", "run.paused",
+]);
+
 export default function RunDetail({ loaderData, params }: any) {
   const { run } = loaderData;
   const { pathname } = useLocation();
@@ -66,6 +71,30 @@ export default function RunDetail({ loaderData, params }: any) {
   const previewFetcher = useFetcher<PreviewUrlResponse>();
   const demoMode = useDemoMode();
   const tabs = allTabs.filter((t) => !t.broken && (!t.demoOnly || demoMode));
+  const revalidator = useRevalidator();
+
+  // Subscribe to SSE for live updates (stages + run status)
+  useEffect(() => {
+    const source = new EventSource("/api/v1/attach");
+    let debounceTimer: ReturnType<typeof setTimeout> | undefined;
+
+    source.onmessage = (msg) => {
+      try {
+        const payload = JSON.parse(msg.data);
+        if (payload.run_id === params.id && RUN_EVENTS.has(payload.event)) {
+          clearTimeout(debounceTimer);
+          debounceTimer = setTimeout(() => revalidator.revalidate(), 300);
+        }
+      } catch {
+        // ignore malformed events
+      }
+    };
+
+    return () => {
+      clearTimeout(debounceTimer);
+      source.close();
+    };
+  }, [params.id]);
 
   useEffect(() => {
     if (previewFetcher.data?.url) {

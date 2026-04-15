@@ -1,23 +1,15 @@
-import { Link, useParams } from "react-router";
-import { CheckCircleIcon, ArrowPathIcon, PauseCircleIcon, XCircleIcon } from "@heroicons/react/24/solid";
-import { DocumentTextIcon, MapIcon, CommandLineIcon, ChatBubbleLeftIcon } from "@heroicons/react/24/outline";
+import { useParams } from "react-router";
+import { CommandLineIcon, ChatBubbleLeftIcon } from "@heroicons/react/24/outline";
 import { ToolBlock } from "../components/tool-use";
 import type { ToolUse } from "../components/tool-use";
+import { StageSidebar, statusConfig } from "../components/stage-sidebar";
+import type { Stage } from "../components/stage-sidebar";
 import { apiJson, apiJsonOrNull } from "../api";
 import { isVisibleStage } from "../data/runs";
 import { formatDurationSecs } from "../lib/format";
 import type { PaginatedRunStageList, StageTurn as ApiStageTurn, PaginatedStageTurnList, PaginatedEventList } from "@qltysh/fabro-api-client";
 
 export const handle = { wide: true };
-
-type StageStatus = "completed" | "running" | "pending" | "failed" | "cancelled";
-
-interface Stage {
-  id: string;
-  name: string;
-  status: StageStatus;
-  duration: string;
-}
 
 type TurnType =
   | { kind: "system"; content: string }
@@ -86,7 +78,7 @@ export async function loader({ request, params }: any) {
   const stages: Stage[] = apiStages.filter((s) => isVisibleStage(s.id)).map((s) => ({
     id: s.id,
     name: s.name,
-    status: s.status as StageStatus,
+    status: s.status as Stage["status"],
     duration: s.duration_secs != null ? formatDurationSecs(s.duration_secs) : "--",
   }));
 
@@ -131,14 +123,6 @@ export async function loader({ request, params }: any) {
   return { stages, turns };
 }
 
-const statusConfig: Record<StageStatus, { icon: typeof CheckCircleIcon; color: string }> = {
-  completed: { icon: CheckCircleIcon, color: "text-mint" },
-  running: { icon: ArrowPathIcon, color: "text-teal-500" },
-  pending: { icon: PauseCircleIcon, color: "text-fg-muted" },
-  failed: { icon: XCircleIcon, color: "text-coral" },
-  cancelled: { icon: XCircleIcon, color: "text-fg-muted" },
-};
-
 function SystemBlock({ content }: { content: string }) {
   return (
     <div className="rounded-md border border-amber/10 bg-amber/5 overflow-hidden">
@@ -177,58 +161,7 @@ export default function RunStages({ loaderData }: any) {
 
   return (
     <div className="flex gap-6">
-      <nav className="w-56 shrink-0 space-y-6">
-        <div>
-          <h3 className="px-2 text-xs font-medium uppercase tracking-wider text-fg-muted">Stages</h3>
-          <ul className="mt-2 space-y-0.5">
-            {stages.map((stage) => {
-              const config = statusConfig[stage.status];
-              const Icon = config.icon;
-              const isSelected = stage.id === selectedStage.id;
-              return (
-                <li key={stage.id}>
-                  <Link
-                    to={`/runs/${id}/stages/${stage.id}`}
-                    className={`flex items-center gap-2 rounded-md px-2 py-1.5 text-sm transition-colors ${
-                      isSelected
-                        ? "bg-overlay text-fg"
-                        : "text-fg-3 hover:bg-overlay hover:text-fg"
-                    }`}
-                  >
-                    <Icon className={`size-4 shrink-0 ${config.color} ${stage.status === "running" ? "animate-spin" : ""}`} />
-                    <span className="flex-1 truncate">{stage.name}</span>
-                    <span className="font-mono text-xs tabular-nums text-fg-muted">{stage.duration}</span>
-                  </Link>
-                </li>
-              );
-            })}
-          </ul>
-        </div>
-
-        <div>
-          <h3 className="px-2 text-xs font-medium uppercase tracking-wider text-fg-muted">Workflow</h3>
-          <ul className="mt-2 space-y-0.5">
-            <li>
-              <Link
-                to={`/runs/${id}/settings`}
-                className="flex items-center gap-2 rounded-md px-2 py-1.5 text-sm text-fg-3 transition-colors hover:bg-overlay hover:text-fg"
-              >
-                <DocumentTextIcon className="size-4 shrink-0 text-fg-muted" />
-                Run Settings
-              </Link>
-            </li>
-            <li>
-              <Link
-                to={`/runs/${id}/graph`}
-                className="flex items-center gap-2 rounded-md px-2 py-1.5 text-sm text-fg-3 transition-colors hover:bg-overlay hover:text-fg"
-              >
-                <MapIcon className="size-4 shrink-0 text-fg-muted" />
-                Workflow Graph
-              </Link>
-            </li>
-          </ul>
-        </div>
-      </nav>
+      <StageSidebar stages={stages} runId={id!} selectedStageId={selectedStage?.id} />
 
       <div className="min-w-0 flex-1 space-y-3">
         <div className="flex items-center gap-2">
