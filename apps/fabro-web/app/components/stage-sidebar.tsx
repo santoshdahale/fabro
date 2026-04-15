@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from "react";
-import { Link } from "react-router";
+import { Link, useRevalidator } from "react-router";
 import { CheckCircleIcon, ArrowPathIcon, PauseCircleIcon, XCircleIcon } from "@heroicons/react/24/solid";
 import { DocumentTextIcon, MapIcon } from "@heroicons/react/24/outline";
 import { formatDurationSecs } from "../lib/format";
@@ -29,10 +29,40 @@ interface StageSidebarProps {
   activeLink?: "settings" | "graph";
 }
 
+const STAGE_EVENTS = new Set([
+  "stage.started", "stage.completed", "stage.failed",
+  "run.completed", "run.failed",
+]);
+
 export function StageSidebar({ stages, runId, selectedStageId, activeLink }: StageSidebarProps) {
+  const revalidator = useRevalidator();
+
   // Track when we first observed each running stage (for ticking timer)
   const runningStartRef = useRef<Map<string, number>>(new Map());
   const [, setTick] = useState(0);
+
+  // Subscribe to run-specific SSE for live stage updates
+  useEffect(() => {
+    const source = new EventSource(`/api/v1/runs/${runId}/attach?since_seq=1`);
+    let debounceTimer: ReturnType<typeof setTimeout> | undefined;
+
+    source.onmessage = (msg) => {
+      try {
+        const payload = JSON.parse(msg.data);
+        if (STAGE_EVENTS.has(payload.event)) {
+          clearTimeout(debounceTimer);
+          debounceTimer = setTimeout(() => revalidator.revalidate(), 300);
+        }
+      } catch {
+        // ignore malformed events
+      }
+    };
+
+    return () => {
+      clearTimeout(debounceTimer);
+      source.close();
+    };
+  }, [runId]);
 
   // Track start times for running stages
   useEffect(() => {

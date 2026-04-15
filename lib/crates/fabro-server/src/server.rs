@@ -2144,15 +2144,22 @@ async fn list_run_stages(
         });
     }
 
-    // Add current node as running if the run is still active.
-    if run_is_active && !checkpoint.completed_nodes.contains(&checkpoint.current_node) {
-        stages.push(RunStage {
-            id:            checkpoint.current_node.clone(),
-            name:          checkpoint.current_node.clone(),
-            status:        ApiStageStatus::Running,
-            duration_secs: None,
-            dot_id:        Some(checkpoint.current_node.clone()),
-        });
+    // Add next node as running if the run is still active.
+    // The checkpoint's current_node is the last *completed* stage; next_node_id
+    // is the stage that is currently executing.
+    if let Some(next_id) = &checkpoint.next_node_id {
+        if run_is_active
+            && next_id != "exit"
+            && !checkpoint.completed_nodes.contains(next_id)
+        {
+            stages.push(RunStage {
+                id:            next_id.clone(),
+                name:          next_id.clone(),
+                status:        ApiStageStatus::Running,
+                duration_secs: None,
+                dot_id:        Some(next_id.clone()),
+            });
+        }
     }
 
     (StatusCode::OK, Json(ListResponse::new(stages))).into_response()
