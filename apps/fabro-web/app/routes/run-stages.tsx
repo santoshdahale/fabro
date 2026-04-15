@@ -1,4 +1,6 @@
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useParams } from "react-router";
+import { marked } from "marked";
 import { CommandLineIcon, ChatBubbleLeftIcon, PlayIcon } from "@heroicons/react/24/outline";
 import { ToolBlock } from "../components/tool-use";
 import type { ToolUse } from "../components/tool-use";
@@ -162,6 +164,16 @@ export async function loader({ request, params }: any) {
   return { stages, turns };
 }
 
+function Markdown({ content }: { content: string }) {
+  const html = useMemo(() => marked.parse(content, { async: false }) as string, [content]);
+  return (
+    <div
+      className="prose prose-sm max-w-none text-fg-3 prose-headings:text-fg-2 prose-strong:text-fg-2 prose-code:rounded prose-code:bg-overlay-strong prose-code:px-1 prose-code:py-0.5 prose-code:text-[0.8em] prose-code:font-mono prose-code:text-fg-3 prose-code:before:content-none prose-code:after:content-none prose-pre:bg-overlay-strong prose-pre:text-fg-3 prose-a:text-teal-500"
+      dangerouslySetInnerHTML={{ __html: html }}
+    />
+  );
+}
+
 function SystemBlock({ content }: { content: string }) {
   return (
     <div className="rounded-md border border-amber/10 bg-amber/5 overflow-hidden">
@@ -170,7 +182,7 @@ function SystemBlock({ content }: { content: string }) {
         <span className="text-xs font-medium text-fg-3">System Prompt</span>
       </div>
       <div className="border-t border-line px-3 py-2.5">
-        <pre className="whitespace-pre-wrap font-mono text-xs leading-relaxed text-fg-3">{content}</pre>
+        <Markdown content={content} />
       </div>
     </div>
   );
@@ -184,7 +196,7 @@ function AssistantBlock({ content }: { content: string }) {
         <span className="text-xs font-medium text-fg-3">Assistant</span>
       </div>
       <div className="border-t border-line px-3 py-2.5">
-        <pre className="whitespace-pre-wrap font-mono text-xs leading-relaxed text-fg-3">{content}</pre>
+        <Markdown content={content} />
       </div>
     </div>
   );
@@ -253,13 +265,36 @@ export default function RunStages({ loaderData }: any) {
   const { id, stageId } = useParams();
   const { stages, turns } = loaderData;
 
+  const selectedStage = stages.find((s: Stage) => s.id === stageId) ?? stages[0];
+  const isRunning = selectedStage?.status === "running";
+
+  // Ticking timer for running stage header
+  const runningStartRef = useRef(isRunning ? Date.now() : 0);
+  const [, setTick] = useState(0);
+
+  useEffect(() => {
+    if (isRunning && runningStartRef.current === 0) {
+      runningStartRef.current = Date.now();
+    } else if (!isRunning) {
+      runningStartRef.current = 0;
+    }
+  }, [isRunning]);
+
+  useEffect(() => {
+    if (!isRunning) return;
+    const interval = setInterval(() => setTick((t) => t + 1), 1000);
+    return () => clearInterval(interval);
+  }, [isRunning]);
+
   if (!stages.length) {
     return <p className="py-8 text-center text-sm text-fg-muted">No stages available for this run.</p>;
   }
 
-  const selectedStage = stages.find((s: Stage) => s.id === stageId) ?? stages[0];
   const selectedConfig = statusConfig[selectedStage.status];
   const SelectedIcon = selectedConfig.icon;
+  const headerDuration = isRunning && runningStartRef.current
+    ? formatDurationSecs(Math.floor((Date.now() - runningStartRef.current) / 1000))
+    : selectedStage.duration;
 
   return (
     <div className="flex gap-6">
@@ -267,9 +302,9 @@ export default function RunStages({ loaderData }: any) {
 
       <div className="min-w-0 flex-1 space-y-3">
         <div className="flex items-center gap-2">
-          <SelectedIcon className={`size-5 ${selectedConfig.color}`} />
+          <SelectedIcon className={`size-5 ${selectedConfig.color} ${isRunning ? "animate-spin" : ""}`} />
           <h3 className="text-sm font-medium text-fg">{selectedStage.name}</h3>
-          <span className="font-mono text-xs text-fg-muted">{selectedStage.duration}</span>
+          <span className="font-mono text-xs text-fg-muted">{headerDuration}</span>
         </div>
 
         {turns.map((turn: TurnType, i: number) => {
