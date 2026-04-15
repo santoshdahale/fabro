@@ -23,6 +23,7 @@ use fabro_server::bind::Bind;
 use fabro_server::serve;
 use fabro_store::ArtifactStore;
 use fabro_types::settings::cli::{CliLayer, OutputFormat};
+use fabro_types::settings::server::ServerAuthMethod;
 use fabro_types::settings::{CliSettings, SettingsLayer};
 use fabro_util::printer::Printer;
 use fabro_util::terminal::Styles;
@@ -102,6 +103,40 @@ fn generate_jwt_keypair() -> Result<(String, String)> {
         pem_encode("PRIVATE KEY", pkcs8.as_ref()),
         pem_encode("PUBLIC KEY", &public_der),
     ))
+}
+
+// ---------------------------------------------------------------------------
+// Auth status display
+// ---------------------------------------------------------------------------
+
+fn print_auth_status(
+    methods: &[ServerAuthMethod],
+    dev_token: Option<&str>,
+    s: &Styles,
+    printer: Printer,
+) {
+    if let Some(token) = dev_token.filter(|_| methods.contains(&ServerAuthMethod::DevToken)) {
+        fabro_util::printerr!(
+            printer,
+            "  {} Auth (Dev Token): {}",
+            s.green.apply_to("✔"),
+            token
+        );
+    } else {
+        let names: Vec<&str> = methods
+            .iter()
+            .map(|m| match m {
+                ServerAuthMethod::DevToken => "dev-token",
+                ServerAuthMethod::Github => "github",
+            })
+            .collect();
+        fabro_util::printerr!(
+            printer,
+            "  {} Auth: {}",
+            s.green.apply_to("✔"),
+            names.join(", ")
+        );
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -1678,10 +1713,21 @@ async fn run_install_github_inner(
             InstallServerRestartOutcome::Started(bind) => {
                 fabro_util::printerr!(
                     printer,
-                    "  {} Server running at {}",
+                    "  {} Server running at http://{}",
                     s.green.apply_to("✔"),
                     bind
                 );
+                let methods = fabro_config::parse_settings_layer(&settings_toml)
+                    .ok()
+                    .and_then(|layer| layer.server)
+                    .and_then(|srv| srv.auth)
+                    .and_then(|auth| auth.methods)
+                    .unwrap_or_default();
+                let token = dev_token::read_dev_token_file(
+                    &Storage::new(&storage_dir).server_state().dev_token_path(),
+                );
+                print_auth_status(&methods, token.as_deref(), &s, printer);
+                fabro_util::printerr!(printer, "");
             }
             InstallServerRestartOutcome::Failed(err) => {
                 fabro_util::printerr!(
@@ -1994,10 +2040,22 @@ async fn run_install_inner(
         InstallServerRestartOutcome::Started(bind) => {
             fabro_util::printerr!(
                 printer,
-                "  {} Server running at {}",
+                "  {} Server running at http://{}",
                 s.green.apply_to("✔"),
                 bind
             );
+            let methods = install_settings
+                .server
+                .as_ref()
+                .and_then(|srv| srv.auth.as_ref())
+                .and_then(|auth| auth.methods.as_ref())
+                .map(Vec::as_slice)
+                .unwrap_or_default();
+            let token = dev_token::read_dev_token_file(
+                &Storage::new(&storage_dir).server_state().dev_token_path(),
+            );
+            print_auth_status(methods, token.as_deref(), &s, printer);
+            fabro_util::printerr!(printer, "");
             true
         }
         InstallServerRestartOutcome::Failed(err) => {
