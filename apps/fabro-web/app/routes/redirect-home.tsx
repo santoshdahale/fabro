@@ -11,7 +11,7 @@ export async function loader() {
     throw error;
   }
 
-  return redirect("/start");
+  return redirect("/runs");
 }
 
 export default function RedirectHome() {

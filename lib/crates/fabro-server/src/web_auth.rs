@@ -579,7 +579,7 @@ async fn callback_github(
         &session_key,
         session_cookie_secure(state.as_ref()),
     );
-    let mut response = Redirect::to("/start").into_response();
+    let mut response = Redirect::to("/runs").into_response();
     append_jar_delta(response.headers_mut(), &jar);
     response
 }

@@ -20,7 +20,7 @@ export default function AuthLogin({ loaderData }: any) {
 
     try {
       await loginDevToken(token);
-      navigate("/start");
+      navigate("/runs");
     } catch {
       setError("Invalid dev token");
     }
