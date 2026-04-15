@@ -39,9 +39,11 @@ function turnsFromEvents(events: RawEvent[], stageId: string): TurnType[] {
       case "stage.prompt":
         turns.push({ kind: "system", content: e.properties?.text as string ?? e.text ?? "" });
         break;
-      case "agent.message":
-        turns.push({ kind: "assistant", content: e.properties?.text as string ?? e.text ?? "" });
+      case "agent.message": {
+        const msg = e.properties?.text as string ?? e.text ?? "";
+        if (msg) turns.push({ kind: "assistant", content: msg });
         break;
+      }
       case "agent.tool.started": {
         const callId = e.properties?.tool_call_id as string ?? e.tool_call_id ?? "";
         pendingTools.set(callId, {
