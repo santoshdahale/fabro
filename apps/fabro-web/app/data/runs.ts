@@ -48,7 +48,7 @@ export interface RunWithStatus extends RunItem {
 }
 
 function truncateGoal(goal: string): string {
-  const firstLine = goal.split("\n")[0];
+  const firstLine = goal.split("\n")[0].replace(/^#+\s*/, "").trim();
   return firstLine.length > 100 ? firstLine.slice(0, 100) + "…" : firstLine;
 }
 
