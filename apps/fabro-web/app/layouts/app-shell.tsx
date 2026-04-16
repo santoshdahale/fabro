@@ -76,7 +76,7 @@ export default function AppShell({ loaderData }: any) {
           <div className="flex h-16 items-center justify-between">
             <div className="flex items-center">
               <div className="shrink-0">
-                <Link to="/start">
+                <Link to={demoMode ? "/start" : "/runs"}>
                   <img alt="Fabro" src={theme === "dark" ? "/logotype.svg" : "/logotype-light.svg"} className="h-8 w-auto" />
                 </Link>
               </div>

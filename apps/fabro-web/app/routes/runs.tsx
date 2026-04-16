@@ -1,6 +1,6 @@
 import { useState, useCallback, useEffect, useRef } from "react";
 import { Link, useRevalidator } from "react-router";
-import { ChevronDownIcon, ChevronRightIcon, MagnifyingGlassIcon } from "@heroicons/react/24/outline";
+import { ChevronDownIcon, ChevronRightIcon, CommandLineIcon, MagnifyingGlassIcon } from "@heroicons/react/24/outline";
 import {
   DndContext,
   closestCenter,
@@ -510,6 +510,107 @@ function SortableRunRow({ run }: { run: RunWithStatus }) {
   );
 }
 
+function TerminalLine({ prompt, command }: { prompt: string; command: string }) {
+  return (
+    <div className="flex items-center gap-2 font-mono text-sm">
+      <span className="select-none text-fg-muted">{prompt}</span>
+      <span className="text-fg-2">{command}</span>
+    </div>
+  );
+}
+
+const GETTING_STARTED_COMMANDS = "fabro repo init && fabro run hello";
+
+function CopyButton({ text }: { text: string }) {
+  const [copied, setCopied] = useState(false);
+
+  function handleCopy() {
+    navigator.clipboard.writeText(text);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  }
+
+  return (
+    <button
+      type="button"
+      onClick={handleCopy}
+      className="rounded p-1 text-fg-muted transition-colors hover:bg-overlay-strong hover:text-fg-3"
+      title="Copy to clipboard"
+    >
+      {copied ? (
+        <svg viewBox="0 0 16 16" fill="currentColor" className="size-4 text-mint" aria-hidden="true">
+          <path d="M13.78 4.22a.75.75 0 0 1 0 1.06l-7.25 7.25a.75.75 0 0 1-1.06 0L2.22 9.28a.751.751 0 0 1 .018-1.042.751.751 0 0 1 1.042-.018L6 10.94l6.72-6.72a.75.75 0 0 1 1.06 0Z" />
+        </svg>
+      ) : (
+        <svg viewBox="0 0 16 16" fill="currentColor" className="size-4" aria-hidden="true">
+          <path d="M0 6.75C0 5.784.784 5 1.75 5h1.5a.75.75 0 0 1 0 1.5h-1.5a.25.25 0 0 0-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 0 0 .25-.25v-1.5a.75.75 0 0 1 1.5 0v1.5A1.75 1.75 0 0 1 9.25 16h-7.5A1.75 1.75 0 0 1 0 14.25Z" />
+          <path d="M5 1.75C5 .784 5.784 0 6.75 0h7.5C15.216 0 16 .784 16 1.75v7.5A1.75 1.75 0 0 1 14.25 11h-7.5A1.75 1.75 0 0 1 5 9.25Zm1.75-.25a.25.25 0 0 0-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 0 0 .25-.25v-7.5a.25.25 0 0 0-.25-.25Z" />
+        </svg>
+      )}
+    </button>
+  );
+}
+
+function EmptyState() {
+  return (
+    <div className="mt-4 flex flex-col items-center">
+      <div className="w-full max-w-lg space-y-5">
+        <p className="text-center text-sm text-fg-muted">
+          Workflow runs will appear here as you run them.
+        </p>
+
+        <div className="rounded-lg border border-line bg-panel/60 p-5">
+          <div className="mb-3 flex items-center gap-2.5">
+            <CommandLineIcon className="size-4 text-teal-500" />
+            <span className="text-sm font-medium text-fg-2">Quick start</span>
+          </div>
+          <div className="flex items-start justify-between rounded-md bg-page px-4 py-3">
+            <div className="space-y-1.5">
+              <TerminalLine prompt="$" command="fabro repo init" />
+              <TerminalLine prompt="$" command="fabro run hello" />
+            </div>
+            <CopyButton text={GETTING_STARTED_COMMANDS} />
+          </div>
+        </div>
+
+        <div className="rounded-lg border border-line bg-panel/60 p-5">
+          <h4 className="mb-3 text-sm font-medium text-fg-2">Resources</h4>
+          <div className="grid grid-cols-2 gap-3">
+            <a
+              href="https://docs.fabro.sh/"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex items-center gap-3 rounded-md bg-page px-4 py-3 transition-colors hover:bg-overlay-strong"
+            >
+              <svg viewBox="0 0 16 16" fill="currentColor" className="size-5 shrink-0 text-teal-500" aria-hidden="true">
+                <path d="M0 1.75A.75.75 0 0 1 .75 1h4.253c1.227 0 2.317.59 3 1.501A3.744 3.744 0 0 1 11.006 1h4.245a.75.75 0 0 1 .75.75v10.5a.75.75 0 0 1-.75.75h-4.507a2.25 2.25 0 0 0-1.591.659l-.622.621a.75.75 0 0 1-1.06 0l-.622-.621A2.25 2.25 0 0 0 5.258 13H.75a.75.75 0 0 1-.75-.75Zm7.251 10.324.004-5.073-.002-2.253A2.25 2.25 0 0 0 5.003 2.5H1.5v9h3.757a3.75 3.75 0 0 1 1.994.574ZM8.755 4.75l-.004 7.322a3.752 3.752 0 0 1 1.992-.572H14.5v-9h-3.495a2.25 2.25 0 0 0-2.25 2.25Z" />
+              </svg>
+              <div>
+                <div className="text-sm font-medium text-fg-2">Docs</div>
+                <div className="text-xs text-fg-muted">Guides and reference</div>
+              </div>
+            </a>
+            <a
+              href="https://fabro.sh/discord"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex items-center gap-3 rounded-md bg-page px-4 py-3 transition-colors hover:bg-overlay-strong"
+            >
+              <svg viewBox="0 0 16 16" fill="currentColor" className="size-5 shrink-0 text-teal-500" aria-hidden="true">
+                <path d="M13.545 2.907a13.2 13.2 0 0 0-3.257-1.011.05.05 0 0 0-.052.025c-.141.25-.297.577-.406.833a12.2 12.2 0 0 0-3.658 0 8 8 0 0 0-.412-.833.05.05 0 0 0-.052-.025c-1.125.194-2.22.534-3.257 1.011a.04.04 0 0 0-.021.018C.356 6.024-.213 9.047.066 12.032q.003.022.021.037a13.3 13.3 0 0 0 3.995 2.02.05.05 0 0 0 .056-.019q.463-.63.818-1.329a.05.05 0 0 0-.01-.059.05.05 0 0 0-.018-.011 8.8 8.8 0 0 1-1.248-.595.05.05 0 0 1-.02-.066.05.05 0 0 1 .015-.019c.084-.063.168-.129.248-.195a.05.05 0 0 1 .051-.007c2.619 1.196 5.454 1.196 8.041 0a.05.05 0 0 1 .053.007c.08.066.164.132.248.195a.05.05 0 0 1-.004.085 8.3 8.3 0 0 1-1.249.594.05.05 0 0 0-.03.03.05.05 0 0 0 .003.041c.24.465.515.909.817 1.329a.05.05 0 0 0 .056.019 13.2 13.2 0 0 0 4.001-2.02.05.05 0 0 0 .021-.037c.334-3.451-.559-6.449-2.366-9.106a.03.03 0 0 0-.02-.019m-8.198 7.307c-.789 0-1.438-.724-1.438-1.612s.637-1.613 1.438-1.613c.807 0 1.45.73 1.438 1.613 0 .888-.637 1.612-1.438 1.612m5.316 0c-.788 0-1.438-.724-1.438-1.612s.637-1.613 1.438-1.613c.807 0 1.451.73 1.438 1.613 0 .888-.631 1.612-1.438 1.612" />
+              </svg>
+              <div>
+                <div className="text-sm font-medium text-fg-2">Discord</div>
+                <div className="text-xs text-fg-muted">Ask questions, get help</div>
+              </div>
+            </a>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function Runs({ loaderData }: any) {
   const initialColumns = loaderData.columns;
   const allRepos = [
@@ -575,6 +676,8 @@ export default function Runs({ loaderData }: any) {
     );
   }, []);
 
+  const totalRuns = columns.reduce((sum, col) => sum + col.items.length, 0);
+
   const filteredColumns = columns.map((col) => ({
     ...col,
     items: col.items.filter(
@@ -639,53 +742,63 @@ export default function Runs({ loaderData }: any) {
         </div>
 
         {view === "columns" ? (
-          <div className="flex gap-5 overflow-x-auto pb-4">
-            {filteredColumns.map((col) => (
-              <div key={col.id} className="w-72 shrink-0">
-                <BoardColumn column={col} />
-              </div>
-            ))}
-          </div>
-        ) : (
-          <div className="space-y-4">
-            {filteredColumns.map((col) => {
-              const isCollapsed = collapsed.has(col.id);
-              return (
-                <div key={col.id}>
-                  <button
-                    type="button"
-                    onClick={() => setCollapsed((prev) => {
-                      const next = new Set(prev);
-                      if (next.has(col.id)) next.delete(col.id);
-                      else next.add(col.id);
-                      return next;
-                    })}
-                    className="mb-3 flex w-full items-center gap-2 text-left"
-                  >
-                    {isCollapsed
-                      ? <ChevronRightIcon className="size-3.5 text-fg-muted" />
-                      : <ChevronDownIcon className="size-3.5 text-fg-muted" />}
-                    <div className={`h-2.5 w-2.5 rounded-full ${col.accent}`} />
-                    <h3 className="text-sm font-semibold tracking-wide text-fg-2">{col.name}</h3>
-                    <span className="rounded-full bg-overlay px-2 py-0.5 font-mono text-xs text-fg-muted">
-                      {col.items.length}
-                    </span>
-                  </button>
-                  {!isCollapsed && (col.items.length > 0 ? (
-                    <SortableContext items={col.items.map((item) => item.id)} strategy={verticalListSortingStrategy}>
-                      <div className="grid gap-2" style={{ gridTemplateColumns: "5rem 1fr 8rem auto" }}>
-                        {col.items.map((item) => (
-                          <SortableRunRow key={item.id} run={{ ...item, status: col.id, statusLabel: col.name }} />
-                        ))}
-                      </div>
-                    </SortableContext>
-                  ) : (
-                    <p className="py-4 text-center text-sm text-fg-muted">No runs</p>
-                  ))}
+          <>
+            <div className="flex gap-5 overflow-x-auto pb-4">
+              {filteredColumns.map((col) => (
+                <div key={col.id} className="w-72 shrink-0">
+                  <BoardColumn column={col} />
                 </div>
-              );
-            })}
-          </div>
+              ))}
+            </div>
+            {totalRuns === 0 && (
+              <EmptyState />
+            )}
+          </>
+        ) : (
+          <>
+            <div className="space-y-4">
+              {filteredColumns.map((col) => {
+                const isCollapsed = collapsed.has(col.id);
+                return (
+                  <div key={col.id}>
+                    <button
+                      type="button"
+                      onClick={() => setCollapsed((prev) => {
+                        const next = new Set(prev);
+                        if (next.has(col.id)) next.delete(col.id);
+                        else next.add(col.id);
+                        return next;
+                      })}
+                      className="mb-3 flex w-full items-center gap-2 text-left"
+                    >
+                      {isCollapsed
+                        ? <ChevronRightIcon className="size-3.5 text-fg-muted" />
+                        : <ChevronDownIcon className="size-3.5 text-fg-muted" />}
+                      <div className={`h-2.5 w-2.5 rounded-full ${col.accent}`} />
+                      <h3 className="text-sm font-semibold tracking-wide text-fg-2">{col.name}</h3>
+                      <span className="rounded-full bg-overlay px-2 py-0.5 font-mono text-xs text-fg-muted">
+                        {col.items.length}
+                      </span>
+                    </button>
+                    {!isCollapsed && (col.items.length > 0 ? (
+                      <SortableContext items={col.items.map((item) => item.id)} strategy={verticalListSortingStrategy}>
+                        <div className="grid gap-2" style={{ gridTemplateColumns: "5rem 1fr 8rem auto" }}>
+                          {col.items.map((item) => (
+                            <SortableRunRow key={item.id} run={{ ...item, status: col.id, statusLabel: col.name }} />
+                          ))}
+                        </div>
+                      </SortableContext>
+                    ) : (
+                      <p className="py-4 text-center text-sm text-fg-muted">No runs</p>
+                    ))}
+                  </div>
+                );
+              })}
+            </div>
+            {totalRuns === 0 && (
+              <EmptyState />
+            )}
+          </>
         )}
       </div>
     </DndContext>
