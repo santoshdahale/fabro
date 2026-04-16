@@ -80,7 +80,7 @@ mod tests {
         BackoffPolicy {
             initial_delay: Duration::from_micros(1),
             factor:        2.0,
-            max_delay:     Duration::from_secs(60),
+            max_delay:     Duration::from_mins(1),
             jitter:        false,
         }
     }
@@ -249,7 +249,7 @@ mod tests {
             backoff: BackoffPolicy {
                 initial_delay: Duration::from_secs(10), // high, but retry_after is low
                 factor:        2.0,
-                max_delay:     Duration::from_secs(60),
+                max_delay:     Duration::from_mins(1),
                 jitter:        false,
             },
             ..Default::default()

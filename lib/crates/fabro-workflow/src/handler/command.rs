@@ -397,7 +397,7 @@ mod tests {
         );
         node.attrs.insert(
             "timeout".to_string(),
-            AttrValue::Duration(Duration::from_millis(5000)),
+            AttrValue::Duration(Duration::from_secs(5)),
         );
         let context = Context::new();
         let graph = Graph::new("test");

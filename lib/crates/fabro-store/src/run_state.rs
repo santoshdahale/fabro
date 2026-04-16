@@ -223,20 +223,14 @@ impl RunProjection {
                         started_at: Some(ts),
                     });
             }
-            EventBody::InterviewCompleted(props) => {
-                if !props.question_id.is_empty() {
-                    self.pending_interviews.remove(&props.question_id);
-                }
+            EventBody::InterviewCompleted(props) if !props.question_id.is_empty() => {
+                self.pending_interviews.remove(&props.question_id);
             }
-            EventBody::InterviewTimeout(props) => {
-                if !props.question_id.is_empty() {
-                    self.pending_interviews.remove(&props.question_id);
-                }
+            EventBody::InterviewTimeout(props) if !props.question_id.is_empty() => {
+                self.pending_interviews.remove(&props.question_id);
             }
-            EventBody::InterviewInterrupted(props) => {
-                if !props.question_id.is_empty() {
-                    self.pending_interviews.remove(&props.question_id);
-                }
+            EventBody::InterviewInterrupted(props) if !props.question_id.is_empty() => {
+                self.pending_interviews.remove(&props.question_id);
             }
             EventBody::StagePrompt(props) => {
                 let Some(node_id) = stored.node_id.as_deref() else {

@@ -295,7 +295,7 @@ async fn daytona_exec_command_local_timeout() {
     // local timeout (duration ~2100ms). Both are valid success conditions for
     // the system as a whole avoiding a stall.
     assert!(
-        duration < std::time::Duration::from_millis(3000),
+        duration < std::time::Duration::from_secs(3),
         "Command stalled for longer than the local timeout mechanism"
     );
     assert!(result.exit_code != 0);
@@ -2209,7 +2209,7 @@ async fn daytona_playwright_mcp_sandbox_transport() {
         .call_tool(
             install_tool,
             serde_json::json!({}),
-            std::time::Duration::from_secs(120),
+            std::time::Duration::from_mins(2),
         )
         .await;
     match &install_result {

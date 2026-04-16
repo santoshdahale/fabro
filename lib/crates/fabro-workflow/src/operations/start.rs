@@ -297,8 +297,7 @@ impl RunSession {
             accepted_definition.map(|definition| Arc::new(definition.workflow_bundle()));
 
         let (origin_url, detected_base_branch) = detect_repo_info(&working_directory)
-            .map(|(url, branch)| (Some(url), branch))
-            .unwrap_or((None, None));
+            .map_or((None, None), |(url, branch)| (Some(url), branch));
 
         let resolved = fabro_config::resolve_run_from_file(settings)
             .map_err(|errors| Error::Precondition(render_resolve_errors(&errors)))?;

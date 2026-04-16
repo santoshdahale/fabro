@@ -687,8 +687,7 @@ impl AppState {
     fn issue_artifact_upload_token(&self, run_id: &RunId) -> Result<String, ApiError> {
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
-            .map(|duration| duration.as_secs())
-            .unwrap_or(0);
+            .map_or(0, |duration| duration.as_secs());
         let claims = ArtifactUploadClaims {
             iss:    ARTIFACT_UPLOAD_TOKEN_ISSUER.to_string(),
             iat:    now,
@@ -1242,12 +1241,9 @@ async fn get_system_info(
 }
 
 fn system_features(settings: &SettingsLayer) -> SystemFeatures {
-    let session_sandboxes = fabro_config::resolve_features_from_file(settings)
-        .map(|s| s.session_sandboxes)
-        .unwrap_or(false);
-    let retros = fabro_config::resolve_run_from_file(settings)
-        .map(|s| s.execution.retros)
-        .unwrap_or(false);
+    let session_sandboxes =
+        fabro_config::resolve_features_from_file(settings).is_ok_and(|s| s.session_sandboxes);
+    let retros = fabro_config::resolve_run_from_file(settings).is_ok_and(|s| s.execution.retros);
     SystemFeatures {
         session_sandboxes: Some(session_sandboxes),
         retros:            Some(retros),
@@ -9238,7 +9234,7 @@ timeout = "30s"
 
         // Verify columns are included in the response
         let columns = body["columns"].as_array().expect("columns should be array");
-        assert!(columns.len() > 0);
+        assert!(!columns.is_empty());
         assert!(columns.iter().any(|c| c["id"].as_str() == Some("waiting")));
         assert!(
             columns

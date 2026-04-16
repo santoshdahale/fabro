@@ -87,12 +87,12 @@ mod tests {
     #[test]
     fn delay_with_jitter_within_range() {
         let b = BackoffPolicy {
-            initial_delay: Duration::from_millis(1000),
+            initial_delay: Duration::from_secs(1),
             factor:        1.0,
             max_delay:     Duration::from_secs(10),
             jitter:        true,
         };
-        let base = Duration::from_millis(1000);
+        let base = Duration::from_secs(1);
         let min = base.mul_f64(0.5);
         let max = base.mul_f64(1.5);
 

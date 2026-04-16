@@ -67,7 +67,7 @@ pub fn write_env_file(path: &Path, entries: &HashMap<String, String>) -> io::Res
     let tmp_path = parent.join(format!(".{file_name}.tmp-{}", ulid::Ulid::new()));
 
     let mut data = entries.iter().collect::<Vec<_>>();
-    data.sort_by(|(left, _), (right, _)| left.cmp(right));
+    data.sort_by_key(|(left, _)| *left);
     let contents = data
         .into_iter()
         .map(|(key, value)| format!("{key}={}", encode_value(value)))

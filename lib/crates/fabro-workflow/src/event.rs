@@ -2771,7 +2771,7 @@ pub struct Emitter {
 
 impl std::fmt::Debug for Emitter {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let count = self.listeners.lock().map(|l| l.len()).unwrap_or(0);
+        let count = self.listeners.lock().map_or(0, |l| l.len());
         f.debug_struct("Emitter")
             .field("run_id", &self.run_id)
             .field("listener_count", &count)

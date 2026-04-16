@@ -281,7 +281,7 @@ impl DaytonaSandbox {
         use daytona_api_client::models::SnapshotState;
         let mut delay = std::time::Duration::from_secs(2);
         let max_delay = std::time::Duration::from_secs(30);
-        let deadline = Instant::now() + std::time::Duration::from_secs(600);
+        let deadline = Instant::now() + std::time::Duration::from_mins(10);
 
         while Instant::now() < deadline {
             time::sleep(delay).await;

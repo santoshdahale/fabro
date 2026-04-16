@@ -1281,7 +1281,7 @@ mod tests {
                 backoff:      BackoffPolicy {
                     initial_delay: Duration::from_secs(5),
                     factor:        2.0,
-                    max_delay:     Duration::from_secs(60),
+                    max_delay:     Duration::from_mins(1),
                     jitter:        false,
                 },
             }),
@@ -2049,9 +2049,9 @@ mod tests {
                 RetryPolicy {
                     max_attempts: 3,
                     backoff:      BackoffPolicy {
-                        initial_delay: Duration::from_secs(60),
+                        initial_delay: Duration::from_mins(1),
                         factor:        1.0,
-                        max_delay:     Duration::from_secs(60),
+                        max_delay:     Duration::from_mins(1),
                         jitter:        false,
                     },
                 }

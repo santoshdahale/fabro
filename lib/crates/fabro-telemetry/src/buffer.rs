@@ -13,7 +13,7 @@ impl Default for BufferPolicy {
     fn default() -> Self {
         Self {
             count_threshold: 20,
-            time_threshold:  Duration::from_secs(60),
+            time_threshold:  Duration::from_mins(1),
         }
     }
 }
@@ -98,7 +98,7 @@ mod tests {
             &rx,
             BufferPolicy {
                 count_threshold: 2,
-                time_threshold:  Duration::from_secs(60),
+                time_threshold:  Duration::from_mins(1),
             },
             move |tracks| {
                 let events: Vec<String> = tracks.iter().map(|t| t.event.clone()).collect();
@@ -133,7 +133,7 @@ mod tests {
             &rx,
             BufferPolicy {
                 count_threshold: 2,
-                time_threshold:  Duration::from_secs(60),
+                time_threshold:  Duration::from_mins(1),
             },
             move |_| {
                 *mid.lock().unwrap() = true;
@@ -210,7 +210,7 @@ mod tests {
             &rx,
             BufferPolicy {
                 count_threshold: 100, // won't trigger
-                time_threshold:  Duration::from_secs(60),
+                time_threshold:  Duration::from_mins(1),
             },
             move |tracks| {
                 let events: Vec<String> = tracks.iter().map(|t| t.event.clone()).collect();

@@ -294,8 +294,7 @@ mod tests {
         let status = match std::fs::read_to_string(std::path::Path::new("/nonexistent/status.json"))
         {
             Ok(data) => serde_json::from_str::<RunStatusRecord>(&data)
-                .map(|record| record.status)
-                .unwrap_or(RunStatus::Dead),
+                .map_or(RunStatus::Dead, |record| record.status),
             Err(_) => RunStatus::Dead,
         };
         assert_eq!(status, RunStatus::Dead);

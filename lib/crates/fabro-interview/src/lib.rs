@@ -357,7 +357,7 @@ mod tests {
     #[async_trait]
     impl Interviewer for SlowInterviewer {
         async fn ask(&self, _question: Question) -> Answer {
-            time::sleep(std::time::Duration::from_secs(60)).await;
+            time::sleep(std::time::Duration::from_mins(1)).await;
             Answer::yes()
         }
     }

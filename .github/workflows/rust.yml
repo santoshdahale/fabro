@@ -45,9 +45,9 @@ jobs:
           persist-credentials: false
       - uses: dtolnay/rust-toolchain@631a55b12751854ce901bb631d5902ceb48146f7 # stable
         with:
-          toolchain: nightly
+          toolchain: nightly-2026-04-14
           components: rustfmt
-      - run: cargo +nightly fmt --check --all
+      - run: cargo +nightly-2026-04-14 fmt --check --all
 
   clippy:
     name: Clippy
@@ -57,10 +57,13 @@ jobs:
         with:
           persist-credentials: false
       - uses: dtolnay/rust-toolchain@631a55b12751854ce901bb631d5902ceb48146f7 # stable
+        with:
+          toolchain: nightly-2026-04-14
+          components: clippy
       - uses: Swatinem/rust-cache@779680da715d629ac1d338a641029a2f4372abb5 # v2
         with:
           cache-on-failure: true
-      - run: cargo clippy --workspace --all-targets -- -D warnings
+      - run: cargo +nightly-2026-04-14 clippy --workspace --all-targets -- -D warnings
 
   test:
     name: Test (Linux)

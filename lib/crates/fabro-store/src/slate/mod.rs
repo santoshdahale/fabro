@@ -170,7 +170,7 @@ impl Database {
             }
             summaries.push(RunDatabase::build_summary(&db, &run_id).await?);
         }
-        summaries.sort_by(|a, b| b.run_id.created_at().cmp(&a.run_id.created_at()));
+        summaries.sort_by_key(|b| std::cmp::Reverse(b.run_id.created_at()));
         Ok(summaries)
     }
 

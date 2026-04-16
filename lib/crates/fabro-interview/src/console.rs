@@ -236,7 +236,7 @@ impl Interviewer for ConsoleInterviewer {
 
         // Non-TTY fallback: line-based stdin reading
         let s = self.styles;
-        eprintln!("{} {}", s.bold_cyan.apply_to("?"), question.text,);
+        eprintln!("{} {}", s.bold_cyan.apply_to("?"), question.text);
 
         match question.question_type {
             QuestionType::MultipleChoice | QuestionType::MultiSelect => {

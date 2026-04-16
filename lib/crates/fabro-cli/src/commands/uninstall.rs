@@ -94,7 +94,7 @@ fn dir_size(path: &Path) -> u64 {
             if ft.is_dir() {
                 total += dir_size(&entry.path());
             } else {
-                total += entry.metadata().map(|m| m.len()).unwrap_or(0);
+                total += entry.metadata().map_or(0, |m| m.len());
             }
         }
     }

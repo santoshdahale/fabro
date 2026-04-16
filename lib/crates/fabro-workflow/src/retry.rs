@@ -4,9 +4,9 @@ use fabro_core::retry::{BackoffPolicy, RetryPolicy};
 use fabro_graphviz::graph::types::{Graph as GvGraph, Node as GvNode};
 
 const DEFAULT_BACKOFF: BackoffPolicy = BackoffPolicy {
-    initial_delay: Duration::from_millis(5_000),
+    initial_delay: Duration::from_secs(5),
     factor:        2.0,
-    max_delay:     Duration::from_millis(60_000),
+    max_delay:     Duration::from_mins(1),
     jitter:        true,
 };
 
@@ -59,7 +59,7 @@ fn preset_retry_policy(preset: &str) -> Option<RetryPolicy> {
         "patient" => Some(RetryPolicy {
             max_attempts: 3,
             backoff:      BackoffPolicy {
-                initial_delay: Duration::from_millis(2_000),
+                initial_delay: Duration::from_secs(2),
                 factor: 3.0,
                 ..DEFAULT_BACKOFF
             },
@@ -126,7 +126,7 @@ mod tests {
         let graph = Graph::new("test");
         let policy = build_retry_policy(&node, &graph);
         assert_eq!(policy.max_attempts, 4);
-        assert_eq!(policy.backoff.initial_delay, Duration::from_millis(5_000));
+        assert_eq!(policy.backoff.initial_delay, Duration::from_secs(5));
     }
 
     #[test]

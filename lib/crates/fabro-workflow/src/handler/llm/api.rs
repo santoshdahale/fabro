@@ -110,11 +110,9 @@ fn track_file_event(event: &AgentEvent, state: &mut FileTracking) {
             tool_name,
             tool_call_id,
             arguments,
-        } => {
-            if tool_name == "write_file" || tool_name == "edit_file" {
-                if let Some(path) = arguments.get("file_path").and_then(|v| v.as_str()) {
-                    state.pending.insert(tool_call_id.clone(), path.to_string());
-                }
+        } if tool_name == "write_file" || tool_name == "edit_file" => {
+            if let Some(path) = arguments.get("file_path").and_then(|v| v.as_str()) {
+                state.pending.insert(tool_call_id.clone(), path.to_string());
             }
         }
         AgentEvent::ToolCallCompleted {

@@ -724,7 +724,7 @@ impl Default for RetryPolicy {
             backoff:     BackoffPolicy {
                 initial_delay: std::time::Duration::from_secs(1),
                 factor:        2.0,
-                max_delay:     std::time::Duration::from_secs(60),
+                max_delay:     std::time::Duration::from_mins(1),
                 jitter:        true,
             },
             on_retry:    None,
@@ -1112,7 +1112,7 @@ mod tests {
             backoff: BackoffPolicy {
                 initial_delay: Duration::from_secs(1),
                 factor:        2.0,
-                max_delay:     Duration::from_secs(60),
+                max_delay:     Duration::from_mins(1),
                 jitter:        false,
             },
             ..Default::default()
@@ -1148,7 +1148,7 @@ mod tests {
             backoff: BackoffPolicy {
                 initial_delay: Duration::from_secs(1),
                 factor:        2.0,
-                max_delay:     Duration::from_secs(60),
+                max_delay:     Duration::from_mins(1),
                 jitter:        true,
             },
             ..Default::default()

@@ -130,9 +130,7 @@ fn eval_clause(clause: &Clause, outcome: &Outcome, context: &Context) -> bool {
         Op::Matches => {
             let resolved = resolve_key(&clause.key, outcome, context);
             // Regex was validated at parse time, so unwrap is safe
-            regex::Regex::new(&clause.value)
-                .map(|re| re.is_match(&resolved))
-                .unwrap_or(false)
+            regex::Regex::new(&clause.value).is_ok_and(|re| re.is_match(&resolved))
         }
     }
 }

@@ -787,7 +787,7 @@ mod tests {
 
     #[test]
     fn parse_duration_str_minutes() {
-        assert_eq!(parse_duration_str("5m"), Duration::from_secs(300));
+        assert_eq!(parse_duration_str("5m"), Duration::from_mins(5));
     }
 
     #[test]

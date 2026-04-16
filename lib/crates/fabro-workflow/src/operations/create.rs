@@ -75,8 +75,7 @@ pub async fn create(store: &Database, request: CreateRunInput) -> Result<Created
     .map_err(|err| Error::Parse(err.to_string()))?;
 
     if fabro_config::resolve_run_from_file(&resolved.settings)
-        .map(|settings| settings.execution.mode != RunMode::DryRun)
-        .unwrap_or(true)
+        .map_or(true, |settings| settings.execution.mode != RunMode::DryRun)
     {
         validate_sandbox_provider(&resolved.settings)?;
     }

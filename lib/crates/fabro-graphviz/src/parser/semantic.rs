@@ -283,7 +283,7 @@ mod tests {
     fn convert_ast_duration_str() {
         assert_eq!(
             convert_value(&AstValue::Str("900s".into())),
-            AttrValue::Duration(Duration::from_secs(900))
+            AttrValue::Duration(Duration::from_mins(15))
         );
         assert_eq!(
             convert_value(&AstValue::Str("250ms".into())),
@@ -291,15 +291,15 @@ mod tests {
         );
         assert_eq!(
             convert_value(&AstValue::Str("15m".into())),
-            AttrValue::Duration(Duration::from_secs(900))
+            AttrValue::Duration(Duration::from_mins(15))
         );
         assert_eq!(
             convert_value(&AstValue::Str("2h".into())),
-            AttrValue::Duration(Duration::from_secs(7200))
+            AttrValue::Duration(Duration::from_hours(2))
         );
         assert_eq!(
             convert_value(&AstValue::Str("1d".into())),
-            AttrValue::Duration(Duration::from_secs(86400))
+            AttrValue::Duration(Duration::from_hours(24))
         );
     }
 
@@ -413,7 +413,7 @@ mod tests {
         );
         assert_eq!(
             plan.attrs.get("timeout").and_then(AttrValue::as_duration),
-            Some(Duration::from_secs(900))
+            Some(Duration::from_mins(15))
         );
 
         let implement = &graph.nodes["implement"];
@@ -422,7 +422,7 @@ mod tests {
                 .attrs
                 .get("timeout")
                 .and_then(AttrValue::as_duration),
-            Some(Duration::from_secs(1800))
+            Some(Duration::from_mins(30))
         );
     }
 

@@ -396,7 +396,7 @@ async fn resolve_devcontainer(options: &mut InitOptions) -> Result<(), Error> {
         .sandbox
         .apply_devcontainer_snapshot(devcontainer_to_snapshot_config(&config));
 
-    let timeout = std::time::Duration::from_millis(300_000);
+    let timeout = std::time::Duration::from_mins(5);
     for command in &config.initialize_commands {
         let shell_commands = match command {
             fabro_devcontainer::Command::Shell(shell) => vec![shell.clone()],

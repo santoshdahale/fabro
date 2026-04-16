@@ -451,7 +451,7 @@ impl Graph {
         {
             Some(d) if d.is_zero() => None,
             Some(d) => Some(d),
-            None => Some(Duration::from_secs(1800)),
+            None => Some(Duration::from_mins(30)),
         }
     }
 
@@ -763,7 +763,7 @@ mod tests {
     #[test]
     fn graph_stall_timeout_default() {
         let g = Graph::new("empty");
-        assert_eq!(g.stall_timeout(), Some(Duration::from_secs(1800)));
+        assert_eq!(g.stall_timeout(), Some(Duration::from_mins(30)));
     }
 
     #[test]

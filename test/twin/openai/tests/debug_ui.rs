@@ -269,8 +269,7 @@ async fn debug_page_renders_in_headless_chrome() {
             std::process::Command::new("which")
                 .arg(name)
                 .output()
-                .map(|o| o.status.success())
-                .unwrap_or(false)
+                .is_ok_and(|o| o.status.success())
         });
 
     let Some(chrome_binary) = chrome_binary.copied() else {

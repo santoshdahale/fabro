@@ -17,7 +17,7 @@ fn test_exec_creates_file() {
         "claude-haiku-4-5",
         "Create a file called hello.txt containing exactly 'Hello from exec scenario'",
     ]);
-    cmd.timeout(Duration::from_secs(120));
+    cmd.timeout(Duration::from_mins(2));
     cmd.assert().success();
 
     let hello = context.temp_dir.join("hello.txt");

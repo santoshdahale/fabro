@@ -218,8 +218,7 @@ fn session_cookie_secure(state: &AppState) -> bool {
         .web
         .url
         .resolve(|name| std::env::var(name).ok())
-        .map(|resolved| resolved.value.starts_with("https://"))
-        .unwrap_or(false)
+        .is_ok_and(|resolved| resolved.value.starts_with("https://"))
 }
 
 async fn login_dev_token(

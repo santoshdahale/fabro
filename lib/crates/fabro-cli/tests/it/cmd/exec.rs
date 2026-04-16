@@ -264,7 +264,7 @@ fn exec_creates_file() {
             "claude-haiku-4-5",
             "Create a file called hello.txt containing exactly 'Hello'",
         ])
-        .timeout(std::time::Duration::from_secs(120))
+        .timeout(std::time::Duration::from_mins(2))
         .assert()
         .success();
     let path = context.temp_dir.join("hello.txt");
@@ -291,7 +291,7 @@ fn exec_shell_command() {
             "claude-haiku-4-5",
             "Run the shell command `echo arc_test_marker_42` and tell me what it printed",
         ])
-        .timeout(std::time::Duration::from_secs(120))
+        .timeout(std::time::Duration::from_mins(2))
         .assert()
         .success();
 }
@@ -311,7 +311,7 @@ fn exec_read_only_blocks_write() {
             "claude-haiku-4-5",
             "Create a file called forbidden.txt containing 'should not exist'",
         ])
-        .timeout(std::time::Duration::from_secs(120))
+        .timeout(std::time::Duration::from_mins(2))
         .assert()
         .success();
     assert!(
@@ -337,7 +337,7 @@ fn exec_json_output_format() {
             "claude-haiku-4-5",
             "Create a file called test.txt containing 'test'",
         ])
-        .timeout(std::time::Duration::from_secs(120))
+        .timeout(std::time::Duration::from_mins(2))
         .assert()
         .success()
         .get_output()
@@ -372,7 +372,7 @@ fn exec_read_and_edit() {
             "claude-haiku-4-5",
             "Read data.txt then replace its entire content with 'new content'",
         ])
-        .timeout(std::time::Duration::from_secs(120))
+        .timeout(std::time::Duration::from_mins(2))
         .assert()
         .success();
     let content =

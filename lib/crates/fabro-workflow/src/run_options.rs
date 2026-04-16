@@ -45,8 +45,7 @@ pub struct RunOptions {
 impl RunOptions {
     pub fn dry_run_enabled(&self) -> bool {
         fabro_config::resolve_run_from_file(&self.settings)
-            .map(|settings| settings.execution.mode == RunMode::DryRun)
-            .unwrap_or(false)
+            .is_ok_and(|settings| settings.execution.mode == RunMode::DryRun)
     }
 
     pub fn checkpoint_exclude_globs(&self) -> Vec<String> {

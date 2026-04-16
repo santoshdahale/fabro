@@ -75,13 +75,11 @@ pub(crate) async fn attach_run_with_client(
     let state = client.get_run_state(run_id).await?;
     let auto_approve = state.run.as_ref().is_some_and(|record| {
         fabro_config::resolve_run_from_file(&record.settings)
-            .map(|settings| settings.execution.approval == ApprovalMode::Auto)
-            .unwrap_or(false)
+            .is_ok_and(|settings| settings.execution.approval == ApprovalMode::Auto)
     });
     let verbose = state.run.as_ref().is_some_and(|record| {
         fabro_config::resolve_cli_from_file(&record.settings)
-            .map(|settings| settings.output.verbosity == OutputVerbosity::Verbose)
-            .unwrap_or(false)
+            .is_ok_and(|settings| settings.output.verbosity == OutputVerbosity::Verbose)
     });
     let events = client.list_run_events(run_id, None, None).await?;
     let replay_events = events.clone();

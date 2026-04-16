@@ -167,7 +167,7 @@ pub(super) use sandbox_tests;
 
 pub(super) fn timeout_for(sandbox: &str) -> Duration {
     match sandbox {
-        "daytona" => Duration::from_secs(600),
-        _ => Duration::from_secs(180),
+        "daytona" => Duration::from_mins(10),
+        _ => Duration::from_mins(3),
     }
 }

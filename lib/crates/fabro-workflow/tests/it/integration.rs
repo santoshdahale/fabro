@@ -6254,7 +6254,7 @@ mod real_llm {
             git:              None,
         };
         let (outcome, state) = tokio::time::timeout(
-            std::time::Duration::from_secs(120),
+            std::time::Duration::from_mins(2),
             engine.run_with_state(&graph, &run_options),
         )
         .await
@@ -6362,7 +6362,7 @@ mod real_llm {
             git:              None,
         };
         let outcome = tokio::time::timeout(
-            std::time::Duration::from_secs(120),
+            std::time::Duration::from_mins(2),
             engine.run(&graph, &run_options),
         )
         .await
@@ -6494,7 +6494,7 @@ mod real_llm {
             git:              None,
         };
         let outcome = tokio::time::timeout(
-            std::time::Duration::from_secs(120),
+            std::time::Duration::from_mins(2),
             engine.run(&graph, &run_options),
         )
         .await
@@ -7214,14 +7214,14 @@ fn subgraph_node_defaults_scoped_to_subgraph() {
     // Plan inherits both thread_id and timeout from subgraph defaults
     let plan = &graph.nodes["plan"];
     assert_eq!(plan.thread_id(), Some("loop-a"));
-    assert_eq!(plan.timeout(), Some(std::time::Duration::from_secs(900)));
+    assert_eq!(plan.timeout(), Some(std::time::Duration::from_mins(15)));
 
     // Implement inherits thread_id but overrides timeout
     let implement = &graph.nodes["implement"];
     assert_eq!(implement.thread_id(), Some("loop-a"));
     assert_eq!(
         implement.timeout(),
-        Some(std::time::Duration::from_secs(1800))
+        Some(std::time::Duration::from_mins(30))
     );
 
     // Outside node should NOT have subgraph defaults
@@ -7302,11 +7302,11 @@ fn subgraph_scoping_does_not_leak_to_outer_scope() {
 
     // Inner node gets the subgraph-scoped timeout of 900s
     let inner = &graph.nodes["inner_node"];
-    assert_eq!(inner.timeout(), Some(std::time::Duration::from_secs(900)));
+    assert_eq!(inner.timeout(), Some(std::time::Duration::from_mins(15)));
 
     // Outer node gets the graph-level default of 300s, not the subgraph's 900s
     let outer = &graph.nodes["outer_node"];
-    assert_eq!(outer.timeout(), Some(std::time::Duration::from_secs(300)));
+    assert_eq!(outer.timeout(), Some(std::time::Duration::from_mins(5)));
 }
 
 #[test]
@@ -7331,13 +7331,13 @@ fn subgraph_global_defaults_plus_subgraph_defaults() {
     let step = &graph.nodes["step"];
     assert_eq!(step.shape(), "box");
     assert_eq!(step.thread_id(), Some("loop-thread"));
-    assert_eq!(step.timeout(), Some(std::time::Duration::from_secs(300)));
+    assert_eq!(step.timeout(), Some(std::time::Duration::from_mins(5)));
 
     // Plain should have the global defaults but no thread_id
     let plain = &graph.nodes["plain"];
     assert_eq!(plain.shape(), "box");
     assert_eq!(plain.thread_id(), None);
-    assert_eq!(plain.timeout(), Some(std::time::Duration::from_secs(300)));
+    assert_eq!(plain.timeout(), Some(std::time::Duration::from_mins(5)));
 }
 
 #[test]
@@ -7377,7 +7377,7 @@ fn subgraph_without_label_no_class_derived() {
     let worker = &graph.nodes["worker"];
     assert!(worker.classes.is_empty());
     // But the default should still apply
-    assert_eq!(worker.timeout(), Some(std::time::Duration::from_secs(600)));
+    assert_eq!(worker.timeout(), Some(std::time::Duration::from_mins(10)));
 }
 
 // ---------------------------------------------------------------------------
@@ -12239,7 +12239,7 @@ impl Handler for HangingHandler {
         _run_dir: &Path,
         _services: &fabro_workflow::handler::EngineServices,
     ) -> Result<Outcome, Error> {
-        tokio::time::sleep(std::time::Duration::from_secs(60)).await;
+        tokio::time::sleep(std::time::Duration::from_mins(1)).await;
         Ok(Outcome::success())
     }
 }
