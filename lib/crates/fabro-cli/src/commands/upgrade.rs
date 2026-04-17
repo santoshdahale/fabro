@@ -31,6 +31,95 @@ fn http_client() -> Result<fabro_http::HttpClient> {
         .context("failed to build HTTP client")
 }
 
+// ── Install source detection ───────────────────────────────────────────────
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum InstallSource {
+    Tarball,
+    Brew { channel: BrewChannel },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum BrewChannel {
+    Stable,
+    Nightly,
+}
+
+impl InstallSource {
+    fn cache_tag(self) -> &'static str {
+        match self {
+            Self::Tarball => "tarball",
+            Self::Brew {
+                channel: BrewChannel::Stable,
+            } => "brew-stable",
+            Self::Brew {
+                channel: BrewChannel::Nightly,
+            } => "brew-nightly",
+        }
+    }
+}
+
+fn upgrade_command_for(source: InstallSource) -> &'static str {
+    match source {
+        InstallSource::Tarball => "fabro upgrade",
+        InstallSource::Brew {
+            channel: BrewChannel::Stable,
+        } => "brew upgrade fabro",
+        InstallSource::Brew {
+            channel: BrewChannel::Nightly,
+        } => "brew upgrade fabro-nightly",
+    }
+}
+
+fn detect_install_source(current_exe: &Path) -> InstallSource {
+    let s = current_exe.to_string_lossy();
+    if s.contains("/Cellar/fabro-nightly/") {
+        InstallSource::Brew {
+            channel: BrewChannel::Nightly,
+        }
+    } else if s.contains("/Cellar/fabro/") {
+        InstallSource::Brew {
+            channel: BrewChannel::Stable,
+        }
+    } else {
+        InstallSource::Tarball
+    }
+}
+
+// ── Homebrew tap manifest ──────────────────────────────────────────────────
+
+const TAP_VERSIONS_URL: &str =
+    "https://raw.githubusercontent.com/fabro-sh/homebrew-tap/main/versions.json";
+
+fn parse_tap_versions(body: &str, channel: BrewChannel) -> Result<String> {
+    let v: serde_json::Value = serde_json::from_str(body).context("parsing tap versions.json")?;
+    let key = match channel {
+        BrewChannel::Stable => "stable",
+        BrewChannel::Nightly => "nightly",
+    };
+    v.get(key)
+        .and_then(|c| c.get("version"))
+        .and_then(|s| s.as_str())
+        .map(str::to_string)
+        .with_context(|| format!("missing {key}.version in tap versions.json"))
+}
+
+async fn fetch_tap_version(
+    client: &fabro_http::HttpClient,
+    channel: BrewChannel,
+) -> Result<String> {
+    let resp = client
+        .get(TAP_VERSIONS_URL)
+        .send()
+        .await
+        .context("failed to fetch tap versions.json")?;
+    if !resp.status().is_success() {
+        bail!("tap versions.json returned HTTP {}", resp.status());
+    }
+    let body = resp.text().await?;
+    parse_tap_versions(&body, channel)
+}
+
 impl Backend {
     async fn fetch_latest_release_tag(&self) -> Result<String> {
         match self {
@@ -257,6 +346,8 @@ const LAST_CHECK_FILE: &str = "last_upgrade_check.json";
 struct UpgradeCheckState {
     checked_at:     u64,
     latest_version: String,
+    #[serde(default)]
+    install_source: Option<String>,
 }
 
 impl UpgradeCheckState {
@@ -266,6 +357,10 @@ impl UpgradeCheckState {
             .unwrap_or_default()
             .as_secs();
         now.saturating_sub(self.checked_at) >= CHECK_INTERVAL_SECS
+    }
+
+    fn is_usable_for(&self, source: InstallSource) -> bool {
+        !self.is_stale() && self.install_source.as_deref() == Some(source.cache_tag())
     }
 
     fn load(path: &Path) -> Option<Self> {
@@ -292,6 +387,15 @@ pub(crate) async fn run_upgrade(
     cli: &CliSettings,
     printer: Printer,
 ) -> Result<()> {
+    let current_exe = std::env::current_exe()
+        .context("resolving current fabro executable path")?
+        .canonicalize()
+        .context("canonicalizing current fabro executable path")?;
+
+    if let InstallSource::Brew { channel } = detect_install_source(&current_exe) {
+        return run_upgrade_brew(&args, cli, printer, channel);
+    }
+
     let backend = select_backend().await;
 
     let current =
@@ -370,10 +474,6 @@ pub(crate) async fn run_upgrade(
     let tarball_name = format!("fabro-{triple}.tar.gz");
     let checksum_name = format!("{tarball_name}.sha256");
 
-    let current_exe = std::env::current_exe()
-        .context("resolving current fabro executable path")?
-        .canonicalize()
-        .context("canonicalizing current fabro executable path")?;
     let exe_dir = current_exe
         .parent()
         .context("could not determine executable directory")?;
@@ -443,6 +543,49 @@ pub(crate) async fn run_upgrade(
     Ok(())
 }
 
+// ── Homebrew-managed upgrade path ──────────────────────────────────────────
+
+fn run_upgrade_brew(
+    args: &UpgradeArgs,
+    cli: &CliSettings,
+    printer: Printer,
+    channel: BrewChannel,
+) -> Result<()> {
+    let formula = match channel {
+        BrewChannel::Stable => "fabro",
+        BrewChannel::Nightly => "fabro-nightly",
+    };
+    let cmd = format!("brew upgrade {formula}");
+
+    if args.version.is_some() || args.prerelease || args.force {
+        bail!(
+            "fabro is managed by Homebrew (formula `{formula}`); Homebrew selects the version \
+             and channel. Use `brew upgrade {formula}` (or reinstall with a different formula) \
+             instead of `fabro upgrade --version`/`--prerelease`/`--force`."
+        );
+    }
+
+    if args.dry_run {
+        if cli.output.format == OutputFormat::Json {
+            print_json_pretty(&serde_json::json!({
+                "install_source": "homebrew",
+                "formula": formula,
+                "brew_command": cmd,
+                "dry_run": true,
+                "note": "fabro is Homebrew-managed; no in-place upgrade attempted",
+            }))?;
+        } else {
+            fabro_util::printerr!(printer, "fabro was installed via Homebrew.");
+            fabro_util::printerr!(printer, "Run `{cmd}` to update.");
+        }
+        return Ok(());
+    }
+
+    fabro_util::printerr!(printer, "fabro was installed via Homebrew.");
+    fabro_util::printerr!(printer, "Run `{cmd}` to update.");
+    bail!("refusing to overwrite a Homebrew-managed binary");
+}
+
 // ── Auto version check ────────────────────────────────────────────────────
 
 /// Spawn a background task that checks for a newer version and prints a notice
@@ -464,24 +607,50 @@ async fn check_and_print_notice(printer: Printer) -> Result<()> {
 
     let current = Version::parse(env!("CARGO_PKG_VERSION"))?;
 
-    // Check cached state first
+    let current_exe = match std::env::current_exe().and_then(|p| p.canonicalize()) {
+        Ok(p) => p,
+        Err(e) => {
+            debug!(%e, "skipping upgrade notice: cannot resolve current executable");
+            return Ok(());
+        }
+    };
+    let source = detect_install_source(&current_exe);
+
     if let Some(state) = UpgradeCheckState::load(&state_path) {
-        if !state.is_stale() {
+        if state.is_usable_for(source) {
             if let Ok(latest) = Version::parse(&state.latest_version) {
                 if latest > current {
-                    print_notice(&current, &latest, printer);
+                    print_notice(&current, &latest, source, printer);
                 }
             }
             return Ok(());
         }
     }
 
-    // Fetch latest version
-    let backend = select_backend().await;
-    let tag = backend.fetch_latest_release_tag().await?;
-    let latest = parse_version_from_tag(&tag)?;
+    let latest = match source {
+        InstallSource::Brew { channel } => {
+            let client = match http_client() {
+                Ok(c) => c,
+                Err(e) => {
+                    debug!(%e, "skipping upgrade notice: failed to build HTTP client");
+                    return Ok(());
+                }
+            };
+            match fetch_tap_version(&client, channel).await {
+                Ok(v) => parse_version_from_tag(&v)?,
+                Err(e) => {
+                    debug!(%e, "skipping upgrade notice: tap manifest fetch failed");
+                    return Ok(());
+                }
+            }
+        }
+        InstallSource::Tarball => {
+            let backend = select_backend().await;
+            let tag = backend.fetch_latest_release_tag().await?;
+            parse_version_from_tag(&tag)?
+        }
+    };
 
-    // Save state
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
@@ -489,22 +658,23 @@ async fn check_and_print_notice(printer: Printer) -> Result<()> {
     let state = UpgradeCheckState {
         checked_at:     now,
         latest_version: latest.to_string(),
+        install_source: Some(source.cache_tag().to_string()),
     };
     let _ = state.save(&state_path);
 
     if latest > current {
-        print_notice(&current, &latest, printer);
+        print_notice(&current, &latest, source, printer);
     }
 
     Ok(())
 }
 
-fn print_notice(current: &Version, latest: &Version, printer: Printer) {
+fn print_notice(current: &Version, latest: &Version, source: InstallSource, printer: Printer) {
     fabro_util::printerr!(
         printer,
         "A new version of fabro is available: {latest} (current: {current})"
     );
-    fabro_util::printerr!(printer, "Run `fabro upgrade` to update.");
+    fabro_util::printerr!(printer, "Run `{}` to update.", upgrade_command_for(source));
 }
 
 // ── Tests ──────────────────────────────────────────────────────────────────
@@ -585,11 +755,13 @@ mod tests {
         let state = UpgradeCheckState {
             checked_at:     1_710_000_000,
             latest_version: "0.5.0".to_string(),
+            install_source: Some("tarball".to_string()),
         };
         let json = serde_json::to_string(&state).unwrap();
         let parsed: UpgradeCheckState = serde_json::from_str(&json).unwrap();
         assert_eq!(parsed.checked_at, 1_710_000_000);
         assert_eq!(parsed.latest_version, "0.5.0");
+        assert_eq!(parsed.install_source.as_deref(), Some("tarball"));
     }
 
     #[test]
@@ -597,19 +769,17 @@ mod tests {
         let old = UpgradeCheckState {
             checked_at:     0, // epoch — definitely stale
             latest_version: "0.1.0".to_string(),
+            install_source: Some("tarball".to_string()),
         };
         assert!(old.is_stale());
     }
 
     #[test]
     fn upgrade_check_state_fresh() {
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_secs();
         let fresh = UpgradeCheckState {
-            checked_at:     now,
+            checked_at:     now_secs(),
             latest_version: "0.5.0".to_string(),
+            install_source: Some("tarball".to_string()),
         };
         assert!(!fresh.is_stale());
     }
@@ -621,11 +791,13 @@ mod tests {
         let state = UpgradeCheckState {
             checked_at:     1_710_000_000,
             latest_version: "0.5.0".to_string(),
+            install_source: Some("brew-stable".to_string()),
         };
         state.save(&path).unwrap();
         let loaded = UpgradeCheckState::load(&path).unwrap();
         assert_eq!(loaded.checked_at, 1_710_000_000);
         assert_eq!(loaded.latest_version, "0.5.0");
+        assert_eq!(loaded.install_source.as_deref(), Some("brew-stable"));
     }
 
     // -- Backend selection --
@@ -702,5 +874,261 @@ mod tests {
     #[test]
     fn pick_latest_tag_returns_none_for_empty_input() {
         assert_eq!(pick_latest_tag(&[]), None);
+    }
+
+    // -- Install source detection --
+
+    #[test]
+    fn detect_install_source_macos_arm_cellar() {
+        let p = PathBuf::from("/opt/homebrew/Cellar/fabro/0.176.2/bin/fabro");
+        assert_eq!(detect_install_source(&p), InstallSource::Brew {
+            channel: BrewChannel::Stable,
+        });
+    }
+
+    #[test]
+    fn detect_install_source_macos_intel_cellar() {
+        let p = PathBuf::from("/usr/local/Cellar/fabro/0.176.2/bin/fabro");
+        assert_eq!(detect_install_source(&p), InstallSource::Brew {
+            channel: BrewChannel::Stable,
+        });
+    }
+
+    #[test]
+    fn detect_install_source_linuxbrew() {
+        let p = PathBuf::from("/home/linuxbrew/.linuxbrew/Cellar/fabro/0.176.2/bin/fabro");
+        assert_eq!(detect_install_source(&p), InstallSource::Brew {
+            channel: BrewChannel::Stable,
+        });
+    }
+
+    #[test]
+    fn detect_install_source_nightly() {
+        let p = PathBuf::from("/opt/homebrew/Cellar/fabro-nightly/0.205.0-nightly.0/bin/fabro");
+        assert_eq!(detect_install_source(&p), InstallSource::Brew {
+            channel: BrewChannel::Nightly,
+        });
+    }
+
+    #[test]
+    fn detect_install_source_tarball() {
+        let p = PathBuf::from("/usr/local/bin/fabro");
+        assert_eq!(detect_install_source(&p), InstallSource::Tarball);
+    }
+
+    #[test]
+    fn detect_install_source_home() {
+        let p = PathBuf::from("/Users/foo/.fabro/bin/fabro");
+        assert_eq!(detect_install_source(&p), InstallSource::Tarball);
+    }
+
+    // -- Tap versions.json parsing --
+
+    const TAP_FIXTURE: &str = r#"{
+        "stable":  { "version": "0.204.0",           "tag": "v0.204.0" },
+        "nightly": { "version": "0.205.0-nightly.0", "tag": "v0.205.0-nightly.0" }
+    }"#;
+
+    #[test]
+    fn parse_tap_versions_stable() {
+        assert_eq!(
+            parse_tap_versions(TAP_FIXTURE, BrewChannel::Stable).unwrap(),
+            "0.204.0"
+        );
+    }
+
+    #[test]
+    fn parse_tap_versions_nightly() {
+        assert_eq!(
+            parse_tap_versions(TAP_FIXTURE, BrewChannel::Nightly).unwrap(),
+            "0.205.0-nightly.0"
+        );
+    }
+
+    #[test]
+    fn parse_tap_versions_missing_channel_errors() {
+        let body = r#"{ "stable": { "version": "0.1.0" } }"#;
+        assert!(parse_tap_versions(body, BrewChannel::Nightly).is_err());
+    }
+
+    #[test]
+    fn parse_tap_versions_malformed_errors() {
+        assert!(parse_tap_versions("not json", BrewChannel::Stable).is_err());
+    }
+
+    // -- Source-aware cache --
+
+    fn now_secs() -> u64 {
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs()
+    }
+
+    #[test]
+    fn cache_is_usable_when_source_matches() {
+        let state = UpgradeCheckState {
+            checked_at:     now_secs(),
+            latest_version: "0.5.0".into(),
+            install_source: Some("brew-stable".into()),
+        };
+        assert!(state.is_usable_for(InstallSource::Brew {
+            channel: BrewChannel::Stable,
+        }));
+    }
+
+    #[test]
+    fn cache_ignored_when_channel_differs() {
+        let state = UpgradeCheckState {
+            checked_at:     now_secs(),
+            latest_version: "0.5.0".into(),
+            install_source: Some("brew-stable".into()),
+        };
+        assert!(!state.is_usable_for(InstallSource::Brew {
+            channel: BrewChannel::Nightly,
+        }));
+    }
+
+    #[test]
+    fn cache_ignored_when_source_differs() {
+        let state = UpgradeCheckState {
+            checked_at:     now_secs(),
+            latest_version: "0.5.0".into(),
+            install_source: Some("tarball".into()),
+        };
+        assert!(!state.is_usable_for(InstallSource::Brew {
+            channel: BrewChannel::Stable,
+        }));
+    }
+
+    #[test]
+    fn legacy_cache_without_install_source_is_not_usable() {
+        let state = UpgradeCheckState {
+            checked_at:     now_secs(),
+            latest_version: "0.5.0".into(),
+            install_source: None,
+        };
+        assert!(!state.is_usable_for(InstallSource::Tarball));
+        assert!(!state.is_usable_for(InstallSource::Brew {
+            channel: BrewChannel::Stable,
+        }));
+    }
+
+    #[test]
+    fn legacy_cache_json_deserializes_with_none_source() {
+        // Old payload shape — no install_source field.
+        let json = r#"{"checked_at":1710000000,"latest_version":"0.5.0"}"#;
+        let state: UpgradeCheckState = serde_json::from_str(json).unwrap();
+        assert_eq!(state.install_source, None);
+    }
+
+    // -- Notice command selection --
+
+    #[test]
+    fn upgrade_command_tarball() {
+        assert_eq!(upgrade_command_for(InstallSource::Tarball), "fabro upgrade");
+    }
+
+    #[test]
+    fn upgrade_command_brew_stable() {
+        assert_eq!(
+            upgrade_command_for(InstallSource::Brew {
+                channel: BrewChannel::Stable,
+            }),
+            "brew upgrade fabro"
+        );
+    }
+
+    #[test]
+    fn upgrade_command_brew_nightly() {
+        assert_eq!(
+            upgrade_command_for(InstallSource::Brew {
+                channel: BrewChannel::Nightly,
+            }),
+            "brew upgrade fabro-nightly"
+        );
+    }
+
+    // -- Brew-managed run_upgrade path --
+
+    fn brew_args(
+        version: Option<&str>,
+        prerelease: bool,
+        force: bool,
+        dry_run: bool,
+    ) -> UpgradeArgs {
+        UpgradeArgs {
+            version: version.map(str::to_string),
+            prerelease,
+            force,
+            dry_run,
+        }
+    }
+
+    #[test]
+    fn run_upgrade_brew_refuses_by_default() {
+        let cli = CliSettings::default();
+        let err = run_upgrade_brew(
+            &brew_args(None, false, false, false),
+            &cli,
+            Printer::Silent,
+            BrewChannel::Stable,
+        )
+        .unwrap_err();
+        assert!(
+            err.to_string().contains("Homebrew"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn run_upgrade_brew_dry_run_returns_ok() {
+        let cli = CliSettings::default();
+        let result = run_upgrade_brew(
+            &brew_args(None, false, false, true),
+            &cli,
+            Printer::Silent,
+            BrewChannel::Nightly,
+        );
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn run_upgrade_brew_rejects_version_flag() {
+        let cli = CliSettings::default();
+        let err = run_upgrade_brew(
+            &brew_args(Some("0.1.0"), false, false, false),
+            &cli,
+            Printer::Silent,
+            BrewChannel::Stable,
+        )
+        .unwrap_err();
+        assert!(err.to_string().contains("Homebrew"));
+    }
+
+    #[test]
+    fn run_upgrade_brew_rejects_prerelease_flag() {
+        let cli = CliSettings::default();
+        let err = run_upgrade_brew(
+            &brew_args(None, true, false, false),
+            &cli,
+            Printer::Silent,
+            BrewChannel::Stable,
+        )
+        .unwrap_err();
+        assert!(err.to_string().contains("Homebrew"));
+    }
+
+    #[test]
+    fn run_upgrade_brew_rejects_force_flag() {
+        let cli = CliSettings::default();
+        let err = run_upgrade_brew(
+            &brew_args(None, false, true, false),
+            &cli,
+            Printer::Silent,
+            BrewChannel::Stable,
+        )
+        .unwrap_err();
+        assert!(err.to_string().contains("Homebrew"));
     }
 }
