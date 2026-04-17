@@ -252,6 +252,9 @@ mod tests {
 
     #[test]
     fn upload_blocking_noops_without_write_key() {
+        if SEGMENT_WRITE_KEY.is_some() {
+            return; // release CI bakes a key in; assertion only applies otherwise
+        }
         let track = Track {
             user:       User::AnonymousId {
                 anonymous_id: "test".to_string(),
@@ -280,7 +283,9 @@ mod tests {
 
     #[test]
     fn upload_noops_without_write_key() {
-        // SEGMENT_WRITE_KEY is not set at compile time in tests, so this should error.
+        if SEGMENT_WRITE_KEY.is_some() {
+            return; // release CI bakes a key in; assertion only applies otherwise
+        }
         let rt = Runtime::new().unwrap();
         let result = rt.block_on(upload(Path::new("/nonexistent")));
         assert!(result.is_err());
