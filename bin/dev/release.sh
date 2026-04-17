@@ -60,6 +60,7 @@ compute_release_version() {
 
 parse_args() {
   DRY_RUN=0
+  SKIP_TESTS=0
   PRERELEASE_LABEL=""
 
   while [[ $# -gt 0 ]]; do
@@ -67,11 +68,21 @@ parse_args() {
       --dry-run)
         DRY_RUN=1
         ;;
+      --skip-tests)
+        SKIP_TESTS=1
+        ;;
       --help|-h)
         cat <<'EOF'
-Usage: bin/dev/release.sh [alpha|beta|rc] [--dry-run]
+Usage: bin/dev/release.sh [alpha|beta|rc] [--dry-run] [--skip-tests]
 
 Create the next stable release from main, or compute a prerelease tag.
+
+Before tagging, runs the same release-mode test smoke the CI release
+workflow does for the native target, with SEGMENT_WRITE_KEY baked in so
+telemetry-active code paths are exercised. This catches regressions
+like "uninstall recreates ~/.fabro via telemetry" or "sender tests
+assume no write key" before we burn a 60-minute CI cycle. Skip only if
+you've already run `cargo nextest run --workspace --release` yourself.
 EOF
         exit 0
         ;;
@@ -101,10 +112,26 @@ verify_spa_assets() {
   fi
 }
 
+verify_release_tests() {
+  if [[ "$SKIP_TESTS" == "1" ]]; then
+    echo "--skip-tests set, skipping release-mode test smoke"
+    return 0
+  fi
+
+  echo "Running release-mode test smoke (SEGMENT_WRITE_KEY baked in)..."
+  SEGMENT_WRITE_KEY="fake-for-local-smoke" \
+    cargo nextest run \
+      --workspace \
+      --release \
+      --profile ci \
+      --status-level slow
+}
+
 main() {
   parse_args "$@"
 
   verify_spa_assets
+  verify_release_tests
 
   local repo_root cargo_toml current_version base_version new_version tag
   repo_root="$(git rev-parse --show-toplevel)"
