@@ -34,6 +34,8 @@ pub(crate) fn print() {
             ),
             ("doctor", "Check environment and integration health"),
             ("repo init", "Initialize Fabro in a repository"),
+            ("server start", "Start the Fabro API server"),
+            ("secret set", "Store a server-owned secret"),
         ],
         cmd_width,
     );
@@ -44,24 +46,14 @@ pub(crate) fn print() {
             ("validate", "Validate a workflow"),
             ("preflight", "Validate run configuration without executing"),
             ("run", "Launch a workflow run"),
+        ],
+        cmd_width,
+    );
+
+    section(
+        "Inspect runs",
+        &[
             ("logs", "View the event log of a workflow run"),
-        ],
-        cmd_width,
-    );
-
-    section(
-        "Server & secrets",
-        &[
-            ("server start", "Start the Fabro API server"),
-            ("secret set", "Store a server-owned secret"),
-            ("secret list", "List server-owned secrets"),
-        ],
-        cmd_width,
-    );
-
-    section(
-        "Inspect sandboxes",
-        &[
             ("sandbox ssh", "SSH into a run's sandbox"),
             (
                 "sandbox preview",
