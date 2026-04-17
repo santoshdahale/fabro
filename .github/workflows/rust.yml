@@ -77,7 +77,7 @@ jobs:
         with:
           cache-on-failure: true
       - uses: taiki-e/install-action@773334c0e05d7e699e4d78234494308223f3a2cf # nextest
-      - run: cargo nextest run --workspace
+      - run: cargo nextest run --workspace --status-level slow
 
   test-macos:
     name: Test (macOS)
@@ -92,4 +92,4 @@ jobs:
         with:
           cache-on-failure: true
       - uses: taiki-e/install-action@773334c0e05d7e699e4d78234494308223f3a2cf # nextest
-      - run: cargo nextest run --workspace
+      - run: cargo nextest run --workspace --status-level slow
