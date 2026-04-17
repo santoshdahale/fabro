@@ -79,6 +79,7 @@ fn no_args_prints_curated_landing() {
       fabro repo init      Initialize Fabro in a repository
       fabro server start   Start the Fabro API server
       fabro secret set     Store a server-owned secret
+      fabro docs           Open the docs website in the browser
 
     Run workflows
 

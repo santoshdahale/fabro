@@ -36,6 +36,7 @@ pub(crate) fn print() {
             ("repo init", "Initialize Fabro in a repository"),
             ("server start", "Start the Fabro API server"),
             ("secret set", "Store a server-owned secret"),
+            ("docs", "Open the docs website in the browser"),
         ],
         cmd_width,
     );
