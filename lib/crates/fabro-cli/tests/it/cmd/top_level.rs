@@ -26,7 +26,7 @@ fn no_dotenv_flag() {
     ----- stderr -----
     error: unexpected argument '--no-dotenv' found
 
-    Usage: fabro [OPTIONS] <COMMAND>
+    Usage: fabro [OPTIONS] [COMMAND]
 
     For more information, try '--help'.
     ");

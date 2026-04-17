@@ -21,7 +21,7 @@ fn old_config_show_command_is_rejected() {
     ----- stderr -----
     error: unrecognized subcommand 'config'
 
-    Usage: fabro [OPTIONS] <COMMAND>
+    Usage: fabro [OPTIONS] [COMMAND]
 
     For more information, try '--help'.
     ");

@@ -4,6 +4,7 @@ mod args;
 mod command_context;
 mod commands;
 mod gh;
+mod landing;
 mod logging;
 mod manifest_builder;
 mod server_client;
@@ -40,7 +41,7 @@ struct Cli {
     globals: GlobalArgs,
 
     #[command(subcommand)]
-    command: Box<Commands>,
+    command: Option<Box<Commands>>,
 }
 
 impl Cli {
@@ -77,29 +78,33 @@ async fn main() {
     let duration_ms = u64::try_from(start.elapsed().as_millis()).unwrap();
 
     let is_error = result.is_err();
-    let command = sanitize::sanitize_command(&raw_args, &command_name);
-    let repository = git::repository_identifier();
-    let ci = std::env::var("CI").is_ok();
-    if is_error {
-        fabro_telemetry::track!("CLI Errored", {
-            "subcommand": command_name,
-            "command": command,
-            "durationMs": duration_ms,
-            "repository": repository,
-            "ci": ci,
-            "success": false,
-            "exitCode": 1,
-        }, error);
-    } else {
-        fabro_telemetry::track!("CLI Executed", {
-            "subcommand": command_name,
-            "command": command,
-            "durationMs": duration_ms,
-            "repository": repository,
-            "ci": ci,
-            "success": true,
-            "exitCode": 0,
-        });
+    // An empty command_name means no subcommand was invoked (landing was shown);
+    // don't emit a tracking event for that case.
+    if !command_name.is_empty() {
+        let command = sanitize::sanitize_command(&raw_args, &command_name);
+        let repository = git::repository_identifier();
+        let ci = std::env::var("CI").is_ok();
+        if is_error {
+            fabro_telemetry::track!("CLI Errored", {
+                "subcommand": command_name,
+                "command": command,
+                "durationMs": duration_ms,
+                "repository": repository,
+                "ci": ci,
+                "success": false,
+                "exitCode": 1,
+            }, error);
+        } else {
+            fabro_telemetry::track!("CLI Executed", {
+                "subcommand": command_name,
+                "command": command,
+                "durationMs": duration_ms,
+                "repository": repository,
+                "ci": ci,
+                "success": true,
+                "exitCode": 0,
+            });
+        }
     }
     fabro_telemetry::shutdown();
 
@@ -131,6 +136,10 @@ async fn main_inner() -> (String, Result<()>) {
     let cli = Cli::parse();
 
     let Cli { globals, command } = cli;
+    let Some(command) = command else {
+        landing::print();
+        return (String::new(), Ok(()));
+    };
     let bootstrap_printer = Printer::from_flags(globals.quiet, globals.verbose);
     let cli_layer = global_args_cli_layer(&globals);
     let process_local_json = globals.json;
@@ -413,7 +422,7 @@ mod tests {
     fn parse_provider_login_openai() {
         let cli = Cli::try_parse_from(["fabro", "provider", "login", "--provider", "openai"])
             .expect("should parse");
-        match *cli.command {
+        match *cli.command.unwrap() {
             Commands::Provider(ProviderNamespace {
                 command: ProviderCommand::Login(args),
             }) => {
@@ -427,7 +436,7 @@ mod tests {
     fn parse_provider_login_anthropic() {
         let cli = Cli::try_parse_from(["fabro", "provider", "login", "--provider", "anthropic"])
             .expect("should parse");
-        match *cli.command {
+        match *cli.command.unwrap() {
             Commands::Provider(ProviderNamespace {
                 command: ProviderCommand::Login(args),
             }) => {
@@ -448,7 +457,7 @@ mod tests {
             "--api-key-stdin",
         ])
         .expect("should parse");
-        match *cli.command {
+        match *cli.command.unwrap() {
             Commands::Provider(ProviderNamespace {
                 command: ProviderCommand::Login(args),
             }) => {
@@ -475,7 +484,7 @@ mod tests {
             "brynary",
         ])
         .expect("should parse");
-        match *cli.command {
+        match *cli.command.unwrap() {
             Commands::Install {
                 args,
                 command: None,
@@ -501,7 +510,7 @@ mod tests {
             "token",
         ])
         .expect("should parse");
-        match *cli.command {
+        match *cli.command.unwrap() {
             Commands::Install {
                 args,
                 command: Some(args::InstallCommand::Github(github_args)),
@@ -530,7 +539,7 @@ mod tests {
     fn parse_create_command() {
         let cli = Cli::try_parse_from(["fabro", "create", "my-workflow.toml", "--goal", "test"])
             .expect("should parse");
-        match *cli.command {
+        match *cli.command.unwrap() {
             Commands::RunCmd(RunCommands::Create(args)) => {
                 assert_eq!(
                     args.workflow.as_deref(),
@@ -564,7 +573,7 @@ mod tests {
             "http://localhost:3000/api/v1",
         ])
         .expect("should parse");
-        match *cli.command {
+        match *cli.command.unwrap() {
             Commands::Model {
                 command: Some(ModelsCommand::List(args)),
             } => assert_eq!(args.target.as_deref(), Some("http://localhost:3000/api/v1")),
@@ -582,7 +591,7 @@ mod tests {
             "fix the bug",
         ])
         .expect("should parse");
-        match *cli.command {
+        match *cli.command.unwrap() {
             Commands::Exec(args) => {
                 assert_eq!(args.server.as_deref(), Some("http://localhost:3000/api/v1"));
             }
@@ -649,7 +658,7 @@ mod tests {
     fn parse_store_dump_command() {
         let cli = Cli::try_parse_from(["fabro", "store", "dump", "ABC123", "-o", "./out"])
             .expect("should parse");
-        match *cli.command {
+        match *cli.command.unwrap() {
             Commands::Store(StoreNamespace {
                 command: StoreCommand::Dump(args),
             }) => {
@@ -663,7 +672,7 @@ mod tests {
     #[test]
     fn parse_start_command() {
         let cli = Cli::try_parse_from(["fabro", "start", "ABC123"]).expect("should parse");
-        match *cli.command {
+        match *cli.command.unwrap() {
             Commands::RunCmd(RunCommands::Start(args)) => {
                 assert_eq!(args.run, "ABC123");
             }
@@ -674,7 +683,7 @@ mod tests {
     #[test]
     fn parse_attach_command() {
         let cli = Cli::try_parse_from(["fabro", "attach", "ABC123"]).expect("should parse");
-        match *cli.command {
+        match *cli.command.unwrap() {
             Commands::RunCmd(RunCommands::Attach(args)) => {
                 assert_eq!(args.run, "ABC123");
             }
@@ -686,7 +695,7 @@ mod tests {
     fn parse_sandbox_cp_command() {
         let cli = Cli::try_parse_from(["fabro", "sandbox", "cp", "ABC123:/tmp/file", "./file"])
             .expect("should parse");
-        match *cli.command {
+        match *cli.command.unwrap() {
             Commands::Sandbox {
                 command: args::SandboxCommand::Cp(args),
             } => {
@@ -715,7 +724,7 @@ mod tests {
             "start",
         ])
         .expect("should parse");
-        match *cli.command {
+        match *cli.command.unwrap() {
             Commands::RunCmd(RunCommands::RunWorker(args)) => {
                 assert_eq!(args.server, "/tmp/fabro.sock");
                 assert_eq!(args.artifact_upload_token.as_deref(), Some("token-123"));
@@ -742,7 +751,7 @@ mod tests {
             "resume",
         ])
         .expect("should parse");
-        match *cli.command {
+        match *cli.command.unwrap() {
             Commands::RunCmd(RunCommands::RunWorker(args)) => {
                 assert_eq!(args.server, "http://127.0.0.1:3000");
                 assert!(args.artifact_upload_token.is_none());
@@ -757,7 +766,7 @@ mod tests {
     #[test]
     fn parse_render_graph_command() {
         let cli = Cli::try_parse_from(["fabro", "__render-graph"]).expect("should parse");
-        match *cli.command {
+        match *cli.command.unwrap() {
             Commands::RenderGraph => {}
             _ => panic!("unexpected command variant"),
         }
@@ -766,8 +775,8 @@ mod tests {
     #[test]
     fn parse_settings_command() {
         let cli = Cli::try_parse_from(["fabro", "settings"]).expect("should parse");
-        assert_eq!(cli.command.name(), "settings");
-        match *cli.command {
+        assert_eq!(cli.command.as_ref().unwrap().name(), "settings");
+        match *cli.command.unwrap() {
             Commands::Settings(args) => {
                 assert!(!args.local);
                 assert!(args.target.server.is_none());
@@ -780,7 +789,7 @@ mod tests {
     #[test]
     fn parse_settings_with_workflow() {
         let cli = Cli::try_parse_from(["fabro", "settings", "demo"]).expect("should parse");
-        match *cli.command {
+        match *cli.command.unwrap() {
             Commands::Settings(args) => {
                 assert_eq!(args.workflow, Some(std::path::PathBuf::from("demo")));
             }
@@ -792,7 +801,7 @@ mod tests {
     fn parse_settings_local_mode() {
         let cli =
             Cli::try_parse_from(["fabro", "settings", "--local", "demo"]).expect("should parse");
-        match *cli.command {
+        match *cli.command.unwrap() {
             Commands::Settings(args) => {
                 assert!(args.local);
                 assert_eq!(args.workflow, Some(std::path::PathBuf::from("demo")));
