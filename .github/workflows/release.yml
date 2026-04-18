@@ -40,16 +40,16 @@ jobs:
       matrix:
         include:
           - target: aarch64-apple-darwin
-            runner: macos-15
+            runner: macos-15-xlarge
           - target: x86_64-unknown-linux-gnu
-            runner: ubuntu-latest
+            runner: ubuntu-24.04-x86-32-cores
           - target: aarch64-unknown-linux-gnu
-            runner: ubuntu-22.04-arm
+            runner: ubuntu-22.04-arm-32-cores
           - target: x86_64-unknown-linux-musl
-            runner: ubuntu-24.04
+            runner: ubuntu-24.04-x86-32-cores
             musl: true
           - target: aarch64-unknown-linux-musl
-            runner: ubuntu-24.04-arm
+            runner: ubuntu-24.04-arm-32-cores
             musl: true
     env:
       CC_x86_64_unknown_linux_musl: musl-gcc
