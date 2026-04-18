@@ -16,3 +16,4 @@ __pycache__
 **/*.pending-snap
 .worktrees
 .fabro/workflows/implement-plan/prompts/
+.claude/scheduled_tasks.lock
