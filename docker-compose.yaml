@@ -2,10 +2,10 @@ services:
   fabro:
     image: fabro
     build:
-      context: ..
+      context: .
       dockerfile: Dockerfile
     ports:
-      - "80:80"
+      - "32276:32276"
     volumes:
       - fabro-storage:/storage
 

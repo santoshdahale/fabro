@@ -1,0 +1,4 @@
+{$FABRO_DOMAIN:localhost} {
+    reverse_proxy fabro:32276
+    encode gzip
+}

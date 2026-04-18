@@ -16,7 +16,7 @@ Screenshots of the Fabro web UI are embedded in the public docs. This guide cove
 ## Boot the demo environment
 
 ```bash
-docker compose -f docker/docker-compose.yaml up -d
+docker compose up -d
 ```
 
 Wait ~5 seconds for the server to be ready, then verify (sending the demo header):
@@ -103,7 +103,7 @@ Current placements:
 ## Cleanup
 
 ```bash
-docker compose -f docker/docker-compose.yaml down
+docker compose down
 ```
 
 If you also started the docs server:

@@ -6,7 +6,7 @@
 #   docker-context/amd64/fabro  (x86_64-unknown-linux-gnu)
 #   docker-context/arm64/fabro  (aarch64-unknown-linux-gnu)
 #
-# The image serves the HTTP API (with embedded web UI) on port 80,
+# The image serves the HTTP API (with embedded web UI) on port 32276,
 # persists state to /storage, and runs as the unprivileged `fabro` user.
 
 FROM debian:trixie-slim
@@ -18,7 +18,6 @@ RUN apt-get update \
  && apt-get install -y --no-install-recommends \
       ca-certificates \
       git \
-      libcap2-bin \
       tini \
  && rm -rf /var/lib/apt/lists/*
 
@@ -29,7 +28,6 @@ RUN groupadd --system --gid 1000 fabro \
  && install -d -m 0755 /etc/fabro
 
 COPY --chmod=0755 docker-context/${TARGETARCH}/fabro /usr/local/bin/fabro
-RUN setcap cap_net_bind_service=+ep /usr/local/bin/fabro
 
 COPY docker/settings.toml /etc/fabro/settings.toml
 COPY --chmod=0755 docker/entrypoint.sh /usr/local/bin/fabro-entrypoint
@@ -38,7 +36,7 @@ ENV FABRO_HOME=/var/fabro \
     FABRO_CONFIG=/etc/fabro/settings.toml
 
 VOLUME ["/storage"]
-EXPOSE 80
+EXPOSE 32276
 
 ENTRYPOINT ["/usr/bin/tini", "--", "/usr/local/bin/fabro-entrypoint"]
-CMD ["fabro", "server", "start", "--foreground", "--bind", "0.0.0.0:80"]
+CMD ["fabro", "server", "start", "--foreground", "--bind", "0.0.0.0:32276"]
