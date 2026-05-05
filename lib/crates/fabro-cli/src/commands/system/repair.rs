@@ -1,5 +1,4 @@
 use anyhow::Result;
-use chrono::{DateTime, Utc};
 use fabro_api::types;
 use fabro_util::printer::Printer;
 
@@ -33,33 +32,26 @@ fn repair_runs_from(
         return Ok(());
     }
 
-    let runs = response.runs.as_slice();
-    if runs.is_empty() {
+    if response.runs.is_empty() {
         fabro_util::printout!(printer, "No run repair issues found.");
         return Ok(());
     }
 
     fabro_util::printout!(printer, "Unreadable runs:");
-    for run in runs {
+    for run in &response.runs {
         fabro_util::printout!(
             printer,
             "  {}  {}  {}",
-            run.run_id.as_deref().unwrap_or("-"),
-            format_created_at(run.created_at.as_ref()),
-            run.error.as_deref().unwrap_or("-"),
+            run.run_id,
+            run.created_at.to_rfc3339(),
+            run.error,
         );
     }
 
     fabro_util::printout!(printer, "");
     fabro_util::printout!(printer, "Delete with:");
-    for run in runs {
-        if let Some(run_id) = run.run_id.as_deref() {
-            fabro_util::printout!(printer, "  fabro rm --force {run_id}");
-        }
+    for run in &response.runs {
+        fabro_util::printout!(printer, "  fabro rm --force {}", run.run_id);
     }
     Ok(())
-}
-
-fn format_created_at(created_at: Option<&DateTime<Utc>>) -> String {
-    created_at.map_or_else(|| "-".to_string(), DateTime::to_rfc3339)
 }

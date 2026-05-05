@@ -18,4 +18,3 @@ export interface RunIntegrationsGithubSettings {
     'permissions': { [key: string]: string; };
 }
 
-

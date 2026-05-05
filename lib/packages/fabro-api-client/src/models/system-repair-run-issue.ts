@@ -21,14 +21,14 @@ export interface SystemRepairRunIssue {
     /**
      * Run identifier.
      */
-    'run_id'?: string;
+    'run_id': string;
     /**
      * Timestamp encoded in the run identifier.
      */
-    'created_at'?: string;
+    'created_at': string;
     /**
      * Error produced while loading the run projection.
      */
-    'error'?: string;
+    'error': string;
 }
 

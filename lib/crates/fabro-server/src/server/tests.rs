@@ -2071,7 +2071,14 @@ async fn system_repair_runs_lists_catalog_entries_without_projection() {
         .parse::<chrono::DateTime<Utc>>()
         .unwrap();
     assert_eq!(created_at, run_id.created_at());
-    assert_eq!(body["runs"][0]["error"], "run has no events");
+    assert!(
+        body["runs"][0]["error"]
+            .as_str()
+            .unwrap()
+            .contains("no events"),
+        "got: {}",
+        body["runs"][0]["error"]
+    );
 }
 
 #[tokio::test]

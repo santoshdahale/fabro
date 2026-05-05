@@ -21,49 +21,26 @@ async fn remove_from(args: &RunsRemoveArgs, ctx: &CommandContext) -> Result<()> 
     let mut errors = Vec::new();
 
     for identifier in &args.runs {
-        if args.force {
-            if let Ok(run_id) = identifier.parse::<fabro_types::RunId>() {
-                let run_id_string = run_id.to_string();
-                if let Err(err) = delete_server_run(client, &run_id, true).await {
-                    let error = err.to_string();
-                    if !json {
-                        fabro_util::printerr!(printer, "error: {identifier}: {error}");
-                    }
-                    errors.push(serde_json::json!({
-                        "identifier": identifier,
-                        "error": error,
-                    }));
-                    had_errors = true;
-                    continue;
-                }
-                removed.push(run_id_string.clone());
-                if !json {
-                    fabro_util::printerr!(printer, "{}", short_run_id(&run_id_string));
-                }
-                continue;
-            }
-        }
-
-        let run = match client.resolve_run(identifier).await {
-            Ok(run) => run,
+        let run_id = match resolve_target(client, identifier, args.force).await {
+            Ok(run_id) => run_id,
             Err(err) => {
+                let error = err.to_string();
                 if !json {
-                    fabro_util::printerr!(printer, "error: {identifier}: {err}");
+                    fabro_util::printerr!(printer, "error: {identifier}: {error}");
                 }
                 errors.push(serde_json::json!({
                     "identifier": identifier,
-                    "error": err.to_string(),
+                    "error": error,
                 }));
                 had_errors = true;
                 continue;
             }
         };
 
-        let run_id = run.run_id.to_string();
-        if let Err(err) = delete_server_run(client, &run.run_id, args.force).await {
+        if let Err(err) = delete_server_run(client, &run_id, args.force).await {
             let error = err.to_string();
             if !json {
-                if error.starts_with("cannot remove active run ") {
+                if !args.force && error.starts_with("cannot remove active run ") {
                     fabro_util::printerr!(printer, "{error}");
                 } else {
                     fabro_util::printerr!(printer, "error: {identifier}: {error}");
@@ -76,9 +53,11 @@ async fn remove_from(args: &RunsRemoveArgs, ctx: &CommandContext) -> Result<()> 
             had_errors = true;
             continue;
         }
-        removed.push(run_id.clone());
+
+        let run_id_string = run_id.to_string();
+        removed.push(run_id_string.clone());
         if !json {
-            fabro_util::printerr!(printer, "{}", short_run_id(&run_id));
+            fabro_util::printerr!(printer, "{}", short_run_id(&run_id_string));
         }
     }
 
@@ -93,6 +72,19 @@ async fn remove_from(args: &RunsRemoveArgs, ctx: &CommandContext) -> Result<()> 
         bail!("some runs could not be removed");
     }
     Ok(())
+}
+
+async fn resolve_target(
+    client: &server_client::Client,
+    identifier: &str,
+    force: bool,
+) -> Result<fabro_types::RunId> {
+    if force {
+        if let Ok(run_id) = identifier.parse::<fabro_types::RunId>() {
+            return Ok(run_id);
+        }
+    }
+    Ok(client.resolve_run(identifier).await?.run_id)
 }
 
 async fn delete_server_run(

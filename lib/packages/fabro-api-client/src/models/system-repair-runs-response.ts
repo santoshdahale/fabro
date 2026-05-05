@@ -21,10 +21,10 @@ import type { SystemRepairRunIssue } from './system-repair-run-issue';
  * Runs that need manual repair or deletion because they cannot be loaded.
  */
 export interface SystemRepairRunsResponse {
-    'runs'?: Array<SystemRepairRunIssue>;
+    'runs': Array<SystemRepairRunIssue>;
     /**
      * Count of run repair issues.
      */
-    'total_count'?: number;
+    'total_count': number;
 }
 

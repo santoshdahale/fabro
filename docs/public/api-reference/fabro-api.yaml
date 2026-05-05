@@ -8034,6 +8034,7 @@ components:
     SystemRepairRunsResponse:
       description: Runs that need manual repair or deletion because they cannot be loaded.
       type: object
+      required: [runs, total_count]
       properties:
         runs:
           type: array
@@ -8047,6 +8048,7 @@ components:
     SystemRepairRunIssue:
       description: One cataloged run that cannot be loaded from durable storage.
       type: object
+      required: [run_id, created_at, error]
       properties:
         run_id:
           type: string

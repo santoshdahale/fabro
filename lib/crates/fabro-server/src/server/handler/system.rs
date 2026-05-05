@@ -130,22 +130,19 @@ async fn get_system_repair_runs(
                 .into_response();
         }
     };
-    let total_count = issues.len();
+    let total_count = to_i64(issues.len());
     let runs = issues
         .into_iter()
         .map(|issue| SystemRepairRunIssue {
-            run_id:     Some(issue.run_id.to_string()),
-            created_at: Some(issue.created_at),
-            error:      Some(issue.error),
+            run_id:     issue.run_id.to_string(),
+            created_at: issue.created_at,
+            error:      issue.error,
         })
         .collect();
 
     (
         StatusCode::OK,
-        Json(SystemRepairRunsResponse {
-            runs,
-            total_count: Some(to_i64(total_count)),
-        }),
+        Json(SystemRepairRunsResponse { runs, total_count }),
     )
         .into_response()
 }
