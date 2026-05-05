@@ -4,7 +4,6 @@
               std::io::BufReader; not on a Tokio path"
 )]
 
-use std::collections::HashMap;
 use std::io::{BufRead as StdBufRead, BufReader as StdBufReader};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -18,7 +17,7 @@ use fabro_interview::{
 };
 use fabro_store::{EventEnvelope, RunProjection, RunProjectionReducer};
 use fabro_types::settings::InterpString;
-use fabro_types::settings::run::RunMode;
+use fabro_types::settings::run::{RunMode, RunNamespace};
 use fabro_types::{
     ArtifactUpload, EventBody, FailureReason, Principal, RunBlobId, RunEvent, RunId,
     WorkflowSettings,
@@ -117,7 +116,12 @@ pub(crate) async fn execute(
         artifact_sink,
         run_control: Some(run_control),
         github_app,
-        github_permissions: HashMap::new(),
+        github_permissions: run_spec
+            .settings
+            .run
+            .integrations
+            .github
+            .resolve_permissions(process_env_var),
         vault,
         on_node: None,
         registry_override: None,
@@ -517,30 +521,23 @@ fn maybe_build_github_credentials(
 ) -> Result<Option<fabro_github::GitHubCredentials>> {
     let resolved_run = &settings.run;
     let resolved_server = ServerSettingsBuilder::load_default().ok();
-    let required_github_credentials = (resolved_run.execution.mode != RunMode::DryRun
-        && clone_sandbox_requires_github_credentials(&resolved_run.sandbox.provider))
-        || resolved_server
-            .as_ref()
-            .is_some_and(|settings| !settings.server.integrations.github.permissions.is_empty());
-    let pull_request_enabled =
-        resolved_run.execution.mode != RunMode::DryRun && resolved_run.pull_request.is_some();
-    let strategy = resolved_server
-        .as_ref()
-        .map(|settings| settings.server.integrations.github.strategy)
+    let server_ns = resolved_server.as_ref().map(|s| &s.server);
+    let strategy = server_ns
+        .map(|server| server.integrations.github.strategy)
         .unwrap_or_default();
-    let app_id = resolved_server
-        .as_ref()
-        .and_then(|settings| settings.server.integrations.github.app_id.as_ref())
+    let app_id = server_ns
+        .and_then(|server| server.integrations.github.app_id.as_ref())
         .map(InterpString::as_source);
-    let app_slug = resolved_server
-        .as_ref()
-        .and_then(|settings| settings.server.integrations.github.slug.as_ref())
+    let app_slug = server_ns
+        .and_then(|server| server.integrations.github.slug.as_ref())
         .map(InterpString::as_source);
 
-    if required_github_credentials {
+    if requires_github_credentials(resolved_run) {
         return build_github_credentials(strategy, app_id.as_deref(), app_slug.as_deref(), vault);
     }
 
+    let pull_request_enabled =
+        resolved_run.execution.mode != RunMode::DryRun && resolved_run.pull_request.is_some();
     if pull_request_enabled {
         return Ok(build_github_credentials(
             strategy,
@@ -553,6 +550,26 @@ fn maybe_build_github_credentials(
     }
 
     Ok(None)
+}
+
+#[expect(
+    clippy::disallowed_methods,
+    reason = "CLI worker InterpString resolution facade for {{ env.* }} values."
+)]
+fn process_env_var(name: &str) -> Option<String> {
+    std::env::var(name).ok()
+}
+
+/// Hard-gate for the CLI worker path: a run-level token is requested, or
+/// a clone-based sandbox in non-dry-run mode will need credentials to
+/// pull the repository. Pull-request-driven credential acquisition is
+/// handled separately by the caller as a soft fallback.
+fn requires_github_credentials(run: &RunNamespace) -> bool {
+    if run.integrations.github.is_token_requested() {
+        return true;
+    }
+    run.execution.mode != RunMode::DryRun
+        && clone_sandbox_requires_github_credentials(&run.sandbox.provider)
 }
 
 fn clone_sandbox_requires_github_credentials(provider: &str) -> bool {
@@ -940,5 +957,68 @@ mod tests {
         let credential = guard.get("anthropic").unwrap();
 
         assert!(credential.contains("vault-key"));
+    }
+
+    mod requires_github_credentials_truth_table {
+        //! Truth-table coverage for the worker-side credential gate.
+        //! `InterpString` → `String` resolution is tested in `fabro-types`
+        //! next to `RunIntegrationsGithubSettings::resolve_permissions`.
+
+        use std::collections::HashMap;
+
+        use fabro_types::settings::InterpString;
+        use fabro_types::settings::run::{
+            RunIntegrationsGithubSettings, RunIntegrationsSettings, RunMode, RunNamespace,
+            RunSandboxSettings,
+        };
+
+        use super::super::requires_github_credentials;
+
+        fn run_with(
+            permissions: HashMap<String, InterpString>,
+            provider: &str,
+            mode: RunMode,
+        ) -> RunNamespace {
+            let mut run = RunNamespace::default();
+            run.execution.mode = mode;
+            run.sandbox = RunSandboxSettings {
+                provider: provider.to_string(),
+                ..RunSandboxSettings::default()
+            };
+            run.integrations = RunIntegrationsSettings {
+                github: RunIntegrationsGithubSettings { permissions },
+            };
+            run
+        }
+
+        #[test]
+        fn requires_github_credentials_when_permissions_non_empty() {
+            let permissions = HashMap::from([("issues".to_string(), InterpString::parse("read"))]);
+            // Even with local sandbox + dry-run, non-empty permissions
+            // force credential acquisition.
+            let run = run_with(permissions, "local", RunMode::DryRun);
+            assert!(requires_github_credentials(&run));
+        }
+
+        #[test]
+        fn requires_github_credentials_for_clone_based_provider() {
+            let run = run_with(HashMap::new(), "docker", RunMode::Normal);
+            assert!(requires_github_credentials(&run));
+
+            let daytona = run_with(HashMap::new(), "daytona", RunMode::Normal);
+            assert!(requires_github_credentials(&daytona));
+        }
+
+        #[test]
+        fn does_not_require_github_credentials_for_local_clean_run() {
+            let run = run_with(HashMap::new(), "local", RunMode::Normal);
+            assert!(!requires_github_credentials(&run));
+        }
+
+        #[test]
+        fn does_not_require_github_credentials_for_clone_provider_in_dry_run() {
+            let run = run_with(HashMap::new(), "docker", RunMode::DryRun);
+            assert!(!requires_github_credentials(&run));
+        }
     }
 }
