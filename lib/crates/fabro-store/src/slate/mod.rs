@@ -256,15 +256,6 @@ impl Database {
         self.projection_cache.remove(run_id).await;
     }
 
-    #[allow(dead_code)]
-    pub(crate) async fn apply_cached_event(
-        &self,
-        run_id: &RunId,
-        event: &crate::EventEnvelope,
-    ) -> Result<()> {
-        self.projection_cache.apply_event(run_id, event).await
-    }
-
     pub async fn delete_run(&self, run_id: &RunId) -> Result<()> {
         let active = self.remove_active_run(run_id).await;
         if let Some(active) = &active {
