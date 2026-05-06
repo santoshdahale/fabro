@@ -1,3 +1,4 @@
+use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -97,21 +98,44 @@ pub(super) fn run_bun_build(web_dir: &Path) -> Result<()> {
     Ok(())
 }
 
-#[expect(
-    clippy::disallowed_methods,
-    reason = "dev spa refresh mirrors build output with synchronous filesystem operations"
-)]
 pub(super) fn mirror_dist(dist_dir: &Path, asset_dir: &Path) -> Result<()> {
     if !dist_dir.is_dir() {
         bail!("apps/fabro-web/dist is missing; run `bun run build` before mirroring SPA assets");
     }
 
-    if asset_dir.exists() {
-        std::fs::remove_dir_all(asset_dir)
-            .with_context(|| format!("removing {}", asset_dir.display()))?;
-    }
+    let plan = mirror_plan(dist_dir)?;
+    remove_stale_entries(asset_dir, &plan)?;
     std::fs::create_dir_all(asset_dir)
         .with_context(|| format!("creating {}", asset_dir.display()))?;
+
+    for relative_dir in &plan.dirs {
+        let destination = asset_dir.join(relative_dir);
+        std::fs::create_dir_all(&destination)
+            .with_context(|| format!("creating {}", destination.display()))?;
+    }
+
+    for source_file in &plan.files {
+        copy_if_changed(&source_file.source, &asset_dir.join(&source_file.relative))?;
+    }
+
+    write_if_changed(&asset_dir.join(".gitkeep"), b"")?;
+
+    Ok(())
+}
+
+struct MirrorPlan {
+    dirs:  BTreeSet<PathBuf>,
+    files: Vec<SourceFile>,
+}
+
+struct SourceFile {
+    source:   PathBuf,
+    relative: PathBuf,
+}
+
+fn mirror_plan(dist_dir: &Path) -> Result<MirrorPlan> {
+    let mut dirs = BTreeSet::new();
+    let mut files = Vec::new();
 
     for entry in WalkDir::new(dist_dir) {
         let entry = entry.context("walking apps/fabro-web/dist")?;
@@ -123,10 +147,8 @@ pub(super) fn mirror_dist(dist_dir: &Path, asset_dir: &Path) -> Result<()> {
             continue;
         }
 
-        let destination = asset_dir.join(relative);
         if entry.file_type().is_dir() {
-            std::fs::create_dir_all(&destination)
-                .with_context(|| format!("creating {}", destination.display()))?;
+            dirs.insert(relative.to_path_buf());
             continue;
         }
 
@@ -134,19 +156,133 @@ pub(super) fn mirror_dist(dist_dir: &Path, asset_dir: &Path) -> Result<()> {
             continue;
         }
 
-        if let Some(parent) = destination.parent() {
-            std::fs::create_dir_all(parent)
-                .with_context(|| format!("creating {}", parent.display()))?;
+        for ancestor in relative.ancestors().skip(1) {
+            if ancestor.as_os_str().is_empty() {
+                break;
+            }
+            dirs.insert(ancestor.to_path_buf());
         }
-        std::fs::copy(source, &destination).with_context(|| {
-            format!("copying {} to {}", source.display(), destination.display())
-        })?;
+
+        files.push(SourceFile {
+            source:   source.to_path_buf(),
+            relative: relative.to_path_buf(),
+        });
     }
 
-    std::fs::write(asset_dir.join(".gitkeep"), b"")
-        .with_context(|| format!("writing {}", asset_dir.join(".gitkeep").display()))?;
+    files.sort_by(|left, right| left.relative.cmp(&right.relative));
+
+    Ok(MirrorPlan { dirs, files })
+}
+
+fn remove_stale_entries(asset_dir: &Path, plan: &MirrorPlan) -> Result<()> {
+    if !asset_dir.exists() {
+        return Ok(());
+    }
+
+    let desired_files = plan
+        .files
+        .iter()
+        .map(|source| source.relative.clone())
+        .chain([PathBuf::from(".gitkeep")])
+        .collect::<BTreeSet<_>>();
+
+    for entry in WalkDir::new(asset_dir).contents_first(true) {
+        let entry = entry.context("walking fabro-spa assets")?;
+        let path = entry.path();
+        let relative = path
+            .strip_prefix(asset_dir)
+            .with_context(|| format!("{} is not under {}", path.display(), asset_dir.display()))?;
+        if relative.as_os_str().is_empty() {
+            continue;
+        }
+
+        if entry.file_type().is_dir() {
+            if !plan.dirs.contains(relative) {
+                std::fs::remove_dir(path)
+                    .with_context(|| format!("removing {}", path.display()))?;
+            }
+        } else if !desired_files.contains(relative) {
+            std::fs::remove_file(path).with_context(|| format!("removing {}", path.display()))?;
+        }
+    }
 
     Ok(())
+}
+
+#[expect(
+    clippy::disallowed_methods,
+    reason = "dev spa refresh mirrors build output with synchronous filesystem operations"
+)]
+fn copy_if_changed(source: &Path, destination: &Path) -> Result<()> {
+    if destination.is_file() && files_match(source, destination)? {
+        return Ok(());
+    }
+
+    if destination.exists() {
+        remove_destination(destination)?;
+    }
+    if let Some(parent) = destination.parent() {
+        std::fs::create_dir_all(parent)
+            .with_context(|| format!("creating {}", parent.display()))?;
+    }
+    std::fs::copy(source, destination)
+        .with_context(|| format!("copying {} to {}", source.display(), destination.display()))?;
+    Ok(())
+}
+
+#[expect(
+    clippy::disallowed_methods,
+    reason = "dev spa refresh writes marker files synchronously while mirroring build output"
+)]
+fn write_if_changed(destination: &Path, contents: &[u8]) -> Result<()> {
+    if destination.is_file()
+        && std::fs::read(destination)
+            .with_context(|| format!("reading {}", destination.display()))?
+            == contents
+    {
+        return Ok(());
+    }
+
+    if destination.exists() {
+        remove_destination(destination)?;
+    }
+    if let Some(parent) = destination.parent() {
+        std::fs::create_dir_all(parent)
+            .with_context(|| format!("creating {}", parent.display()))?;
+    }
+    std::fs::write(destination, contents)
+        .with_context(|| format!("writing {}", destination.display()))
+}
+
+#[expect(
+    clippy::disallowed_methods,
+    reason = "dev spa refresh compares generated asset bytes synchronously before mirroring"
+)]
+fn files_match(left: &Path, right: &Path) -> Result<bool> {
+    let left_len = left
+        .metadata()
+        .with_context(|| format!("reading metadata for {}", left.display()))?
+        .len();
+    let right_len = right
+        .metadata()
+        .with_context(|| format!("reading metadata for {}", right.display()))?
+        .len();
+    if left_len != right_len {
+        return Ok(false);
+    }
+
+    Ok(
+        std::fs::read(left).with_context(|| format!("reading {}", left.display()))?
+            == std::fs::read(right).with_context(|| format!("reading {}", right.display()))?,
+    )
+}
+
+fn remove_destination(path: &Path) -> Result<()> {
+    if path.is_dir() {
+        std::fs::remove_dir_all(path).with_context(|| format!("removing {}", path.display()))
+    } else {
+        std::fs::remove_file(path).with_context(|| format!("removing {}", path.display()))
+    }
 }
 
 pub(super) struct TempDir {
@@ -208,6 +344,32 @@ mod tests {
 
     fn read_bytes(root: &Path, path: &str) -> Vec<u8> {
         std::fs::read(root.join(path)).expect("reading fixture file")
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn mirror_dist_preserves_unchanged_assets() {
+        use std::os::unix::fs::MetadataExt;
+
+        let fixture = tempfile::tempdir().expect("creating fixture");
+        write_file(fixture.path(), "dist/index.html", b"index");
+        write_file(fixture.path(), "assets/index.html", b"index");
+
+        let before_inode = std::fs::metadata(fixture.path().join("assets/index.html"))
+            .expect("reading initial metadata")
+            .ino();
+
+        mirror_dist(&fixture.path().join("dist"), &fixture.path().join("assets"))
+            .expect("mirroring dist");
+
+        let after_inode = std::fs::metadata(fixture.path().join("assets/index.html"))
+            .expect("reading mirrored metadata")
+            .ino();
+
+        assert_eq!(
+            before_inode, after_inode,
+            "unchanged asset files should not be deleted and recreated"
+        );
     }
 
     #[test]

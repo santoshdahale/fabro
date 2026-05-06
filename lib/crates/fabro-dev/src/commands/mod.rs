@@ -116,6 +116,9 @@ impl PlannedCommand {
 pub(crate) fn command(planned: &PlannedCommand) -> Command {
     let mut command = Command::new(&planned.program);
     command.args(&planned.args);
+    if planned.program == "cargo" {
+        scrub_nested_cargo_env(&mut command);
+    }
     for key in &planned.unset_env {
         command.env_remove(key);
     }
@@ -144,10 +147,69 @@ pub(crate) fn capture_command(cwd: &Path, planned: &PlannedCommand) -> Result<Ou
         .with_context(|| format!("running {}", planned.to_shell_line()))
 }
 
+#[expect(
+    clippy::disallowed_methods,
+    reason = "dev CLI sanitizes inherited Cargo build-script env before spawning nested cargo"
+)]
+fn scrub_nested_cargo_env(command: &mut Command) {
+    for (key, _) in std::env::vars_os() {
+        if is_cargo_build_env(&key) {
+            command.env_remove(key);
+        }
+    }
+}
+
+fn is_cargo_build_env(key: &std::ffi::OsStr) -> bool {
+    let Some(key) = key.to_str() else {
+        return false;
+    };
+
+    matches!(
+        key,
+        "CARGO_BIN_NAME"
+            | "CARGO_CRATE_NAME"
+            | "CARGO_MANIFEST_DIR"
+            | "CARGO_MANIFEST_PATH"
+            | "CARGO_PRIMARY_PACKAGE"
+            | "DEBUG"
+            | "HOST"
+            | "NUM_JOBS"
+            | "OPT_LEVEL"
+            | "OUT_DIR"
+            | "PROFILE"
+            | "RUSTC"
+            | "RUSTDOC"
+            | "TARGET"
+    ) || key.starts_with("CARGO_BIN_EXE_")
+        || key.starts_with("CARGO_CFG_")
+        || key.starts_with("CARGO_FEATURE_")
+        || key.starts_with("CARGO_PKG_")
+        || key.starts_with("DEP_")
+}
+
 pub(crate) fn shell_arg(arg: impl AsRef<str>) -> String {
     let arg = arg.as_ref();
     shlex::try_quote(arg).map_or_else(
         |_| format!("'{}'", arg.replace('\'', "'\\''")),
         std::borrow::Cow::into_owned,
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use std::ffi::OsStr;
+
+    use super::{PlannedCommand, command};
+
+    #[test]
+    fn cargo_commands_do_not_inherit_outer_manifest_dir() {
+        let prepared = command(&PlannedCommand::new("cargo").arg("build"));
+
+        assert!(
+            prepared
+                .get_envs()
+                .any(|(key, value)| { key == OsStr::new("CARGO_MANIFEST_DIR") && value.is_none() }),
+            "nested cargo commands should scrub CARGO_MANIFEST_DIR from cargo run"
+        );
+    }
 }
