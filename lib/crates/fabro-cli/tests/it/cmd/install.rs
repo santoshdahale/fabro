@@ -55,7 +55,7 @@ fn github_help() {
           --json                 Output as JSON [env: FABRO_JSON=]
           --strategy <STRATEGY>  GitHub authentication strategy (requires --non-interactive) [possible values: token, app]
           --debug                Enable DEBUG-level logging (default is INFO) [env: FABRO_DEBUG=]
-          --owner <OWNER>        GitHub App owner: 'personal' or 'org:<slug>' (app only, requires --non-interactive)
+          --owner <OWNER>        GitHub App owner: `personal` or `org:<slug>` (app only, requires --non-interactive)
           --no-upgrade-check     Disable automatic upgrade check [env: FABRO_NO_UPGRADE_CHECK=true]
           --non-interactive      Run install without prompts; use hidden scripted flags for inputs
           --quiet                Suppress non-essential output [env: FABRO_QUIET=]

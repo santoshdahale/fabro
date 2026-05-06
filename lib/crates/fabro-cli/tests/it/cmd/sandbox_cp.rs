@@ -21,8 +21,8 @@ fn help() {
     Usage: fabro sandbox cp [OPTIONS] <SRC> <DST>
 
     Arguments:
-      <SRC>  Source: <run-id>:<path> or local path
-      <DST>  Destination: <run-id>:<path> or local path
+      <SRC>  Source: `<run-id>:<path>` or local path
+      <DST>  Destination: `<run-id>:<path>` or local path
 
     Options:
           --json              Output as JSON [env: FABRO_JSON=]
