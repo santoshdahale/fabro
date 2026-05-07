@@ -298,7 +298,6 @@ function durationBetween(startTs: string | undefined, endTs: string): number {
 }
 
 function formatDurationMs(ms: number): string {
-  if (ms < 1000) return `${ms}ms`;
   return `${(ms / 1000).toFixed(1)}s`;
 }
 
@@ -517,13 +516,7 @@ function EventDetails({ turn, runStart }: { turn: TurnType; runStart: string | u
             {turn.running
               ? "Running…"
               : `exit ${turn.exitCode ?? "?"}${
-                  turn.durationMs
-                    ? ` · ${
-                        turn.durationMs < 1000
-                          ? `${turn.durationMs}ms`
-                          : `${(turn.durationMs / 1000).toFixed(1)}s`
-                      }`
-                    : ""
+                  turn.durationMs ? ` · ${formatDurationMs(turn.durationMs)}` : ""
                 }`}
           </DetailField>
           <DetailField label="Script">
