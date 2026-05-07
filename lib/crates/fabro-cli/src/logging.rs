@@ -13,7 +13,8 @@ use fabro_util::run_log::BufferedFileAppender;
 use tracing::field::{Field, Visit};
 use tracing::{Event, Level, Subscriber};
 use tracing_appender::rolling;
-use tracing_subscriber::fmt::format::{FormatEvent, FormatFields, Writer};
+use tracing_subscriber::field::RecordFields;
+use tracing_subscriber::fmt::format::{DefaultFields, FormatEvent, FormatFields, Writer};
 use tracing_subscriber::fmt::writer::MakeWriter;
 use tracing_subscriber::fmt::{FmtContext, FormattedFields};
 use tracing_subscriber::layer::SubscriberExt;
@@ -112,6 +113,21 @@ struct TtyLogFormat {
 impl TtyLogFormat {
     fn new(ansi: bool) -> Self {
         Self { ansi }
+    }
+}
+
+#[derive(Debug, Default)]
+struct TtySpanFields {
+    inner: DefaultFields,
+}
+
+impl<'writer> FormatFields<'writer> for TtySpanFields {
+    fn format_fields<R: RecordFields>(
+        &self,
+        writer: Writer<'writer>,
+        fields: R,
+    ) -> std::fmt::Result {
+        self.inner.format_fields(writer, fields)
     }
 }
 
@@ -363,6 +379,7 @@ where
         .with(filter)
         .with(
             fmt::layer()
+                .fmt_fields(TtySpanFields::default())
                 .with_writer(stdout_writer)
                 .with_ansi(ansi)
                 .event_format(TtyLogFormat::new(ansi)),
@@ -413,6 +430,7 @@ fn init_worker_stdout_subscriber<ServerWriter, RunWriter>(
         .with(filter)
         .with(
             fmt::layer()
+                .fmt_fields(TtySpanFields::default())
                 .with_writer(server_writer)
                 .with_ansi(ansi)
                 .event_format(TtyLogFormat::new(ansi)),
@@ -441,7 +459,7 @@ mod tests {
     use tracing_subscriber::prelude::*;
     use tracing_subscriber::{fmt as tracing_fmt, registry};
 
-    use super::TtyLogFormat;
+    use super::{TtyLogFormat, TtySpanFields};
 
     #[test]
     fn tty_format_timestamp_includes_calendar_date() {
@@ -545,6 +563,22 @@ mod tests {
     }
 
     #[test]
+    fn worker_run_log_stays_plain_when_stdout_uses_color() {
+        let (_stdout, run_log) = render_worker_stdout_and_run_log_event(|| {
+            let span = tracing::info_span!("run", id = %"01HV6D7S5YF4Z4B2M7K4N0Q6T9");
+            let _guard = span.enter();
+            tracing::info!("Pushed git ref to origin");
+        });
+
+        assert!(run_log.contains("Pushed git ref to origin"));
+        assert!(
+            !run_log.contains("\x1b["),
+            "per-run disk log should not contain ANSI escapes, got: {run_log:?}"
+        );
+        assert!(run_log.contains("run{id=01HV6D7S5YF4Z4B2M7K4N0Q6T9}:"));
+    }
+
+    #[test]
     fn tty_format_with_color_contains_ansi_sequences() {
         let output = render_tty_event(true, || {
             tracing::warn!(attempt = 2, "LLM request failed, retrying");
@@ -573,6 +607,7 @@ mod tests {
         let subscriber = registry().with(
             tracing_fmt::layer()
                 .with_writer(output.clone())
+                .fmt_fields(TtySpanFields::default())
                 .with_ansi(ansi)
                 .event_format(TtyLogFormat::new(ansi)),
         );
@@ -580,6 +615,29 @@ mod tests {
         subscriber::with_default(subscriber, emit);
 
         output.captured_output()
+    }
+
+    fn render_worker_stdout_and_run_log_event(emit: impl FnOnce()) -> (String, String) {
+        let stdout = CapturedTrace::default();
+        let run_log = CapturedTrace::default();
+        let subscriber = registry()
+            .with(
+                tracing_fmt::layer()
+                    .fmt_fields(TtySpanFields::default())
+                    .with_writer(stdout.clone())
+                    .with_ansi(true)
+                    .event_format(TtyLogFormat::new(true)),
+            )
+            .with(
+                tracing_fmt::layer()
+                    .with_writer(run_log.clone())
+                    .with_target(true)
+                    .with_ansi(false),
+            );
+
+        subscriber::with_default(subscriber, emit);
+
+        (stdout.captured_output(), run_log.captured_output())
     }
 
     fn render_plain_event(emit: impl FnOnce()) -> String {
