@@ -46,6 +46,12 @@ enum PromptRead {
     Error,
 }
 
+enum ParsedPromptAnswer {
+    Answer(Answer),
+    Invalid(String),
+    Interrupted,
+}
+
 #[cfg(unix)]
 use nix::errno::Errno;
 #[cfg(unix)]
@@ -86,6 +92,14 @@ impl NonblockingStdin {
     fn read_line(&self, buffer: &mut Vec<u8>) -> LineRead {
         let mut chunk = [0_u8; 256];
         loop {
+            if let Some(newline) = buffer.iter().position(|byte| *byte == b'\n') {
+                let line = buffer.drain(..=newline).collect::<Vec<_>>();
+                return LineRead::Complete(
+                    String::from_utf8_lossy(&line)
+                        .trim_end_matches(['\r', '\n'])
+                        .to_string(),
+                );
+            }
             match unistd::read(self.stdin.as_fd(), &mut chunk) {
                 Ok(0) => {
                     return if buffer.is_empty() {
@@ -433,6 +447,7 @@ fn api_question_to_question(question: &types::ApiQuestion) -> Question {
     reason = "Interactive questions and options belong on stderr, not captured stdout."
 )]
 async fn ask_attach_question(question: Question, styles: &'static Styles) -> Answer {
+    let mut input_buffer = Vec::new();
     if let Some(ref context_text) = question.context_display {
         let rendered = styles.render_markdown(context_text);
         eprint!("{rendered}");
@@ -454,12 +469,31 @@ async fn ask_attach_question(question: Question, styles: &'static Styles) -> Ans
             if question.allow_freeform {
                 eprintln!("  Or type a free-text response");
             }
-            parse_choice_response(&question, read_attach_line("Select: ").await)
+            loop {
+                match parse_choice_response(
+                    &question,
+                    read_attach_line("Select: ", &mut input_buffer).await,
+                ) {
+                    ParsedPromptAnswer::Answer(answer) => return answer,
+                    ParsedPromptAnswer::Invalid(message) => eprintln!("{message}"),
+                    ParsedPromptAnswer::Interrupted => return Answer::interrupted(),
+                }
+            }
         }
-        QuestionType::YesNo | QuestionType::Confirmation => {
-            parse_confirm_response(read_attach_line("[Y/N]: ").await)
-        }
-        QuestionType::Freeform => parse_freeform_response(read_attach_line("> ").await),
+        QuestionType::YesNo | QuestionType::Confirmation => loop {
+            match parse_confirm_response(read_attach_line("[Y/N]: ", &mut input_buffer).await) {
+                ParsedPromptAnswer::Answer(answer) => return answer,
+                ParsedPromptAnswer::Invalid(message) => eprintln!("{message}"),
+                ParsedPromptAnswer::Interrupted => return Answer::interrupted(),
+            }
+        },
+        QuestionType::Freeform => loop {
+            match parse_freeform_response(read_attach_line("> ", &mut input_buffer).await) {
+                ParsedPromptAnswer::Answer(answer) => return answer,
+                ParsedPromptAnswer::Invalid(message) => eprintln!("{message}"),
+                ParsedPromptAnswer::Interrupted => return Answer::interrupted(),
+            }
+        },
     }
 }
 
@@ -467,20 +501,19 @@ async fn ask_attach_question(question: Question, styles: &'static Styles) -> Ans
     clippy::print_stderr,
     reason = "Prompts go to stderr so piped stdout stays machine-readable."
 )]
-async fn read_attach_line(prompt: &str) -> PromptRead {
+async fn read_attach_line(prompt: &str, buffer: &mut Vec<u8>) -> PromptRead {
     eprint!("{prompt}");
     let _ = std::io::stderr().flush();
-    read_attach_line_after_prompt().await
+    read_attach_line_after_prompt(buffer).await
 }
 
 #[cfg(unix)]
-async fn read_attach_line_after_prompt() -> PromptRead {
+async fn read_attach_line_after_prompt(buffer: &mut Vec<u8>) -> PromptRead {
     let Some(stdin) = NonblockingStdin::new() else {
         return PromptRead::Error;
     };
-    let mut buffer = Vec::new();
     loop {
-        match stdin.read_line(&mut buffer) {
+        match stdin.read_line(buffer) {
             LineRead::Pending => sleep(PROMPT_READ_POLL_INTERVAL).await,
             LineRead::Complete(line) => return PromptRead::Line(line),
             LineRead::Eof => return PromptRead::Eof,
@@ -490,7 +523,7 @@ async fn read_attach_line_after_prompt() -> PromptRead {
 }
 
 #[cfg(not(unix))]
-async fn read_attach_line_after_prompt() -> PromptRead {
+async fn read_attach_line_after_prompt(_buffer: &mut Vec<u8>) -> PromptRead {
     use tokio::io::{self, AsyncBufReadExt, BufReader};
 
     let stdin = io::stdin();
@@ -503,12 +536,12 @@ async fn read_attach_line_after_prompt() -> PromptRead {
     }
 }
 
-fn parse_choice_response(question: &Question, prompt_read: PromptRead) -> Answer {
+fn parse_choice_response(question: &Question, prompt_read: PromptRead) -> ParsedPromptAnswer {
     let PromptRead::Line(response) = prompt_read else {
-        return Answer::interrupted();
+        return ParsedPromptAnswer::Interrupted;
     };
     if response.trim().is_empty() {
-        return Answer::interrupted();
+        return ParsedPromptAnswer::Invalid(invalid_choice_message(question));
     }
     if question.question_type == QuestionType::MultiSelect {
         let selected = response
@@ -531,38 +564,52 @@ fn parse_choice_response(question: &Question, prompt_read: PromptRead) -> Answer
             })
             .collect::<Option<Vec<_>>>();
         if let Some(selected) = selected.filter(|keys| !keys.is_empty()) {
-            return Answer::multi_selected(selected);
+            return ParsedPromptAnswer::Answer(Answer::multi_selected(selected));
         }
+        return ParsedPromptAnswer::Invalid(invalid_choice_message(question));
     }
     if let Some(answer) = find_matching_option(&response, &question.options) {
-        return answer;
+        return ParsedPromptAnswer::Answer(answer);
     }
     if question.allow_freeform {
-        return Answer::text(response);
+        return ParsedPromptAnswer::Answer(Answer::text(response));
     }
-    Answer::interrupted()
+    ParsedPromptAnswer::Invalid(invalid_choice_message(question))
 }
 
-fn parse_confirm_response(prompt_read: PromptRead) -> Answer {
+fn parse_confirm_response(prompt_read: PromptRead) -> ParsedPromptAnswer {
     let PromptRead::Line(response) = prompt_read else {
-        return Answer::interrupted();
+        return ParsedPromptAnswer::Interrupted;
     };
     match response.trim().to_lowercase().as_str() {
-        "y" | "yes" => Answer::yes(),
-        "n" | "no" => Answer::no(),
-        _ => Answer::interrupted(),
+        "y" | "yes" => ParsedPromptAnswer::Answer(Answer::yes()),
+        "n" | "no" => ParsedPromptAnswer::Answer(Answer::no()),
+        _ => ParsedPromptAnswer::Invalid("Please enter y or n.".to_string()),
     }
 }
 
-fn parse_freeform_response(prompt_read: PromptRead) -> Answer {
+fn parse_freeform_response(prompt_read: PromptRead) -> ParsedPromptAnswer {
     let PromptRead::Line(response) = prompt_read else {
-        return Answer::interrupted();
+        return ParsedPromptAnswer::Interrupted;
     };
     if response.trim().is_empty() {
-        Answer::interrupted()
+        ParsedPromptAnswer::Invalid("Please enter a response.".to_string())
     } else {
-        Answer::text(response)
+        ParsedPromptAnswer::Answer(Answer::text(response))
     }
+}
+
+fn invalid_choice_message(question: &Question) -> String {
+    let keys = question
+        .options
+        .iter()
+        .map(|option| option.key.as_str())
+        .collect::<Vec<_>>()
+        .join(", ");
+    if keys.is_empty() {
+        return "Please enter one of the listed options.".to_string();
+    }
+    format!("Please enter one of: {keys}.")
 }
 
 fn find_matching_option(response: &str, options: &[InterviewOption]) -> Option<Answer> {
@@ -894,6 +941,79 @@ mod tests {
         assert!(answer_requires_reattach(&interrupted));
         assert!(answer_requires_reattach(&skipped));
         assert!(!answer_requires_reattach(&answered));
+    }
+
+    #[test]
+    fn invalid_confirm_response_is_user_correctable() {
+        let response = parse_confirm_response(PromptRead::Line("dasf".to_string()));
+
+        assert!(matches!(response, ParsedPromptAnswer::Invalid(_)));
+    }
+
+    #[test]
+    fn eof_confirm_response_is_interrupted() {
+        let response = parse_confirm_response(PromptRead::Eof);
+
+        assert!(matches!(response, ParsedPromptAnswer::Interrupted));
+    }
+
+    #[test]
+    fn invalid_multiple_choice_without_freeform_is_user_correctable() {
+        let mut question = Question::new("Pick one.", QuestionType::MultipleChoice);
+        question.options = vec![InterviewOption {
+            key:   "A".to_string(),
+            label: "Approve".to_string(),
+        }];
+
+        let response = parse_choice_response(&question, PromptRead::Line("bogus".to_string()));
+
+        assert!(matches!(response, ParsedPromptAnswer::Invalid(_)));
+    }
+
+    #[test]
+    fn unmatched_multiple_choice_with_freeform_remains_text() {
+        let mut question = Question::new("Pick one.", QuestionType::MultipleChoice);
+        question.options = vec![InterviewOption {
+            key:   "A".to_string(),
+            label: "Approve".to_string(),
+        }];
+        question.allow_freeform = true;
+
+        let response = parse_choice_response(&question, PromptRead::Line("custom".to_string()));
+
+        assert!(matches!(
+            response,
+            ParsedPromptAnswer::Answer(Answer {
+                value: AnswerValue::Text(text),
+                ..
+            }) if text == "custom"
+        ));
+    }
+
+    #[test]
+    fn invalid_multi_select_token_is_user_correctable() {
+        let mut question = Question::new("Pick many.", QuestionType::MultiSelect);
+        question.options = vec![
+            InterviewOption {
+                key:   "A".to_string(),
+                label: "Approve".to_string(),
+            },
+            InterviewOption {
+                key:   "N".to_string(),
+                label: "Notify".to_string(),
+            },
+        ];
+
+        let response = parse_choice_response(&question, PromptRead::Line("A bogus".to_string()));
+
+        assert!(matches!(response, ParsedPromptAnswer::Invalid(_)));
+    }
+
+    #[test]
+    fn empty_freeform_response_is_user_correctable() {
+        let response = parse_freeform_response(PromptRead::Line("   ".to_string()));
+
+        assert!(matches!(response, ParsedPromptAnswer::Invalid(_)));
     }
 
     #[test]

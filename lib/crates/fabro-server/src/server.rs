@@ -2593,10 +2593,9 @@ fn validate_answer_for_question(
 ) -> Result<(), Response> {
     match (&question.question_type, &answer.value) {
         (
-            QuestionType::YesNo,
+            QuestionType::YesNo | QuestionType::Confirmation,
             fabro_interview::AnswerValue::Yes | fabro_interview::AnswerValue::No,
         )
-        | (QuestionType::Confirmation, fabro_interview::AnswerValue::Yes)
         | (
             _,
             fabro_interview::AnswerValue::Interrupted

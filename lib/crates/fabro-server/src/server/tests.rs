@@ -4050,6 +4050,24 @@ async fn submit_pending_interview_answer_rejects_invalid_answer_shape() {
 }
 
 #[test]
+fn validate_answer_for_question_accepts_no_for_confirmation() {
+    let question = InterviewQuestionRecord {
+        id:              "q-1".to_string(),
+        text:            "Continue?".to_string(),
+        stage:           "gate".to_string(),
+        question_type:   QuestionType::Confirmation,
+        options:         vec![],
+        allow_freeform:  false,
+        timeout_seconds: None,
+        context_display: None,
+    };
+
+    let result = validate_answer_for_question(&question, &Answer::no());
+
+    assert!(result.is_ok());
+}
+
+#[test]
 fn answer_from_typed_yes_request_maps_to_yes_answer() {
     let question = InterviewQuestionRecord {
         id:              "q-1".to_string(),
