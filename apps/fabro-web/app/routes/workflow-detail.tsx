@@ -1,10 +1,10 @@
 import { ChevronRightIcon } from "@heroicons/react/20/solid";
+import type {
+  WorkflowDetailResponse as ApiWorkflowDetail,
+  WorkflowSettings as WorkflowSettingsSnapshot,
+} from "@qltysh/fabro-api-client";
 import { Link, Outlet, useLocation, useParams } from "react-router";
 import { useWorkflow } from "../lib/queries";
-import type {
-  WorkflowSettingsSnapshot,
-  WorkflowDetailResponse as ApiWorkflowDetail,
-} from "../lib/workflow-api";
 
 export interface WorkflowEntry {
   name: string;

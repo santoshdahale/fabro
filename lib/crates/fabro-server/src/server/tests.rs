@@ -8202,6 +8202,64 @@ async fn demo_get_run_returns_404_for_unknown_run() {
 }
 
 #[tokio::test]
+async fn demo_workflows_return_list_detail_and_runs() {
+    let state = test_app_state();
+    let app = crate::test_support::build_test_router(state);
+
+    let list_req = Request::builder()
+        .method("GET")
+        .uri(api("/workflows"))
+        .header("X-Fabro-Demo", "1")
+        .body(Body::empty())
+        .unwrap();
+    let list_response = app.clone().oneshot(list_req).await.unwrap();
+    let list_body = response_json!(list_response, StatusCode::OK).await;
+    let workflows = list_body["data"]
+        .as_array()
+        .expect("workflow list data should be an array");
+    assert!(!workflows.is_empty(), "demo should return workflows");
+    let first = &workflows[0];
+    assert!(first["name"].is_string());
+    assert!(first["slug"].is_string());
+    assert!(first["filename"].is_string());
+    assert!(first["last_run"].is_object() || first["last_run"].is_null());
+    assert!(first["schedule"].is_object() || first["schedule"].is_null());
+
+    let detail_req = Request::builder()
+        .method("GET")
+        .uri(api("/workflows/implement"))
+        .header("X-Fabro-Demo", "1")
+        .body(Body::empty())
+        .unwrap();
+    let detail_response = app.clone().oneshot(detail_req).await.unwrap();
+    let detail_body = response_json!(detail_response, StatusCode::OK).await;
+    assert_eq!(detail_body["slug"], "implement");
+    assert!(detail_body["settings"].is_object());
+    assert!(
+        detail_body["graph"]
+            .as_str()
+            .is_some_and(|graph| graph.contains("digraph"))
+    );
+
+    let runs_req = Request::builder()
+        .method("GET")
+        .uri(api("/workflows/implement/runs"))
+        .header("X-Fabro-Demo", "1")
+        .body(Body::empty())
+        .unwrap();
+    let runs_response = app.oneshot(runs_req).await.unwrap();
+    let runs_body = response_json!(runs_response, StatusCode::OK).await;
+    let runs = runs_body["data"]
+        .as_array()
+        .expect("workflow runs data should be an array");
+    assert!(
+        runs.iter()
+            .all(|run| run["workflow_slug"].as_str() == Some("implement")),
+        "workflow run list should be scoped to the requested workflow"
+    );
+}
+
+#[tokio::test]
 async fn boards_runs_returns_run_list_items_with_board_columns() {
     let state = test_app_state();
     let app = crate::test_support::build_test_router(Arc::clone(&state));

@@ -11,6 +11,8 @@ tags:
     description: First-run browser install workflow
   - name: Integrations
     description: External provider callbacks and integration endpoints
+  - name: Auth
+    description: Browser authentication and demo-mode controls
   - name: Runs
     description: Run management operations
   - name: Human-in-the-Loop
@@ -616,6 +618,108 @@ paths:
           headers:
             x-request-id:
               $ref: "#/components/headers/XRequestId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  # ── Auth ─────────────────────────────────────────────────────────────
+
+  /api/v1/auth/config:
+    get:
+      operationId: getAuthConfig
+      tags: [Auth]
+      summary: Retrieve auth configuration
+      description: Returns the browser login methods enabled for this server.
+      security: []
+      responses:
+        "200":
+          description: Enabled authentication methods
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthConfigResponse"
+
+  /api/v1/auth/me:
+    get:
+      operationId: getAuthMe
+      tags: [Auth]
+      summary: Retrieve current browser user
+      description: Returns the authenticated browser session user and demo-mode state.
+      responses:
+        "200":
+          description: Current authenticated browser user
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthMeResponse"
+        "401":
+          description: Not authenticated
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/v1/demo/toggle:
+    post:
+      operationId: toggleDemo
+      tags: [Auth]
+      summary: Toggle browser demo mode
+      description: Enables or disables demo-mode routing for the current browser session.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DemoToggleRequest"
+      responses:
+        "200":
+          description: Demo-mode state updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DemoToggleResponse"
+        "401":
+          description: Not authenticated
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /auth/login/dev-token:
+    post:
+      operationId: loginDevToken
+      tags: [Auth]
+      summary: Login with development token
+      description: Creates a browser session from an enabled development token.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DevTokenLoginRequest"
+      responses:
+        "200":
+          description: Browser session created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DevTokenLoginResponse"
+        "401":
+          description: Invalid or disabled development token
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: Session secret is not configured
           content:
             application/json:
               schema:
@@ -1343,6 +1447,17 @@ paths:
       description: Renders the workflow graph as an SVG image using Graphviz.
       parameters:
         - $ref: "#/components/parameters/RunId"
+        - name: direction
+          in: query
+          required: false
+          description: Optional Graphviz rank direction override for the rendered graph.
+          schema:
+            type: string
+            enum:
+              - LR
+              - TB
+              - BT
+              - RL
       responses:
         "200":
           description: SVG image of the workflow graph
@@ -2501,6 +2616,114 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
 
+  # ── Workflows ────────────────────────────────────────────────────────
+
+  /api/v1/workflows:
+    get:
+      operationId: listWorkflows
+      tags: [Workflows]
+      summary: List workflows
+      description: Returns workflow definitions available to the browser workflow pages. Real-mode servers may return 501 until workflow cataloging is implemented.
+      parameters:
+        - $ref: "#/components/parameters/PageLimit"
+        - $ref: "#/components/parameters/PageOffset"
+      responses:
+        "200":
+          description: Paginated workflow summaries
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PaginatedWorkflowListResponse"
+        "501":
+          description: Workflow cataloging is not implemented in real mode
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/v1/workflows/{name}:
+    get:
+      operationId: retrieveWorkflow
+      tags: [Workflows]
+      summary: Retrieve workflow
+      description: Returns a single workflow definition and its dense settings snapshot.
+      parameters:
+        - name: name
+          in: path
+          required: true
+          description: Workflow slug or name.
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Workflow details
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WorkflowDetailResponse"
+        "404":
+          description: Workflow not found
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "501":
+          description: Workflow cataloging is not implemented in real mode
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/v1/workflows/{name}/runs:
+    get:
+      operationId: listWorkflowRuns
+      tags: [Workflows]
+      summary: List workflow runs
+      description: Returns durable runs associated with one workflow.
+      parameters:
+        - name: name
+          in: path
+          required: true
+          description: Workflow slug or name.
+          schema:
+            type: string
+        - $ref: "#/components/parameters/PageLimit"
+        - $ref: "#/components/parameters/PageOffset"
+      responses:
+        "200":
+          description: Paginated durable runs for the workflow
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PaginatedRunList"
+        "404":
+          description: Workflow not found
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "501":
+          description: Workflow cataloging is not implemented in real mode
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
   # ── Insights ──────────────────────────────────────────────────────────
 
   /api/v1/insights/queries:
@@ -3237,6 +3460,95 @@ components:
         format: uuid
 
   schemas:
+    AuthConfigResponse:
+      description: Browser login methods enabled by server auth settings.
+      type: object
+      required:
+        - methods
+      properties:
+        methods:
+          type: array
+          items:
+            type: string
+          example: ["dev-token", "github"]
+
+    AuthMeResponse:
+      description: Current authenticated browser user and session state.
+      type: object
+      required:
+        - user
+        - provider
+        - demoMode
+      properties:
+        user:
+          $ref: "#/components/schemas/AuthSessionUser"
+        provider:
+          type: string
+          example: dev-token
+        demoMode:
+          type: boolean
+
+    AuthSessionUser:
+      description: Browser session user profile.
+      type: object
+      required:
+        - login
+        - name
+        - email
+        - avatarUrl
+        - userUrl
+      properties:
+        login:
+          type: string
+        name:
+          type: string
+        email:
+          type: string
+        idpIssuer:
+          type: string
+        idpSubject:
+          type: string
+        avatarUrl:
+          type: string
+        userUrl:
+          type: string
+
+    DemoToggleRequest:
+      description: Desired browser demo-mode state.
+      type: object
+      required:
+        - enabled
+      properties:
+        enabled:
+          type: boolean
+
+    DemoToggleResponse:
+      description: Updated browser demo-mode state.
+      type: object
+      required:
+        - enabled
+      properties:
+        enabled:
+          type: boolean
+
+    DevTokenLoginRequest:
+      description: Browser login payload for development-token auth.
+      type: object
+      required:
+        - token
+      properties:
+        token:
+          type: string
+
+    DevTokenLoginResponse:
+      description: Browser development-token login result.
+      type: object
+      required:
+        - ok
+      properties:
+        ok:
+          type: boolean
+
     InstallSessionResponse:
       description: Current browser-install session snapshot with secrets redacted.
       type: object
@@ -3612,6 +3924,86 @@ components:
             $ref: "#/components/schemas/RunListItem"
         meta:
           $ref: "#/components/schemas/PaginationMeta"
+
+    WorkflowScheduleSummary:
+      description: Workflow schedule summary shown in workflow lists.
+      type: object
+      required:
+        - expression
+      properties:
+        expression:
+          type: string
+        next_run:
+          type: ["string", "null"]
+          format: date-time
+
+    WorkflowLastRunSummary:
+      description: Most recent run timestamp for a workflow.
+      type: object
+      properties:
+        ran_at:
+          type: ["string", "null"]
+          format: date-time
+
+    WorkflowListItem:
+      description: Workflow summary shown in workflow list pages.
+      type: object
+      required:
+        - name
+        - slug
+        - filename
+      properties:
+        name:
+          type: string
+        slug:
+          type: string
+        filename:
+          type: string
+        last_run:
+          oneOf:
+            - $ref: "#/components/schemas/WorkflowLastRunSummary"
+            - type: "null"
+        schedule:
+          oneOf:
+            - $ref: "#/components/schemas/WorkflowScheduleSummary"
+            - type: "null"
+
+    PaginatedWorkflowListResponse:
+      description: Paginated list of workflows.
+      type: object
+      required:
+        - data
+      properties:
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/WorkflowListItem"
+        pagination:
+          $ref: "#/components/schemas/PaginationMeta"
+
+    WorkflowDetailResponse:
+      description: Workflow definition and dense settings snapshot.
+      type: object
+      required:
+        - name
+        - slug
+        - description
+        - filename
+        - settings
+        - graph
+      properties:
+        name:
+          type: string
+        slug:
+          type: string
+        description:
+          type: string
+        filename:
+          type: string
+        settings:
+          $ref: "#/components/schemas/WorkflowSettings"
+        graph:
+          type: string
 
     PaginatedModelList:
       description: Paginated list of models.

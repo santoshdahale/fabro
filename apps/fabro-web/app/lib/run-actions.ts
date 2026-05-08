@@ -1,7 +1,12 @@
 import type { ErrorResponseEntry, RunStatusResponse } from "@qltysh/fabro-api-client";
 
-import { apiRequest } from "./api-client";
-import { queryKeys } from "./query-keys";
+import {
+  ApiError,
+  apiData,
+  apiResponse,
+  requestSignalOptions,
+  runsApi,
+} from "./api-client";
 import type { RunStatus } from "../data/runs";
 
 export type LifecycleAction = "cancel" | "archive" | "unarchive";
@@ -39,13 +44,12 @@ export async function unarchiveRun(id: string, request?: Request): Promise<RunSt
 }
 
 export async function deleteRun(id: string, request?: Request): Promise<void> {
-  const response = await apiRequest(`/api/v1/runs/${encodeURIComponent(id)}`, {
-    init: { method: "DELETE" },
-    request,
-  });
-
-  if (response.status === 204 || response.status === 404) return;
-  throw await parseLifecycleActionError(response);
+  try {
+    await apiResponse(() => runsApi.deleteRun(id, undefined, requestSignalOptions(request)));
+  } catch (error) {
+    if (error instanceof ApiError && error.status === 404) return;
+    throw lifecycleActionErrorFromError(error);
+  }
 }
 
 export function canCancel(status: string | null | undefined): boolean {
@@ -116,43 +120,33 @@ async function runLifecycleAction(
   action: LifecycleAction,
   request?: Request,
 ): Promise<RunStatusResponse> {
-  const response = await apiRequest(queryKeys.runs[action](id), {
-    init: {
-      method: "POST",
-    },
-    request,
-  });
-
-  if (!response.ok) {
-    throw await parseLifecycleActionError(response);
+  try {
+    switch (action) {
+      case "cancel":
+        return await apiData(() => runsApi.cancelRun(id, requestSignalOptions(request)));
+      case "archive":
+        return await apiData(() => runsApi.archiveRun(id, requestSignalOptions(request)));
+      case "unarchive":
+        return await apiData(() => runsApi.unarchiveRun(id, requestSignalOptions(request)));
+    }
+  } catch (error) {
+    throw lifecycleActionErrorFromError(error);
   }
-
-  return response.json() as Promise<RunStatusResponse>;
 }
 
-async function parseLifecycleActionError(response: Response): Promise<LifecycleActionError> {
-  let bodyText = "";
-  try {
-    bodyText = await response.text();
-  } catch {
-    // Ignore body read failures and fall back to the status only.
-  }
+function lifecycleActionErrorFromError(error: unknown): LifecycleActionError {
+  if (!(error instanceof ApiError)) throw error;
+  return {
+    status: error.status,
+    errors: parseLifecycleErrors(error.body),
+  };
+}
 
-  if (!bodyText) {
-    return { status: response.status, errors: [] };
-  }
-
-  try {
-    const body = JSON.parse(bodyText) as { errors?: unknown };
-    if (!Array.isArray(body.errors)) {
-      return { status: response.status, errors: [] };
-    }
-
-    const errors = body.errors.filter(isErrorResponseEntry);
-    return { status: response.status, errors };
-  } catch {
-    return { status: response.status, errors: [] };
-  }
+function parseLifecycleErrors(body: unknown): ErrorResponseEntry[] {
+  if (!body || typeof body !== "object") return [];
+  const errors = (body as { errors?: unknown }).errors;
+  if (!Array.isArray(errors)) return [];
+  return errors.filter(isErrorResponseEntry);
 }
 
 export function isLifecycleActionError(value: unknown): value is LifecycleActionError {
