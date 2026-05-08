@@ -65,6 +65,10 @@ const allTabs = [
 
 export const handle = { hideHeader: true };
 
+export function focusSteerAfterMenuClose(focus: () => void) {
+  globalThis.setTimeout(focus, 0);
+}
+
 const ACTIONS_TRIGGER_CLASS =
   `${SECONDARY_BUTTON_CLASS} disabled:cursor-not-allowed disabled:opacity-60`;
 
@@ -316,7 +320,9 @@ export default function RunDetail({ params }: { params: { id: string } }) {
           interruptPending={interruptMutation.isMutating}
           onSendInterrupt={() => void interruptMutation.trigger()}
           canFocusSteer={statusKind === "running" && !hasPendingQuestions}
-          onFocusSteer={() => steerBarRef.current?.focus()}
+          onFocusSteer={() => {
+            focusSteerAfterMenuClose(() => steerBarRef.current?.focus());
+          }}
           canPreview={!!run.sandboxId}
           previewPending={previewPending}
           onPreview={() => void previewMutation.trigger({

@@ -61,6 +61,7 @@ mock.module("../hooks/use-run-toasts", () => ({
 
 const {
   default: RunDetail,
+  focusSteerAfterMenuClose,
   handleLifecycleToastResult,
   lifecycleActionVisibility,
 } = await import("./run-detail");
@@ -351,6 +352,16 @@ describe("RunDetail full-height child routes", () => {
 
     const badges = tabCountBadges(renderer);
     expect(badges.map((badge) => badge.children.join(""))).toContain("7");
+  });
+
+  test("defers steer bar focus until after the Actions menu item click settles", async () => {
+    const focusCalls: string[] = [];
+
+    focusSteerAfterMenuClose(() => focusCalls.push("focus"));
+
+    expect(focusCalls).toEqual([]);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(focusCalls).toEqual(["focus"]);
   });
 
   test("hides the Files Changed tab badge when diff stats are absent", async () => {
