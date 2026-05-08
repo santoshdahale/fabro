@@ -13,14 +13,14 @@ import {
   RectangleStackIcon,
   SignalIcon,
 } from "@heroicons/react/20/solid";
-import { Link, Outlet, useLocation, useMatches } from "react-router";
+import { Link, Outlet, useLocation, useMatches, useNavigate } from "react-router";
 import { Menu, MenuButton, MenuItem, MenuItems } from "@headlessui/react";
 
 import { InterviewDock } from "../components/interview-dock";
 import { SteerBar, type SteerBarHandle } from "../components/steer-bar";
 import { ErrorState } from "../components/state";
 import { useToast } from "../components/toast";
-import { SECONDARY_BUTTON_CLASS, Tooltip } from "../components/ui";
+import { ConfirmDialog, SECONDARY_BUTTON_CLASS, Tooltip } from "../components/ui";
 import {
   isRunStatus,
   mapRunSummaryToRunItem,
@@ -28,6 +28,7 @@ import {
   type RunSummary,
 } from "../data/runs";
 import { useDemoMode } from "../lib/demo-mode";
+import { useSWRConfig } from "swr";
 import {
   useArchiveRun,
   useCancelRun,
@@ -38,13 +39,17 @@ import {
   type PreviewMutationResult,
 } from "../lib/mutations";
 import { formatAbsoluteTs, formatRelativeTime } from "../lib/format";
+import { queryKeys } from "../lib/query-keys";
 import { useRunEvents } from "../lib/run-events";
 import { useRunToasts } from "../hooks/use-run-toasts";
 import { useRun, useRunQuestions } from "../lib/queries";
 import {
   canArchive,
   canCancel,
+  canDelete,
   canUnarchive,
+  deleteErrorMessage,
+  deleteRun,
   isTerminalCancelledRun,
   mapError,
   type LifecycleAction,
@@ -107,6 +112,7 @@ export function lifecycleActionVisibility(status: string | null | undefined) {
     showPrimaryCancel: canCancel(status),
     showArchive: canArchive(status),
     showUnarchive: canUnarchive(status),
+    showDelete: canDelete(status),
   };
 }
 
@@ -147,6 +153,10 @@ export default function RunDetail({ params }: { params: { id: string } }) {
   const archiveMutation = useArchiveRun(params.id);
   const unarchiveMutation = useUnarchiveRun(params.id);
   const interruptMutation = useInterruptRun(params.id);
+  const navigate = useNavigate();
+  const { mutate } = useSWRConfig();
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [deletePending, setDeletePending] = useState(false);
   const { push, dismiss } = useToast();
   const filesCount = runQuery.data?.diff_summary?.files_changed ?? null;
   const tabs = allTabs
@@ -217,6 +227,21 @@ export default function RunDetail({ params }: { params: { id: string } }) {
   const cancelPending = cancelMutation.isMutating;
   const archivePending = archiveMutation.isMutating;
   const unarchivePending = unarchiveMutation.isMutating;
+  const handleConfirmDelete = async () => {
+    setDeletePending(true);
+    try {
+      await deleteRun(params.id);
+      void mutate(queryKeys.boards.runs());
+      void mutate(queryKeys.boards.runs(true));
+      push({ message: "Run deleted." });
+      navigate("/runs");
+    } catch (error) {
+      push({ message: deleteErrorMessage(error), tone: "error" });
+    } finally {
+      setDeletePending(false);
+      setDeleteDialogOpen(false);
+    }
+  };
   const hasPendingQuestions = isBlocked && pendingQuestions.length > 0;
   const dockClearance = hasPendingQuestions ? "18rem" : "5rem";
   const rootStyle = {
@@ -304,11 +329,30 @@ export default function RunDetail({ params }: { params: { id: string } }) {
           canUnarchive={visibility.showUnarchive}
           unarchivePending={unarchivePending}
           onUnarchive={() => void unarchiveMutation.trigger()}
+          canDelete={visibility.showDelete}
+          deletePending={deletePending}
+          onDelete={() => setDeleteDialogOpen(true)}
           canCancel={visibility.showPrimaryCancel}
           cancelPending={cancelPending}
           onCancel={() => void cancelMutation.trigger()}
         />
       </div>
+
+      <ConfirmDialog
+        open={deleteDialogOpen}
+        title="Delete this run?"
+        description={
+          <>
+            This permanently removes <span className="font-mono text-fg-2">{run.title}</span> and its
+            durable state. This action cannot be undone.
+          </>
+        }
+        confirmLabel="Delete run"
+        pendingLabel="Deleting…"
+        pending={deletePending}
+        onConfirm={() => void handleConfirmDelete()}
+        onCancel={() => setDeleteDialogOpen(false)}
+      />
 
       <div
         className={classNames(
@@ -456,6 +500,9 @@ interface ActionsMenuProps {
   canUnarchive: boolean;
   unarchivePending: boolean;
   onUnarchive: () => void;
+  canDelete: boolean;
+  deletePending: boolean;
+  onDelete: () => void;
   canCancel: boolean;
   cancelPending: boolean;
   onCancel: () => void;
@@ -468,16 +515,17 @@ function ActionsMenu(props: ActionsMenuProps) {
     canPreview, previewPending, onPreview,
     canArchive, archivePending, onArchive,
     canUnarchive, unarchivePending, onUnarchive,
+    canDelete, deletePending, onDelete,
     canCancel, cancelPending, onCancel,
   } = props;
 
   const hasOps =
     canPreview || canSendInterrupt || canFocusSteer;
   const hasLifecycle = canArchive || canUnarchive;
-  const hasDestructive = canCancel;
+  const hasDestructive = canCancel || canDelete;
   const hasAny = hasOps || hasLifecycle || hasDestructive;
   const anyPending =
-    previewPending || archivePending || unarchivePending || cancelPending || interruptPending;
+    previewPending || archivePending || unarchivePending || deletePending || cancelPending || interruptPending;
 
   if (!hasAny) return null;
 
@@ -564,6 +612,18 @@ function ActionsMenu(props: ActionsMenuProps) {
               className={MENU_ITEM_DANGER_CLASS}
             >
               {cancelPending ? "Cancelling…" : "Cancel"}
+            </button>
+          </MenuItem>
+        )}
+        {canDelete && (
+          <MenuItem>
+            <button
+              type="button"
+              onClick={onDelete}
+              disabled={deletePending}
+              className={MENU_ITEM_DANGER_CLASS}
+            >
+              {deletePending ? "Deleting…" : "Delete"}
             </button>
           </MenuItem>
         )}

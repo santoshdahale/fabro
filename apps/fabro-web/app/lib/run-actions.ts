@@ -38,6 +38,16 @@ export async function unarchiveRun(id: string, request?: Request): Promise<RunSt
   return runLifecycleAction(id, "unarchive", request);
 }
 
+export async function deleteRun(id: string, request?: Request): Promise<void> {
+  const response = await apiRequest(`/api/v1/runs/${encodeURIComponent(id)}`, {
+    init: { method: "DELETE" },
+    request,
+  });
+
+  if (response.status === 204 || response.status === 404) return;
+  throw await parseLifecycleActionError(response);
+}
+
 export function canCancel(status: string | null | undefined): boolean {
   return !!status && CANCELABLE_STATUSES.has(status as RunStatus);
 }
@@ -50,8 +60,23 @@ export function canUnarchive(status: string | null | undefined): boolean {
   return status === "archived";
 }
 
+export function canDelete(status: string | null | undefined): boolean {
+  return status === "archived";
+}
+
 export function isTerminalCancelledRun(run: RunStatusResponse): boolean {
   return run.status.kind === "failed" && run.status.reason === "cancelled";
+}
+
+export function deleteErrorMessage(error: unknown): string {
+  if (isLifecycleActionError(error)) {
+    if (error.status === 409) {
+      return "Active runs can't be deleted.";
+    }
+    const detail = error.errors[0]?.detail?.trim();
+    if (detail) return detail;
+  }
+  return "Couldn't delete the run right now. Try again.";
 }
 
 export function mapError(error: unknown, action: LifecycleAction): string {
