@@ -6,6 +6,7 @@ import { MemoryRouter, Route, Routes } from "react-router";
 import { ToastProvider } from "../components/toast";
 
 let currentFilesPayload: any = null;
+let currentCommitsPayload: any = null;
 let currentRunStatus = "succeeded";
 const useRunFilesCalls: any[] = [];
 
@@ -54,14 +55,21 @@ mock.module("../lib/queries", () => ({
       source_directory: null,
     },
   }),
-  useRunFiles: (id: string | undefined, scope: string | undefined) => {
-    useRunFilesCalls.push({ id, scope });
-    return {
-    data:         currentFilesPayload,
+  useRunCommits: () => ({
+    data:         currentCommitsPayload,
     error:        null,
     isLoading:    false,
     isValidating: false,
-    mutate:       mock(() => Promise.resolve(currentFilesPayload)),
+    mutate:       mock(() => Promise.resolve(currentCommitsPayload)),
+  }),
+  useRunFiles: (id: string | undefined, selection: any) => {
+    useRunFilesCalls.push({ id, selection });
+    return {
+      data:         currentFilesPayload,
+      error:        null,
+      isLoading:    false,
+      isValidating: false,
+      mutate:       mock(() => Promise.resolve(currentFilesPayload)),
     };
   },
   useRunQuestions: () => ({ data: [] }),
@@ -83,8 +91,9 @@ function makeFiles(count: number) {
 function makePayload(count: number, source = "sandbox") {
   return {
     data: makeFiles(count),
-    source,
     meta: {
+      source,
+      scope:               "committed",
       degraded:            false,
       degraded_reason:     null,
       total_changed:       count,
@@ -106,8 +115,9 @@ function makePatchPayload(patch: string) {
         unified_patch: patch,
       },
     ],
-    source: "sandbox",
     meta:   {
+      source:              "sandbox",
+      scope:               "committed",
       degraded:            false,
       degraded_reason:     null,
       total_changed:       1,
@@ -149,6 +159,7 @@ describe("RunFiles rendering", () => {
       }
     });
     currentFilesPayload = null;
+    currentCommitsPayload = null;
     currentRunStatus = "succeeded";
     multiFileDiffCalls.length = 0;
     patchDiffCalls.length = 0;
@@ -174,7 +185,35 @@ describe("RunFiles rendering", () => {
 
     renderRunFiles("/runs/run_1/files?scope=all#file=src/file-0.ts");
 
-    expect(useRunFilesCalls[0]).toEqual({ id: "run_1", scope: "all" });
+    expect(useRunFilesCalls[0]).toEqual({
+      id:        "run_1",
+      selection: { kind: "scope", scope: "all" },
+    });
+  });
+
+  test("passes a selected commit range to useRunFiles", () => {
+    currentFilesPayload = makePayload(1);
+    currentCommitsPayload = {
+      data: [
+        {
+          sha:       "b".repeat(40),
+          short_sha: "bbbbbbb",
+          subject:   "fabro(run_1): implement (succeeded)",
+          parents:   [{ sha: "a".repeat(40), short_sha: "aaaaaaa" }],
+        },
+      ],
+    };
+
+    renderRunFiles(`/runs/run_1/files?commit=${"b".repeat(40)}`);
+
+    expect(useRunFilesCalls[0]).toEqual({
+      id:        "run_1",
+      selection: {
+        kind:    "commit",
+        fromSha: "a".repeat(40),
+        toSha:   "b".repeat(40),
+      },
+    });
   });
 
   test("shows the scope picker only for sandbox responses", () => {

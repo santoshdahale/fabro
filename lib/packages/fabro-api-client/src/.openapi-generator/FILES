@@ -172,6 +172,7 @@ models/paginated-board-run-list.ts
 models/paginated-event-list.ts
 models/paginated-history-entry-list.ts
 models/paginated-model-list.ts
+models/paginated-run-commit-list.ts
 models/paginated-run-file-list.ts
 models/paginated-run-list.ts
 models/paginated-run-stage-list.ts
@@ -231,6 +232,10 @@ models/run-billing.ts
 models/run-checkpoint-settings.ts
 models/run-checkpoint.ts
 models/run-client-provenance.ts
+models/run-commit-parent.ts
+models/run-commit-person.ts
+models/run-commit.ts
+models/run-commits-meta.ts
 models/run-control-action.ts
 models/run-error.ts
 models/run-event.ts

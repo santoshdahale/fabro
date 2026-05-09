@@ -146,11 +146,9 @@ async fn malformed_from_sha_query_returns_400() {
 }
 
 #[tokio::test]
-async fn non_default_from_sha_returns_400_even_when_hex() {
+async fn one_sided_from_sha_returns_400_even_when_hex() {
     let app = fabro_server::test_support::build_test_router(test_app_state());
     let fake = "01ARZ3NDEKTSV4RRFFQ69G5FAV";
-    // Well-formed hex SHA but v1 reserves the parameter for a future
-    // version; any non-default value must be rejected.
     let req = Request::builder()
         .method("GET")
         .uri(format!(
@@ -163,7 +161,7 @@ async fn non_default_from_sha_returns_400_even_when_hex() {
     response_status(
         resp,
         StatusCode::BAD_REQUEST,
-        format!("GET /api/v1/runs/{fake}/files?from_sha=<non-default>"),
+        format!("GET /api/v1/runs/{fake}/files?from_sha=<one-sided>"),
     )
     .await;
 }
@@ -238,7 +236,8 @@ async fn submitted_run_without_sandbox_returns_empty_envelope() {
         "expected empty data: {body}"
     );
     assert_eq!(body["meta"]["total_changed"], 0);
-    assert_eq!(body["source"].as_str(), Some("final_patch"));
+    assert_eq!(body["meta"]["source"].as_str(), Some("final_patch"));
+    assert_eq!(body["meta"]["scope"].as_str(), Some("committed"));
     // Degraded is false because there's no final_patch either — the run
     // simply hasn't produced anything to diff.
     assert_eq!(body["meta"]["degraded"].as_bool(), Some(false));
@@ -288,7 +287,8 @@ diff --git a/.env.production b/.env.production
 
     assert_eq!(body["meta"]["degraded"].as_bool(), Some(true));
     assert!(body["meta"]["degraded_reason"].is_string());
-    assert_eq!(body["source"].as_str(), Some("final_patch"));
+    assert_eq!(body["meta"]["source"].as_str(), Some("final_patch"));
+    assert_eq!(body["meta"]["scope"].as_str(), Some("committed"));
     assert!(body["meta"].get("patch").is_none());
     assert_eq!(body["meta"]["total_changed"], 2);
     assert_eq!(body["meta"]["truncated"].as_bool(), Some(false));
@@ -341,7 +341,8 @@ diff --git a/src/lib.rs b/src/lib.rs
         )
         .await;
 
-        assert_eq!(body["source"].as_str(), Some("final_patch"));
+        assert_eq!(body["meta"]["source"].as_str(), Some("final_patch"));
+        assert_eq!(body["meta"]["scope"].as_str(), Some("committed"));
         assert_eq!(body["meta"]["degraded"].as_bool(), Some(true));
         assert_eq!(body["data"].as_array().map(Vec::len), Some(1));
     }
@@ -364,7 +365,8 @@ async fn demo_mode_returns_fixture_without_touching_store() {
     let body = response_json(resp, StatusCode::OK, "GET /api/v1/runs/whatever/files").await;
 
     // Demo fixture ships three entries (modified + added + renamed).
-    assert_eq!(body["source"].as_str(), Some("sandbox"));
+    assert_eq!(body["meta"]["source"].as_str(), Some("sandbox"));
+    assert_eq!(body["meta"]["scope"].as_str(), Some("committed"));
     let data = body["data"].as_array().expect("data array");
     assert_eq!(data.len(), 3, "demo fixture should have 3 entries");
     // At least one entry must render with populated contents to prove the
@@ -394,7 +396,9 @@ async fn response_envelope_matches_openapi_paginated_run_file_list_shape() {
 
     assert!(body["data"].is_array());
     assert!(body["meta"].is_object());
-    assert!(body["source"].is_string());
+    assert!(body.get("source").is_none());
+    assert!(body["meta"]["source"].is_string());
+    assert!(body["meta"]["scope"].is_string());
     assert!(body["meta"]["truncated"].is_boolean());
     assert!(body["meta"]["total_changed"].is_number());
     for entry in body["data"].as_array().unwrap() {

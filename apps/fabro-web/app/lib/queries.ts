@@ -6,6 +6,7 @@ import type {
   CommandLogResponse,
   EventEnvelope,
   PaginatedBoardRunList,
+  PaginatedRunCommitList,
   PaginatedRunFileList,
   PaginatedRunList,
   PaginatedRunStageList,
@@ -36,7 +37,12 @@ import {
   workflowsApi,
   type PaginatedEnvelope,
 } from "./api-client";
-import { queryKeys, type RunFileScope, type RunGraphDirection } from "./query-keys";
+import {
+  queryKeys,
+  runFileScopeSelection,
+  type RunFileSelection,
+  type RunGraphDirection,
+} from "./query-keys";
 
 const immutableOptions: SWRConfiguration = {
   revalidateIfStale: false,
@@ -97,14 +103,36 @@ export function useRunState(id: string | undefined) {
 
 export function useRunFiles(
   id: string | undefined,
-  scope: RunFileScope = "committed",
+  selection: RunFileSelection = runFileScopeSelection("committed"),
 ) {
   return useSWR<PaginatedRunFileList | null>(
-    id ? queryKeys.runs.files(id, scope) : null,
+    id ? queryKeys.runs.files(id, selection) : null,
     () =>
       apiNullableData(() =>
-        runOutputsApi.listRunFiles(id!, undefined, undefined, scope),
+        selection.kind === "scope"
+          ? runOutputsApi.listRunFiles(
+              id!,
+              undefined,
+              undefined,
+              selection.scope,
+            )
+          : runOutputsApi.listRunFiles(
+              id!,
+              undefined,
+              undefined,
+              undefined,
+              selection.fromSha,
+              selection.toSha,
+            ),
       ),
+    { keepPreviousData: true },
+  );
+}
+
+export function useRunCommits(id: string | undefined) {
+  return useSWR<PaginatedRunCommitList | null>(
+    id ? queryKeys.runs.commits(id) : null,
+    () => apiNullableData(() => runOutputsApi.listRunCommits(id!, 100)),
     { keepPreviousData: true },
   );
 }

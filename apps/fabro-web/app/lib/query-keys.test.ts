@@ -10,14 +10,24 @@ describe("queryKeys", () => {
       "runs",
       "files",
       "run 1",
+      "scope",
       "committed",
     ]);
-    expect(queryKeys.runs.files("run 1", "all")).toEqual([
+    expect(queryKeys.runs.files("run 1", { kind: "scope", scope: "all" })).toEqual([
       "runs",
       "files",
       "run 1",
+      "scope",
       "all",
     ]);
+    expect(
+      queryKeys.runs.files("run 1", {
+        kind:    "commit",
+        fromSha: "abc1234",
+        toSha:   "def5678",
+      }),
+    ).toEqual(["runs", "files", "run 1", "commit", "abc1234", "def5678"]);
+    expect(queryKeys.runs.commits("run 1")).toEqual(["runs", "commits", "run 1"]);
     expect(queryKeys.runs.graph("run-1", "TB")).toEqual(["runs", "graph", "run-1", "TB"]);
     expect(queryKeys.runs.stageLog("run 1", "build step@2", 12, 34)).toEqual([
       "runs",
@@ -39,7 +49,10 @@ describe("queryKeys", () => {
 
   test("event-mapped keys match query hook resources", () => {
     expect(queryKeysForRunEvent("run-1", "checkpoint.completed")).toEqual(
-      queryKeys.runs.filesAllScopes("run-1"),
+      [
+        ...queryKeys.runs.filesAllScopes("run-1"),
+        queryKeys.runs.commits("run-1"),
+      ],
     );
     expect(queryKeysForRunEvent("run-1", "stage.completed", "stage-1")).toEqual([
       queryKeys.runs.stages("run-1"),

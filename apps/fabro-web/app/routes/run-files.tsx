@@ -19,6 +19,7 @@ import { useToast } from "../components/toast";
 import type {
   FileDiff as ApiFileDiff,
   PaginatedRunFileList,
+  RunCommit,
 } from "@qltysh/fabro-api-client";
 import {
   DegradedBanner,
@@ -34,12 +35,21 @@ import {
   RunFilesErrorBoundary,
 } from "./run-files/states";
 import { useFileKeyboardNav } from "./run-files/keyboard";
-import { Toolbar, type DiffStyle } from "./run-files/toolbar";
+import {
+  Toolbar,
+  type DiffCommitOption,
+  type DiffPickerValue,
+  type DiffStyle,
+} from "./run-files/toolbar";
 import { fileCacheKey, stringHash } from "./run-files/cache-keys";
 import { VirtualizedDiffList } from "./run-files/virtualized-diff-list";
 import { ApiError, extractRequestId } from "../lib/api-client";
-import { useRun, useRunFiles } from "../lib/queries";
-import type { RunFileScope } from "../lib/query-keys";
+import { useRun, useRunCommits, useRunFiles } from "../lib/queries";
+import {
+  runFileScopeSelection,
+  type RunFileScope,
+  type RunFileSelection,
+} from "../lib/query-keys";
 
 export { extractRequestId };
 
@@ -65,6 +75,39 @@ export function normalizeRunFileScope(value: string | null): RunFileScope {
     return value;
   }
   return "committed";
+}
+
+export function fabroGeneratedCommitStage(subject: string): string | null {
+  const match = subject.match(/^fabro\([^)]+\):\s+(.+?)\s+\([^)]+\)$/);
+  const stage = match?.[1]?.trim();
+  return stage ? stage : null;
+}
+
+export type RunCommitPickerOption = DiffCommitOption & {
+  fromSha: string | null;
+  toSha: string;
+};
+
+export function buildRunCommitOptions(
+  commits: Pick<RunCommit, "sha" | "short_sha" | "subject" | "parents">[],
+): RunCommitPickerOption[] {
+  const generatedVisits = new Map<string, number>();
+  return commits.map((commit) => {
+    const stage = fabroGeneratedCommitStage(commit.subject);
+    let label = commit.subject || commit.short_sha;
+    if (stage) {
+      const visit = (generatedVisits.get(stage) ?? 0) + 1;
+      generatedVisits.set(stage, visit);
+      label = `${stage}@${visit}`;
+    }
+    return {
+      sha:     commit.sha,
+      fromSha: commit.parents[0]?.sha ?? null,
+      toSha:   commit.sha,
+      label,
+      title:   `${commit.short_sha} ${commit.subject}`.trim(),
+    };
+  });
 }
 
 function useNarrowViewport(): boolean {
@@ -219,7 +262,7 @@ function fileDiffRenderKey({
 }: {
   file: ApiFileDiff;
   index: number;
-  scope: RunFileScope;
+  scope: string;
   toSha: string | null | undefined;
 }): string {
   const display = file.new_file.name || file.old_file.name || `file-${index}`;
@@ -334,10 +377,34 @@ export default function RunFiles() {
   const params = useParams();
   const location = useLocation();
   const navigate = useNavigate();
-  const selectedScope = normalizeRunFileScope(
-    new URLSearchParams(location.search).get("scope"),
+  const searchParams = useMemo(
+    () => new URLSearchParams(location.search),
+    [location.search],
   );
-  const filesQuery = useRunFiles(params.id, selectedScope);
+  const selectedScope = normalizeRunFileScope(searchParams.get("scope"));
+  const selectedCommitSha = searchParams.get("commit");
+  const commitsQuery = useRunCommits(params.id);
+  const commitOptions = useMemo(
+    () => buildRunCommitOptions(commitsQuery.data?.data ?? []),
+    [commitsQuery.data],
+  );
+  const selectedCommit = selectedCommitSha
+    ? commitOptions.find((commit) => commit.sha === selectedCommitSha)
+    : undefined;
+  const waitingForCommitSelection =
+    !!selectedCommitSha && commitsQuery.data === undefined && !commitsQuery.error;
+  const fileSelection: RunFileSelection =
+    selectedCommit && selectedCommit.fromSha
+      ? {
+          kind:    "commit",
+          fromSha: selectedCommit.fromSha,
+          toSha:   selectedCommit.toSha,
+        }
+      : runFileScopeSelection(selectedScope);
+  const filesQuery = useRunFiles(
+    waitingForCommitSelection ? undefined : params.id,
+    fileSelection,
+  );
   const runQuery = useRun(params.id);
   const { push } = useToast();
   const narrow = useNarrowViewport();
@@ -364,7 +431,7 @@ export default function RunFiles() {
   const data: PaginatedRunFileList | null =
     filesQuery.data ?? lastGoodDataRef.current;
 
-  const isInitialLoading = filesQuery.isLoading && !data;
+  const isInitialLoading = (waitingForCommitSelection || filesQuery.isLoading) && !data;
   const isRevalidating = filesQuery.isValidating;
 
   // Revalidation error is whatever the most recent loader call returned;
@@ -405,10 +472,16 @@ export default function RunFiles() {
     setMinSpinUntil(Date.now() + MIN_REFRESH_SPIN_MS);
     void filesQuery.mutate();
   }, [filesQuery]);
-  const handleScopeChange = useCallback(
-    (scope: RunFileScope) => {
+  const handlePickerChange = useCallback(
+    (selection: DiffPickerValue) => {
       const search = new URLSearchParams(location.search);
-      search.set("scope", scope);
+      if (selection.kind === "commit") {
+        search.set("commit", selection.sha);
+        search.delete("scope");
+      } else {
+        search.set("scope", selection.scope);
+        search.delete("commit");
+      }
       navigate({
         pathname: location.pathname,
         search:   `?${search.toString()}`,
@@ -512,10 +585,14 @@ export default function RunFiles() {
   }
 
   const { data: files, meta } = data;
-  const showScopePicker = data.source === "sandbox";
-  const effectiveScope: RunFileScope = showScopePicker
-    ? selectedScope
-    : "committed";
+  const showScopePicker = data.meta.source === "sandbox";
+  const pickerSelection: DiffPickerValue =
+    selectedCommit && selectedCommit.fromSha
+      ? { kind: "commit", sha: selectedCommit.sha }
+      : { kind: "scope", scope: showScopePicker ? selectedScope : "committed" };
+  const effectiveScope = fileSelection.kind === "commit"
+    ? `commit:${fileSelection.toSha}`
+    : fileSelection.scope;
 
   // Refresh is disabled when the server reports the same `to_sha` it
   // reported on the previous successful fetch — no new checkpoint yet.
@@ -532,9 +609,10 @@ export default function RunFiles() {
         additions: meta.stats.additions,
         deletions: meta.stats.deletions,
       }}
-      scope={effectiveScope}
+      selection={pickerSelection}
+      commits={commitOptions}
       showScopePicker={showScopePicker}
-      onScopeChange={handleScopeChange}
+      onPickerChange={handlePickerChange}
       onRefresh={handleRefresh}
       refreshing={showRefreshing}
       refreshDisabled={refreshDisabled}

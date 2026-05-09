@@ -1,11 +1,26 @@
 export type RunGraphDirection = "LR" | "TB" | "BT" | "RL";
 export type RunFileScope = "committed" | "uncommitted" | "all";
+export type RunFileSelection =
+  | { kind: "scope"; scope: RunFileScope }
+  | { kind: "commit"; fromSha: string; toSha: string };
 export type QueryKey = readonly unknown[];
 
 export const RUN_FILE_SCOPES = ["committed", "uncommitted", "all"] as const;
 
+export function runFileScopeSelection(
+  scope: RunFileScope = "committed",
+): RunFileSelection {
+  return { kind: "scope", scope };
+}
+
 function pathSegment(value: string): string {
   return encodeURIComponent(value);
+}
+
+function fileSelectionKey(selection: RunFileSelection): readonly unknown[] {
+  return selection.kind === "scope"
+    ? ["scope", selection.scope]
+    : ["commit", selection.fromSha, selection.toSha];
 }
 
 export const queryKeys = {
@@ -27,10 +42,13 @@ export const queryKeys = {
   runs: {
     detail: (id: string) => ["runs", "detail", id] as const,
     state: (id: string) => ["runs", "state", id] as const,
-    files: (id: string, scope: RunFileScope = "committed") =>
-      ["runs", "files", id, scope] as const,
+    files: (id: string, selection: RunFileSelection = runFileScopeSelection()) =>
+      ["runs", "files", id, ...fileSelectionKey(selection)] as const,
     filesAllScopes: (id: string) =>
-      RUN_FILE_SCOPES.map((scope) => ["runs", "files", id, scope] as const),
+      RUN_FILE_SCOPES.map((scope) =>
+        queryKeys.runs.files(id, runFileScopeSelection(scope)),
+      ),
+    commits: (id: string) => ["runs", "commits", id] as const,
     stages: (id: string) => ["runs", "stages", id] as const,
     graph: (id: string, direction?: RunGraphDirection) =>
       ["runs", "graph", id, direction ?? null] as const,

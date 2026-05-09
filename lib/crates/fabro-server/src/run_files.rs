@@ -17,6 +17,7 @@
 
 use std::collections::{HashMap, HashSet};
 use std::future::Future;
+use std::num::NonZeroU64;
 use std::panic::AssertUnwindSafe;
 use std::sync::Arc;
 use std::time::Instant;
@@ -28,7 +29,10 @@ use axum::response::{IntoResponse, Response};
 use fabro_agent::Sandbox;
 use fabro_api::types::{
     DiffFile, DiffStats, FileDiff, FileDiffChangeKind, FileDiffTruncationReason, ListRunFilesScope,
-    PaginatedRunFileList, PaginatedRunFileListSource, RunFilesMeta, RunFilesMetaDegradedReason,
+    PaginatedRunCommitList, PaginatedRunFileList, RunCommit, RunCommitParent, RunCommitParentSha,
+    RunCommitParentShortSha, RunCommitPerson, RunCommitSha, RunCommitShortSha, RunCommitTreeSha,
+    RunCommitsMeta, RunCommitsMetaBaseSha, RunCommitsMetaHeadSha, RunCommitsMetaSource,
+    RunFilesMeta, RunFilesMetaDegradedReason, RunFilesMetaScope, RunFilesMetaSource,
     RunFilesMetaToSha,
 };
 use fabro_sandbox::reconnect::reconnect_for_run;
@@ -91,6 +95,13 @@ pub struct ListRunFilesParams {
     pub to_sha:   Option<String>,
     #[serde(default)]
     pub scope:    Option<ListRunFilesScope>,
+}
+
+/// Query parameters accepted by `GET /runs/{id}/commits`.
+#[derive(Debug, Deserialize, Default)]
+pub struct ListRunCommitsParams {
+    #[serde(default)]
+    pub limit: Option<NonZeroU64>,
 }
 
 #[derive(Debug, Clone, Copy, Eq, Hash, PartialEq)]
@@ -188,13 +199,12 @@ where
 
 /// `GET /api/v1/runs/{id}/files` handler.
 ///
-/// 1. Parse + authenticate. Reject non-default `from_sha`/`to_sha` (v1 only
-///    serves the full run diff).
+/// 1. Parse + authenticate. Validate scope/range query combinations.
 /// 2. Load the run projection. 404 covers both missing run and missing access —
 ///    IDOR-safe.
 /// 3. Reconnect and start the sandbox, then build a structured diff.
-/// 4. On garbage-collected base commits, fall through to a degraded response
-///    built from `RunProjection.final_patch`.
+/// 4. On garbage-collected base commits for aggregate scopes, fall through to a
+///    degraded response built from `RunProjection.final_patch`.
 ///
 /// All logging emits a single `tracing::info!` with an allowlisted field
 /// set enforced by [`RunFilesMetrics::emit`] — no paths, contents, or raw
@@ -211,22 +221,44 @@ pub async fn list_run_files(
         Err(resp) => return resp,
     };
 
-    // 2. SHA format + non-default rejection.
+    // 2. SHA format + range validation.
     if let Err(resp) = validate_sha_params(&params) {
         return resp;
     }
 
-    // 3. Coalesce the materialization.
-    let scope = params.scope.unwrap_or_default();
-    let state_cloned = Arc::clone(&state);
-    let id_cloned = id;
-    let result: Shared =
+    let result: Shared = if let (Some(from_sha), Some(to_sha)) = (params.from_sha, params.to_sha) {
+        Arc::new(materialize_sandbox_range_path(&state, &id, &from_sha, &to_sha).await)
+    } else {
+        // 3. Coalesce the materialization.
+        let scope = params.scope.unwrap_or_default();
+        let state_cloned = Arc::clone(&state);
+        let id_cloned = id;
         coalesced_list_run_files(&state.files_in_flight, &id, scope, move || async move {
             materialize_sandbox_path(&state_cloned, &id_cloned, scope).await
         })
-        .await;
+        .await
+    };
 
     match (*result).clone() {
+        Ok(body) => (StatusCode::OK, Json(body)).into_response(),
+        Err(err) => err.into_response(),
+    }
+}
+
+/// `GET /api/v1/runs/{id}/commits` handler.
+pub async fn list_run_commits(
+    _auth: RequiredUser,
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+    Query(params): Query<ListRunCommitsParams>,
+) -> Response {
+    let id = match parse_run_id_path(&id) {
+        Ok(id) => id,
+        Err(resp) => return resp,
+    };
+
+    let limit = params.limit.map_or(100, |limit| limit.get().min(100));
+    match materialize_run_commits(&state, &id, limit).await {
         Ok(body) => (StatusCode::OK, Json(body)).into_response(),
         Err(err) => err.into_response(),
     }
@@ -235,12 +267,20 @@ pub async fn list_run_files(
 fn validate_sha_params(params: &ListRunFilesParams) -> std::result::Result<(), Response> {
     validate_one_sha(params.from_sha.as_deref(), "from_sha")?;
     validate_one_sha(params.to_sha.as_deref(), "to_sha")?;
-    // v1 rejects non-default values per R15 — default = absent.
-    if params.from_sha.is_some() || params.to_sha.is_some() {
-        return Err(ApiError::bad_request(
-            "The `from_sha` and `to_sha` parameters are reserved for a future API version.",
-        )
-        .into_response());
+    match (&params.from_sha, &params.to_sha) {
+        (Some(_), Some(_)) if params.scope.is_some() => {
+            return Err(ApiError::bad_request(
+                "`scope` cannot be combined with `from_sha` and `to_sha`.",
+            )
+            .into_response());
+        }
+        (Some(_), None) | (None, Some(_)) => {
+            return Err(ApiError::bad_request(
+                "`from_sha` and `to_sha` must be supplied together.",
+            )
+            .into_response());
+        }
+        _ => {}
     }
     Ok(())
 }
@@ -258,6 +298,199 @@ fn validate_one_sha(value: Option<&str>, param_name: &str) -> std::result::Resul
     Ok(())
 }
 
+async fn materialize_sandbox_range_path(
+    state: &Arc<AppState>,
+    run_id: &RunId,
+    from_sha: &str,
+    to_sha: &str,
+) -> ListRunFilesResult {
+    let start = Instant::now();
+    let projection = load_projection(state, run_id).await?;
+    let sandbox = reconnect_run_sandbox(state, run_id, &projection).await?;
+    let (resolved_to_sha, to_sha_committed_at) =
+        resolve_ref_sha_and_time(sandbox.as_ref(), to_sha).await?;
+    materialize_committed_range_sandbox_path(
+        sandbox.as_ref(),
+        None,
+        from_sha,
+        &resolved_to_sha,
+        to_sha_committed_at,
+        RunFilesMetaScope::Range,
+        run_id,
+        start,
+    )
+    .await
+}
+
+async fn materialize_run_commits(
+    state: &Arc<AppState>,
+    run_id: &RunId,
+    limit: u64,
+) -> std::result::Result<PaginatedRunCommitList, ApiError> {
+    let projection = load_projection(state, run_id).await?;
+    let base_sha = projection
+        .start
+        .as_ref()
+        .and_then(|s| s.base_sha.clone())
+        .ok_or_else(|| ApiError::new(StatusCode::CONFLICT, "Run has no base SHA."))?;
+    let sandbox = reconnect_run_sandbox(state, run_id, &projection).await?;
+    let (head_sha, _) = resolve_ref_sha_and_time(sandbox.as_ref(), "HEAD").await?;
+    let output = git_log_commits(sandbox.as_ref(), &base_sha, &head_sha, limit + 1).await?;
+    let mut commits = parse_git_log_commits(&output)?;
+    let truncated = commits.len() > usize::try_from(limit).unwrap_or(usize::MAX);
+    commits.truncate(usize::try_from(limit).unwrap_or(usize::MAX));
+    let total_returned = u64::try_from(commits.len()).unwrap_or(u64::MAX);
+
+    Ok(PaginatedRunCommitList {
+        data: commits,
+        meta: RunCommitsMeta {
+            source: RunCommitsMetaSource::Sandbox,
+            base_sha: sha_newtype::<RunCommitsMetaBaseSha>(&base_sha),
+            head_sha: sha_newtype::<RunCommitsMetaHeadSha>(&head_sha),
+            limit: NonZeroU64::new(limit).expect("commit limit is non-zero"),
+            total_returned,
+            truncated,
+        },
+    })
+}
+
+async fn git_log_commits(
+    sandbox: &dyn Sandbox,
+    base_sha: &str,
+    head_sha: &str,
+    limit: u64,
+) -> std::result::Result<String, ApiError> {
+    let base_q = shell_quote(base_sha);
+    let head_q = shell_quote(head_sha);
+    let format_q =
+        shell_quote("%H%x1f%T%x1f%P%x1f%an%x1f%ae%x1f%aI%x1f%cn%x1f%ce%x1f%cI%x1f%B%x1e");
+    sandbox_git_stdout(
+        sandbox,
+        &format!(
+            "git -c maintenance.auto=0 -c gc.auto=0 -c core.hooksPath=/dev/null -c core.fsmonitor=false -c core.quotePath=false log --first-parent --reverse --max-count={limit} --format={format_q} {base_q}..{head_q}"
+        ),
+        "git log",
+    )
+    .await
+}
+
+fn parse_git_log_commits(stdout: &str) -> std::result::Result<Vec<RunCommit>, ApiError> {
+    stdout
+        .split('\x1e')
+        .filter_map(|record| {
+            let record = record.trim_matches('\n');
+            (!record.is_empty()).then_some(record)
+        })
+        .map(parse_git_log_commit)
+        .collect()
+}
+
+fn parse_git_log_commit(record: &str) -> std::result::Result<RunCommit, ApiError> {
+    let mut fields = record.splitn(10, '\x1f');
+    let sha = fields.next().unwrap_or_default();
+    let tree_sha = fields.next().unwrap_or_default();
+    let parents = fields.next().unwrap_or_default();
+    let author_name = fields.next().unwrap_or_default();
+    let author_email = fields.next().unwrap_or_default();
+    let author_date = fields.next().unwrap_or_default();
+    let committer_name = fields.next().unwrap_or_default();
+    let committer_email = fields.next().unwrap_or_default();
+    let committer_date = fields.next().unwrap_or_default();
+    let message = fields
+        .next()
+        .unwrap_or_default()
+        .trim_end_matches('\n')
+        .to_string();
+    if sha.is_empty() {
+        return Err(ApiError::bad_request(
+            "Malformed git log output: missing commit SHA.",
+        ));
+    }
+
+    let (subject, body) = split_commit_message(&message);
+    let parents = parents
+        .split_whitespace()
+        .map(|parent| RunCommitParent {
+            sha:       sha_newtype::<RunCommitParentSha>(parent),
+            short_sha: short_sha_newtype::<RunCommitParentShortSha>(parent),
+        })
+        .collect();
+
+    Ok(RunCommit {
+        sha: sha_newtype::<RunCommitSha>(sha),
+        short_sha: short_sha_newtype::<RunCommitShortSha>(sha),
+        parents,
+        author: RunCommitPerson {
+            name:  author_name.to_string(),
+            email: author_email.to_string(),
+            date:  parse_git_date(author_date),
+        },
+        committer: RunCommitPerson {
+            name:  committer_name.to_string(),
+            email: committer_email.to_string(),
+            date:  parse_git_date(committer_date),
+        },
+        subject,
+        body,
+        message: message.clone(),
+        trailers: parse_commit_trailers(&message),
+        tree_sha: (!tree_sha.is_empty()).then(|| sha_newtype::<RunCommitTreeSha>(tree_sha)),
+    })
+}
+
+fn split_commit_message(message: &str) -> (String, Option<String>) {
+    let mut lines = message.lines();
+    let subject = lines.next().unwrap_or_default().to_string();
+    let body = lines.collect::<Vec<_>>().join("\n").trim().to_string();
+    (subject, (!body.is_empty()).then_some(body))
+}
+
+fn parse_commit_trailers(message: &str) -> HashMap<String, String> {
+    let mut trailers = HashMap::new();
+    for line in message.lines().rev() {
+        let line = line.trim();
+        if line.is_empty() {
+            if trailers.is_empty() {
+                continue;
+            }
+            break;
+        }
+        let Some((key, value)) = line.split_once(": ") else {
+            break;
+        };
+        if !key.chars().all(|c| c.is_ascii_alphanumeric() || c == '-') {
+            break;
+        }
+        trailers.insert(key.to_string(), value.to_string());
+    }
+    trailers
+}
+
+fn parse_git_date(value: &str) -> Option<chrono::DateTime<chrono::Utc>> {
+    chrono::DateTime::parse_from_rfc3339(value.trim())
+        .ok()
+        .map(|d| d.with_timezone(&chrono::Utc))
+}
+
+fn sha_newtype<T>(sha: &str) -> T
+where
+    T: TryFrom<String>,
+    <T as TryFrom<String>>::Error: std::fmt::Display,
+{
+    T::try_from(sha.to_string())
+        .unwrap_or_else(|err| panic!("invalid generated SHA `{sha}`: {err}"))
+}
+
+fn short_sha_newtype<T>(sha: &str) -> T
+where
+    T: TryFrom<String>,
+    <T as TryFrom<String>>::Error: std::fmt::Display,
+{
+    let short = sha.chars().take(7).collect::<String>();
+    T::try_from(short.clone())
+        .unwrap_or_else(|err| panic!("invalid generated short SHA `{short}`: {err}"))
+}
+
 /// Materialize the response for `GET /runs/{id}/files`. Prefers the live
 /// sandbox path; falls through to a `final_patch`-based degraded response
 /// when the base objects are gone; falls through to an empty envelope when
@@ -273,7 +506,10 @@ async fn materialize_sandbox_path(
 
     let Some(base_sha) = projection.start.as_ref().and_then(|s| s.base_sha.clone()) else {
         // Run hasn't started yet — no base_sha, no diff to compute.
-        return Ok(empty_envelope(PaginatedRunFileListSource::FinalPatch));
+        return Ok(empty_envelope(
+            RunFilesMetaSource::FinalPatch,
+            RunFilesMetaScope::Committed,
+        ));
     };
 
     let sandbox = match reconnect_run_sandbox(state, run_id, &projection).await {
@@ -301,10 +537,24 @@ async fn materialize_sandbox_path(
             .await
         }
         ListRunFilesScope::Uncommitted => {
-            materialize_working_tree_sandbox_path(sandbox.as_ref(), "HEAD", run_id, start).await
+            materialize_working_tree_sandbox_path(
+                sandbox.as_ref(),
+                "HEAD",
+                RunFilesMetaScope::Uncommitted,
+                run_id,
+                start,
+            )
+            .await
         }
         ListRunFilesScope::All => {
-            materialize_working_tree_sandbox_path(sandbox.as_ref(), &base_sha, run_id, start).await
+            materialize_working_tree_sandbox_path(
+                sandbox.as_ref(),
+                &base_sha,
+                RunFilesMetaScope::All,
+                run_id,
+                start,
+            )
+            .await
         }
     };
 
@@ -336,13 +586,35 @@ async fn materialize_committed_sandbox_path(
 ) -> ListRunFilesResult {
     // Resolve HEAD (sha + commit time) in one round-trip.
     let (to_sha, to_sha_committed_at) = resolve_head_sha_and_time(sandbox).await?;
+    materialize_committed_range_sandbox_path(
+        sandbox,
+        Some(projection),
+        base_sha,
+        &to_sha,
+        to_sha_committed_at,
+        RunFilesMetaScope::Committed,
+        run_id,
+        start,
+    )
+    .await
+}
 
+async fn materialize_committed_range_sandbox_path(
+    sandbox: &dyn Sandbox,
+    fallback_projection: Option<&fabro_store::RunProjection>,
+    base_sha: &str,
+    to_sha: &str,
+    to_sha_committed_at: Option<chrono::DateTime<chrono::Utc>>,
+    scope: RunFilesMetaScope,
+    run_id: &RunId,
+    start: Instant,
+) -> ListRunFilesResult {
     // Enumerate changes and classify binary vs text in parallel — both
     // traversals are mutually independent once `to_sha` is known, and
     // running them sequentially would add ~100 ms per request on Daytona.
     let (raw_res, numstat_res) = tokio::join!(
-        list_changed_files_raw(sandbox, base_sha, &to_sha),
-        list_diff_numstat(sandbox, base_sha, &to_sha),
+        list_changed_files_raw(sandbox, base_sha, to_sha),
+        list_diff_numstat(sandbox, base_sha, to_sha),
     );
 
     // Permanent errors (bad_sha, missing object) fall through to the
@@ -350,12 +622,15 @@ async fn materialize_committed_sandbox_path(
     let raw_entries = match raw_res {
         Ok(v) => v,
         Err(DiffError::Permanent { .. }) => {
-            return Ok(build_fallback_response(
-                projection,
-                RunFilesMetaDegradedReason::SandboxGone,
-                run_id,
-                start,
-            ));
+            if let Some(projection) = fallback_projection {
+                return Ok(build_fallback_response(
+                    projection,
+                    RunFilesMetaDegradedReason::SandboxGone,
+                    run_id,
+                    start,
+                ));
+            }
+            return Err(ApiError::bad_request("Invalid git diff range."));
         }
         Err(DiffError::Transient { message }) => {
             return Err(transient_503("git diff --raw", &message));
@@ -429,9 +704,10 @@ async fn materialize_committed_sandbox_path(
     .emit(run_id);
 
     Ok(PaginatedRunFileList {
-        data:   response_data,
-        source: PaginatedRunFileListSource::Sandbox,
-        meta:   RunFilesMeta {
+        data: response_data,
+        meta: RunFilesMeta {
+            source: RunFilesMetaSource::Sandbox,
+            scope,
             truncated,
             files_omitted_by_budget: (files_omitted_by_budget > 0)
                 .then(|| i64::try_from(files_omitted_by_budget).unwrap_or(i64::MAX)),
@@ -448,6 +724,7 @@ async fn materialize_committed_sandbox_path(
 async fn materialize_working_tree_sandbox_path(
     sandbox: &dyn Sandbox,
     base_ref: &str,
+    scope: RunFilesMetaScope,
     run_id: &RunId,
     start: Instant,
 ) -> ListRunFilesResult {
@@ -470,7 +747,8 @@ async fn materialize_working_tree_sandbox_path(
     Ok(build_patch_backed_response(
         &entries,
         PatchBackedResponseMeta {
-            source: PaginatedRunFileListSource::Sandbox,
+            source: RunFilesMetaSource::Sandbox,
+            scope,
             degraded: false,
             degraded_reason: None,
             to_sha: Some(to_sha_wrapper(&to_sha)),
@@ -510,7 +788,7 @@ fn build_fallback_response(
     start: Instant,
 ) -> PaginatedRunFileList {
     let Some(patch) = projection.final_patch.as_deref() else {
-        return empty_envelope(PaginatedRunFileListSource::FinalPatch);
+        return empty_envelope(RunFilesMetaSource::FinalPatch, RunFilesMetaScope::Committed);
     };
 
     let entries: Vec<String> = split_patch_sections(patch)
@@ -532,7 +810,8 @@ fn build_fallback_response(
     build_patch_backed_response(
         &entries,
         PatchBackedResponseMeta {
-            source: PaginatedRunFileListSource::FinalPatch,
+            source: RunFilesMetaSource::FinalPatch,
+            scope: RunFilesMetaScope::Committed,
             degraded: true,
             degraded_reason: Some(reason),
             to_sha,
@@ -544,7 +823,8 @@ fn build_fallback_response(
 }
 
 struct PatchBackedResponseMeta {
-    source:              PaginatedRunFileListSource,
+    source:              RunFilesMetaSource,
+    scope:               RunFilesMetaScope,
     degraded:            bool,
     degraded_reason:     Option<RunFilesMetaDegradedReason>,
     to_sha:              Option<RunFilesMetaToSha>,
@@ -639,9 +919,10 @@ fn build_patch_backed_response(
     .emit(run_id);
 
     PaginatedRunFileList {
-        data:   response_data,
-        source: meta_input.source,
-        meta:   RunFilesMeta {
+        data: response_data,
+        meta: RunFilesMeta {
+            source: meta_input.source,
+            scope: meta_input.scope,
             truncated,
             files_omitted_by_budget: (files_omitted_by_budget > 0)
                 .then(|| i64::try_from(files_omitted_by_budget).unwrap_or(i64::MAX)),
@@ -860,22 +1141,23 @@ fn degraded_file_diff(
     }
 }
 
-fn empty_envelope(source: PaginatedRunFileListSource) -> PaginatedRunFileList {
+fn empty_envelope(source: RunFilesMetaSource, scope: RunFilesMetaScope) -> PaginatedRunFileList {
     PaginatedRunFileList {
         data: Vec::new(),
-        source,
         meta: RunFilesMeta {
-            truncated:               false,
+            source,
+            scope,
+            truncated: false,
             files_omitted_by_budget: None,
-            total_changed:           0,
-            stats:                   DiffStats {
+            total_changed: 0,
+            stats: DiffStats {
                 additions: 0,
                 deletions: 0,
             },
-            to_sha:                  None,
-            to_sha_committed_at:     None,
-            degraded:                Some(false),
-            degraded_reason:         None,
+            to_sha: None,
+            to_sha_committed_at: None,
+            degraded: Some(false),
+            degraded_reason: None,
         },
     }
 }
@@ -935,9 +1217,17 @@ async fn reconnect_run_sandbox(
 async fn resolve_head_sha_and_time(
     sandbox: &dyn Sandbox,
 ) -> std::result::Result<(String, Option<chrono::DateTime<chrono::Utc>>), ApiError> {
+    resolve_ref_sha_and_time(sandbox, "HEAD").await
+}
+
+async fn resolve_ref_sha_and_time(
+    sandbox: &dyn Sandbox,
+    git_ref: &str,
+) -> std::result::Result<(String, Option<chrono::DateTime<chrono::Utc>>), ApiError> {
+    let ref_q = shell_quote(git_ref);
     let res = sandbox
         .exec_command(
-            "git -c core.hooksPath=/dev/null show -s --format=%H\\ %cI HEAD",
+            &format!("git -c core.hooksPath=/dev/null show -s --format=%H\\ %cI {ref_q}"),
             SANDBOX_GIT_TIMEOUT_MS,
             None,
             None,
@@ -948,7 +1238,7 @@ async fn resolve_head_sha_and_time(
     if !res.is_success() {
         return Err(ApiError::new(
             StatusCode::SERVICE_UNAVAILABLE,
-            "Failed to resolve sandbox HEAD.",
+            "Failed to resolve sandbox git ref.",
         ));
     }
     parse_head_show_output(&res.stdout).ok_or_else(|| {
@@ -1426,9 +1716,10 @@ mod tests {
 
     fn ok_response() -> PaginatedRunFileList {
         PaginatedRunFileList {
-            data:   Vec::new(),
-            source: PaginatedRunFileListSource::Sandbox,
-            meta:   fabro_api::types::RunFilesMeta {
+            data: Vec::new(),
+            meta: fabro_api::types::RunFilesMeta {
+                source:                  RunFilesMetaSource::Sandbox,
+                scope:                   RunFilesMetaScope::Committed,
                 truncated:               false,
                 files_omitted_by_budget: None,
                 total_changed:           0,
@@ -1566,18 +1857,56 @@ diff --git a/src/live.rs b/src/live.rs
             commands: StdMutex::new(Vec::new()),
         };
 
-        let body =
-            materialize_working_tree_sandbox_path(&sandbox, "HEAD", &RunId::new(), Instant::now())
-                .await
-                .expect("working tree materialization should succeed");
+        let body = materialize_working_tree_sandbox_path(
+            &sandbox,
+            "HEAD",
+            RunFilesMetaScope::Uncommitted,
+            &RunId::new(),
+            Instant::now(),
+        )
+        .await
+        .expect("working tree materialization should succeed");
 
-        assert_eq!(body.source, PaginatedRunFileListSource::Sandbox);
+        assert_eq!(body.meta.source, RunFilesMetaSource::Sandbox);
+        assert_eq!(body.meta.scope, RunFilesMetaScope::Uncommitted);
         assert_eq!(body.data.len(), 1);
         let commands = sandbox.commands.lock().expect("commands lock poisoned");
         assert_eq!(commands.len(), 2);
         assert!(commands[0].contains(" show -s --format="));
         assert!(commands[1].contains(" diff --patch --find-renames=50% HEAD"));
         assert!(!commands.iter().any(|command| command.contains("ls-files")));
+    }
+
+    #[test]
+    fn parse_git_log_commits_keeps_external_and_fabro_metadata() {
+        let stdout = concat!(
+            "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\x1f",
+            "cccccccccccccccccccccccccccccccccccccccc\x1f",
+            "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\x1f",
+            "Fabro\x1fbot@fabro.sh\x1f2026-05-09T17:12:40Z\x1f",
+            "Fabro\x1fbot@fabro.sh\x1f2026-05-09T17:12:40Z\x1f",
+            "fabro(run_1): implement (succeeded)\n\nFabro-Run: run_1\nFabro-Completed: 1\n\x1e",
+            "dddddddddddddddddddddddddddddddddddddddd\x1f",
+            "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee\x1f",
+            "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\x1f",
+            "Alice\x1falice@example.com\x1f2026-05-09T18:00:00Z\x1f",
+            "Alice\x1falice@example.com\x1f2026-05-09T18:00:00Z\x1f",
+            "external tool update\n\nLonger body.\n\x1e",
+        );
+
+        let commits = parse_git_log_commits(stdout).expect("git log should parse");
+
+        assert_eq!(commits.len(), 2);
+        assert_eq!(commits[0].subject, "fabro(run_1): implement (succeeded)");
+        assert_eq!(
+            commits[0].trailers.get("Fabro-Run").map(String::as_str),
+            Some("run_1")
+        );
+        assert_eq!(commits[0].parents.len(), 1);
+        assert_eq!(&*commits[0].short_sha, "bbbbbbb");
+        assert_eq!(commits[1].subject, "external tool update");
+        assert_eq!(commits[1].body.as_deref(), Some("Longer body."));
+        assert!(commits[1].trailers.is_empty());
     }
 
     #[tokio::test]
@@ -2055,7 +2384,8 @@ index 1111111..2222222 160000
         serde_json::to_value(build_patch_backed_response(
             entries,
             PatchBackedResponseMeta {
-                source:              PaginatedRunFileListSource::Sandbox,
+                source:              RunFilesMetaSource::Sandbox,
+                scope:               RunFilesMetaScope::Committed,
                 degraded:            false,
                 degraded_reason:     None,
                 to_sha:              Some(to_sha_wrapper(
@@ -2087,7 +2417,8 @@ diff --git a/{path} b/{path}
         let entries = vec![simple_patch("src/live.rs")];
         let body = sandbox_patch_response_json(&entries);
 
-        assert_eq!(body["source"].as_str(), Some("sandbox"));
+        assert_eq!(body["meta"]["source"].as_str(), Some("sandbox"));
+        assert_eq!(body["meta"]["scope"].as_str(), Some("committed"));
         assert_eq!(body["meta"]["degraded"].as_bool(), Some(false));
         assert!(body["meta"]["degraded_reason"].is_null());
         assert_eq!(

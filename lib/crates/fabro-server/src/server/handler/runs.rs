@@ -37,7 +37,7 @@ use crate::error::ApiError;
 use crate::principal_middleware::{
     RequestAuth, RequireCommandLog, RequireRunScoped, RequiredUser, require_user,
 };
-use crate::run_files::list_run_files;
+use crate::run_files::{list_run_commits, list_run_files};
 use crate::run_manifest;
 use crate::run_selector::{ResolveRunError, resolve_run_by_selector};
 
@@ -66,6 +66,7 @@ pub(super) fn routes() -> Router<Arc<AppState>> {
         )
         .route("/runs/{id}/settings", get(get_run_settings))
         .route("/runs/{id}/files", get(list_run_files))
+        .route("/runs/{id}/commits", get(list_run_commits))
         .merge(manifest_routes())
 }
 

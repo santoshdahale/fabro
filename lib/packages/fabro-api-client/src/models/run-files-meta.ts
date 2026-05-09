@@ -21,6 +21,14 @@ import type { DiffStats } from './diff-stats';
  * Metadata for a `PaginatedRunFileList` response.  Replaces `PaginationMeta` on the files endpoint — the naturally-bounded list does not use cursor pagination but exposes caps and a degraded-response path instead. 
  */
 export interface RunFilesMeta {
+    /**
+     * Source used to materialize this response. `sandbox` honors the requested scope from the run-owned sandbox; `final_patch` is fallback committed/final diff data from stored run state.
+     */
+    'source': RunFilesMetaSourceEnum;
+    /**
+     * Diff scope materialized for this response.
+     */
+    'scope': RunFilesMetaScopeEnum;
     'stats': DiffStats;
     /**
      * True when any cap (file count, per-file size, or aggregate size) was hit for this response.
@@ -52,6 +60,20 @@ export interface RunFilesMeta {
     'degraded_reason'?: RunFilesMetaDegradedReasonEnum;
 }
 
+export const RunFilesMetaSourceEnum = {
+    SANDBOX: 'sandbox',
+    FINAL_PATCH: 'final_patch'
+} as const;
+
+export type RunFilesMetaSourceEnum = typeof RunFilesMetaSourceEnum[keyof typeof RunFilesMetaSourceEnum];
+export const RunFilesMetaScopeEnum = {
+    COMMITTED: 'committed',
+    UNCOMMITTED: 'uncommitted',
+    ALL: 'all',
+    RANGE: 'range'
+} as const;
+
+export type RunFilesMetaScopeEnum = typeof RunFilesMetaScopeEnum[keyof typeof RunFilesMetaScopeEnum];
 export const RunFilesMetaDegradedReasonEnum = {
     SANDBOX_UNREACHABLE: 'sandbox_unreachable',
     SANDBOX_GONE: 'sandbox_gone',

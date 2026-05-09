@@ -2255,14 +2255,14 @@ paths:
         - name: from_sha
           in: query
           required: false
-          description: Reserved for future use. Only the default value is accepted in the current API version; any other value returns 400.
+          description: Explicit start SHA for a commit-range diff. Must be supplied together with `to_sha`; when present, `scope` must be omitted and the response scope is `range`.
           schema:
             type: string
             pattern: "^[0-9a-f]{7,40}$"
         - name: to_sha
           in: query
           required: false
-          description: Reserved for future use. Only the default value is accepted in the current API version; any other value returns 400.
+          description: Explicit end SHA for a commit-range diff. Must be supplied together with `from_sha`; when present, `scope` must be omitted and the response scope is `range`.
           schema:
             type: string
             pattern: "^[0-9a-f]{7,40}$"
@@ -2274,7 +2274,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/PaginatedRunFileList"
         "400":
-          description: Malformed query parameter (invalid SHA format, or non-default value for `from_sha`/`to_sha`).
+          description: Malformed query parameter (invalid SHA format, one-sided SHA range, or `scope` combined with an explicit SHA range).
           headers:
             x-request-id:
               $ref: "#/components/headers/XRequestId"
@@ -2293,6 +2293,70 @@ paths:
                 $ref: "#/components/schemas/ErrorResponse"
         "503":
           description: Transient sandbox subprocess failure (timeout, process kill). Safe to retry.
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/v1/runs/{id}/commits:
+    get:
+      operationId: listRunCommits
+      tags: [Run Outputs]
+      summary: List Run Commits
+      description: |
+        Returns commits on the run branch since the run's base SHA, sourced directly from sandbox Git.
+
+        The list uses first-parent chronological history and is capped by `limit` (default and maximum: 100). Commit data is Git-authoritative; Fabro-generated commit messages are not required for correctness.
+      parameters:
+        - $ref: "#/components/parameters/RunId"
+        - name: limit
+          in: query
+          required: false
+          description: Maximum number of commits to return. Defaults to 100 and is capped at 100.
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 100
+      responses:
+        "200":
+          description: Commits on the run branch since the run base.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PaginatedRunCommitList"
+        "400":
+          description: Malformed run id or query parameter.
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Run not found.
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: Run has no active sandbox or no base SHA.
+          headers:
+            x-request-id:
+              $ref: "#/components/headers/XRequestId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: Sandbox Git history is temporarily unavailable.
           headers:
             x-request-id:
               $ref: "#/components/headers/XRequestId"
@@ -7226,10 +7290,26 @@ components:
         Replaces `PaginationMeta` on the files endpoint — the naturally-bounded list does not use cursor pagination but exposes caps and a degraded-response path instead.
       type: object
       required:
+        - source
+        - scope
         - truncated
         - total_changed
         - stats
       properties:
+        source:
+          type: string
+          description: Source used to materialize this response. `sandbox` honors the requested scope from the run-owned sandbox; `final_patch` is fallback committed/final diff data from stored run state.
+          enum:
+            - sandbox
+            - final_patch
+        scope:
+          type: string
+          description: Diff scope materialized for this response.
+          enum:
+            - committed
+            - uncommitted
+            - all
+            - range
         stats:
           $ref: "#/components/schemas/DiffStats"
         truncated:
@@ -7274,7 +7354,6 @@ components:
       required:
         - data
         - meta
-        - source
       properties:
         data:
           type: array
@@ -7282,12 +7361,123 @@ components:
             $ref: "#/components/schemas/FileDiff"
         meta:
           $ref: "#/components/schemas/RunFilesMeta"
+
+    RunCommitParent:
+      description: Parent commit pointer.
+      type: object
+      required:
+        - sha
+        - short_sha
+      properties:
+        sha:
+          type: string
+          pattern: "^[0-9a-f]{7,40}$"
+        short_sha:
+          type: string
+          pattern: "^[0-9a-f]{7,12}$"
+
+    RunCommitPerson:
+      description: Git author or committer identity.
+      type: object
+      required:
+        - name
+        - email
+        - date
+      properties:
+        name:
+          type: string
+        email:
+          type: string
+        date:
+          type: ["string", "null"]
+          format: date-time
+
+    RunCommit:
+      description: A Git commit on a run branch.
+      type: object
+      required:
+        - sha
+        - short_sha
+        - parents
+        - author
+        - committer
+        - subject
+        - message
+        - trailers
+        - tree_sha
+      properties:
+        sha:
+          type: string
+          pattern: "^[0-9a-f]{7,40}$"
+        short_sha:
+          type: string
+          pattern: "^[0-9a-f]{7,12}$"
+        parents:
+          type: array
+          items:
+            $ref: "#/components/schemas/RunCommitParent"
+        author:
+          $ref: "#/components/schemas/RunCommitPerson"
+        committer:
+          $ref: "#/components/schemas/RunCommitPerson"
+        subject:
+          type: string
+        body:
+          type: ["string", "null"]
+        message:
+          type: string
+        trailers:
+          type: object
+          additionalProperties:
+            type: string
+        tree_sha:
+          type: ["string", "null"]
+          pattern: "^[0-9a-f]{7,40}$"
+
+    RunCommitsMeta:
+      description: Metadata for a `PaginatedRunCommitList` response.
+      type: object
+      required:
+        - source
+        - base_sha
+        - head_sha
+        - limit
+        - total_returned
+        - truncated
+      properties:
         source:
           type: string
-          description: Source used to materialize this response. `sandbox` honors the requested scope from the run-owned sandbox; `final_patch` is fallback committed/final diff data from stored run state.
           enum:
             - sandbox
-            - final_patch
+        base_sha:
+          type: string
+          pattern: "^[0-9a-f]{7,40}$"
+        head_sha:
+          type: string
+          pattern: "^[0-9a-f]{7,40}$"
+        limit:
+          type: integer
+          minimum: 1
+          maximum: 100
+        total_returned:
+          type: integer
+          minimum: 0
+        truncated:
+          type: boolean
+
+    PaginatedRunCommitList:
+      description: Git commits on a run branch since the run base.
+      type: object
+      required:
+        - data
+        - meta
+      properties:
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/RunCommit"
+        meta:
+          $ref: "#/components/schemas/RunCommitsMeta"
 
     # ── Billing Schemas ──────────────────────────────────────────────────
 

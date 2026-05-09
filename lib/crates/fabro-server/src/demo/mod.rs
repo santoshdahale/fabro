@@ -16,8 +16,11 @@ use axum::response::sse::{Event, Sse};
 use axum::response::{IntoResponse, Response};
 use fabro_api::types::{
     CreateSecretRequest, DeleteSecretRequest, DiffFile, DiffStats, EventEnvelope, FileDiff,
-    FileDiffChangeKind, PaginatedEventList, PaginatedRunFileList, PaginatedRunFileListSource,
-    PaginationMeta, RunArtifactListResponse, RunFilesMeta,
+    FileDiffChangeKind, PaginatedEventList, PaginatedRunCommitList, PaginatedRunFileList,
+    PaginationMeta, RunArtifactListResponse, RunCommit, RunCommitParent, RunCommitParentSha,
+    RunCommitParentShortSha, RunCommitPerson, RunCommitSha, RunCommitShortSha, RunCommitTreeSha,
+    RunCommitsMeta, RunCommitsMetaBaseSha, RunCommitsMetaHeadSha, RunCommitsMetaSource,
+    RunFilesMeta, RunFilesMetaScope, RunFilesMetaSource,
 };
 use serde_json::json;
 
@@ -193,13 +196,86 @@ pub(crate) async fn list_run_files_stub(
     (StatusCode::OK, Json(demo_run_files())).into_response()
 }
 
+pub(crate) async fn list_run_commits_stub(
+    _auth: RequiredUser,
+    State(_state): State<Arc<AppState>>,
+    Path(_id): Path<String>,
+) -> Response {
+    let sha = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+    let parent = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+    let tree = "cccccccccccccccccccccccccccccccccccccccc";
+    let commit = RunCommit {
+        sha:       sha_newtype::<RunCommitSha>(sha),
+        short_sha: short_sha_newtype::<RunCommitShortSha>(sha),
+        parents:   vec![RunCommitParent {
+            sha:       sha_newtype::<RunCommitParentSha>(parent),
+            short_sha: short_sha_newtype::<RunCommitParentShortSha>(parent),
+        }],
+        author:    RunCommitPerson {
+            name:  "Fabro".to_string(),
+            email: "bot@fabro.sh".to_string(),
+            date:  None,
+        },
+        committer: RunCommitPerson {
+            name:  "Fabro".to_string(),
+            email: "bot@fabro.sh".to_string(),
+            date:  None,
+        },
+        subject:   "fabro(demo): implement (succeeded)".to_string(),
+        body:      None,
+        message:   "fabro(demo): implement (succeeded)\n\nFabro-Run: demo\nFabro-Completed: 1\n"
+            .to_string(),
+        trailers:  [
+            ("Fabro-Run".to_string(), "demo".to_string()),
+            ("Fabro-Completed".to_string(), "1".to_string()),
+        ]
+        .into_iter()
+        .collect(),
+        tree_sha:  Some(sha_newtype::<RunCommitTreeSha>(tree)),
+    };
+
+    (
+        StatusCode::OK,
+        Json(PaginatedRunCommitList {
+            data: vec![commit],
+            meta: RunCommitsMeta {
+                source:         RunCommitsMetaSource::Sandbox,
+                base_sha:       sha_newtype::<RunCommitsMetaBaseSha>(parent),
+                head_sha:       sha_newtype::<RunCommitsMetaHeadSha>(sha),
+                limit:          std::num::NonZeroU64::new(100).expect("literal is non-zero"),
+                total_returned: 1,
+                truncated:      false,
+            },
+        }),
+    )
+        .into_response()
+}
+
+fn sha_newtype<T>(sha: &str) -> T
+where
+    T: TryFrom<String>,
+    <T as TryFrom<String>>::Error: std::fmt::Display,
+{
+    T::try_from(sha.to_string()).unwrap_or_else(|err| panic!("invalid demo SHA `{sha}`: {err}"))
+}
+
+fn short_sha_newtype<T>(sha: &str) -> T
+where
+    T: TryFrom<String>,
+    <T as TryFrom<String>>::Error: std::fmt::Display,
+{
+    let short = sha.chars().take(7).collect::<String>();
+    T::try_from(short.clone())
+        .unwrap_or_else(|err| panic!("invalid demo short SHA `{short}`: {err}"))
+}
+
 fn demo_run_files() -> PaginatedRunFileList {
     let old_main = "import { parseArgs } from \"node:util\";\n\nexport function run(argv: string[]) {\n  const { values } = parseArgs({ args: argv, options: { config: { type: \"string\" } } });\n  console.log(values.config);\n}\n";
     let new_main = "import { parseArgs } from \"node:util\";\nimport { loadConfig } from \"./config.js\";\n\nexport async function run(argv: string[]) {\n  const { values } = parseArgs({ args: argv, options: { config: { type: \"string\" } } });\n  const config = await loadConfig(values.config ?? \".fabro/project.toml\");\n  console.log(JSON.stringify(config, null, 2));\n}\n";
     let new_config = "import { readFile } from \"node:fs/promises\";\nimport { parse as parseToml } from \"@iarna/toml\";\n\nexport async function loadConfig(path: string) {\n  const contents = await readFile(path, \"utf8\");\n  return parseToml(contents);\n}\n";
 
     PaginatedRunFileList {
-        data:   vec![
+        data: vec![
             FileDiff {
                 binary:            None,
                 change_kind:       Some(FileDiffChangeKind::Modified),
@@ -249,8 +325,9 @@ fn demo_run_files() -> PaginatedRunFileList {
                 unified_patch:     None,
             },
         ],
-        source: PaginatedRunFileListSource::Sandbox,
-        meta:   RunFilesMeta {
+        meta: RunFilesMeta {
+            source:                  RunFilesMetaSource::Sandbox,
+            scope:                   RunFilesMetaScope::Committed,
             truncated:               false,
             files_omitted_by_budget: None,
             total_changed:           3,

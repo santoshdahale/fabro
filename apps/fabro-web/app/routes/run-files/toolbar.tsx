@@ -22,11 +22,22 @@ type ChangeSummary = {
   deletions: number;
 };
 
+export type DiffPickerValue =
+  | { kind: "scope"; scope: RunFileScope }
+  | { kind: "commit"; sha: string };
+
+export type DiffCommitOption = {
+  sha: string;
+  label: string;
+  title: string;
+};
+
 export function Toolbar({
   changeSummary,
-  scope,
+  selection,
+  commits,
   showScopePicker,
-  onScopeChange,
+  onPickerChange,
   onRefresh,
   refreshing,
   refreshDisabled,
@@ -37,9 +48,10 @@ export function Toolbar({
   diffStyleForced,
 }: {
   changeSummary: ChangeSummary;
-  scope: RunFileScope;
+  selection: DiffPickerValue;
+  commits: DiffCommitOption[];
   showScopePicker: boolean;
-  onScopeChange: (scope: RunFileScope) => void;
+  onPickerChange: (selection: DiffPickerValue) => void;
   onRefresh: () => void;
   refreshing: boolean;
   /** True when the server has nothing new to show (to_sha unchanged). */
@@ -66,7 +78,11 @@ export function Toolbar({
     <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 border-b border-line pb-3">
       <div className="flex min-w-0 items-center gap-3">
         {showScopePicker ? (
-          <DiffScopePicker value={scope} onChange={onScopeChange} />
+          <DiffScopePicker
+            value={selection}
+            commits={commits}
+            onChange={onPickerChange}
+          />
         ) : null}
         <p className="text-base font-semibold text-fg">
           <span className="tabular-nums">{totalChanged}</span>
@@ -125,32 +141,39 @@ const scopeOptions: Array<{ value: RunFileScope; label: string }> = [
 
 function DiffScopePicker({
   value,
+  commits,
   onChange,
 }: {
-  value: RunFileScope;
-  onChange: (scope: RunFileScope) => void;
+  value: DiffPickerValue;
+  commits: DiffCommitOption[];
+  onChange: (selection: DiffPickerValue) => void;
 }) {
-  const selected =
-    scopeOptions.find((o) => o.value === value) ?? scopeOptions[0];
+  const selectedValue = pickerValueKey(value);
+  const selectedLabel =
+    value.kind === "scope"
+      ? (scopeOptions.find((o) => o.value === value.scope) ?? scopeOptions[0])
+          .label
+      : (commits.find((commit) => commit.sha === value.sha)?.label ??
+        value.sha.slice(0, 7));
   return (
-    <Listbox value={value} onChange={onChange}>
+    <Listbox value={selectedValue} onChange={(next) => onChange(parsePickerValue(next))}>
       <div className="relative">
         <ListboxButton
           aria-label="Diff scope"
-          className="flex h-7 items-center gap-1.5 rounded-md border border-line bg-panel px-2.5 text-xs font-medium text-fg-3 transition-colors hover:bg-overlay hover:text-fg data-open:bg-overlay data-open:text-fg"
+          className="flex h-7 max-w-56 items-center gap-1.5 rounded-md border border-line bg-panel px-2.5 text-xs font-medium text-fg-3 transition-colors hover:bg-overlay hover:text-fg data-open:bg-overlay data-open:text-fg"
         >
-          <span>{selected.label}</span>
+          <span className="truncate">{selectedLabel}</span>
           <ChevronUpDownIcon className="size-3.5 text-fg-muted" aria-hidden="true" />
         </ListboxButton>
         <ListboxOptions
           transition
           anchor={{ to: "bottom start", gap: 4 }}
-          className="z-20 w-44 origin-top-left rounded-md bg-panel py-1 shadow-xl shadow-black/30 outline-1 -outline-offset-1 outline-line-strong transition data-closed:scale-95 data-closed:opacity-0 data-enter:duration-100 data-enter:ease-out data-leave:duration-75 data-leave:ease-in focus:outline-none"
+          className="z-20 w-64 origin-top-left rounded-md bg-panel py-1 shadow-xl shadow-black/30 outline-1 -outline-offset-1 outline-line-strong transition data-closed:scale-95 data-closed:opacity-0 data-enter:duration-100 data-enter:ease-out data-leave:duration-75 data-leave:ease-in focus:outline-none"
         >
           {scopeOptions.map((option) => (
             <ListboxOption
               key={option.value}
-              value={option.value}
+              value={`scope:${option.value}`}
               className="flex cursor-default items-center justify-between gap-3 px-3 py-1.5 text-xs text-fg-3 data-focus:bg-overlay data-focus:text-fg data-selected:text-fg"
             >
               {({ selected }) => (
@@ -168,10 +191,53 @@ function DiffScopePicker({
               )}
             </ListboxOption>
           ))}
+          {commits.length > 0 ? (
+            <div
+              role="separator"
+              className="my-1 border-t border-line"
+            />
+          ) : null}
+          {commits.map((commit) => (
+            <ListboxOption
+              key={commit.sha}
+              value={`commit:${commit.sha}`}
+              title={commit.title}
+              className="flex cursor-default items-center justify-between gap-3 px-3 py-1.5 text-xs text-fg-3 data-focus:bg-overlay data-focus:text-fg data-selected:text-fg"
+            >
+              {({ selected }) => (
+                <>
+                  <span className={`truncate ${selected ? "font-medium" : ""}`}>
+                    {commit.label}
+                  </span>
+                  {selected ? (
+                    <CheckIcon
+                      className="size-3.5 shrink-0 text-teal-300"
+                      aria-hidden="true"
+                    />
+                  ) : null}
+                </>
+              )}
+            </ListboxOption>
+          ))}
         </ListboxOptions>
       </div>
     </Listbox>
   );
+}
+
+function pickerValueKey(value: DiffPickerValue): string {
+  return value.kind === "scope" ? `scope:${value.scope}` : `commit:${value.sha}`;
+}
+
+function parsePickerValue(value: string): DiffPickerValue {
+  if (value.startsWith("commit:")) {
+    return { kind: "commit", sha: value.slice("commit:".length) };
+  }
+  const scope = value.slice("scope:".length);
+  if (scope === "all" || scope === "uncommitted" || scope === "committed") {
+    return { kind: "scope", scope };
+  }
+  return { kind: "scope", scope: "committed" };
 }
 
 function DiffLayoutToggle({
