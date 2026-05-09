@@ -15,15 +15,6 @@ let currentRunSummary: any = null;
 let currentQuestions: any[] = [];
 const mountedRenderers: TestRenderer.ReactTestRenderer[] = [];
 
-function noopMutation() {
-  return {
-    data:       undefined,
-    isMutating: false,
-    trigger:    mock(() => Promise.resolve()),
-    reset:      mock(() => undefined),
-  };
-}
-
 mock.module("../lib/queries", () => ({
   useRun: () => ({
     data:      currentRunSummary,
@@ -41,16 +32,6 @@ mock.module("../lib/queries", () => ({
   }),
 }));
 
-mock.module("../lib/mutations", () => ({
-  useArchiveRun:           () => noopMutation(),
-  useCancelRun:            () => noopMutation(),
-  useInterruptRun:         () => noopMutation(),
-  usePreviewRun:           () => noopMutation(),
-  useSteerRun:             () => noopMutation(),
-  useSubmitInterviewAnswer: () => noopMutation(),
-  useUnarchiveRun:         () => noopMutation(),
-}));
-
 mock.module("../lib/run-events", () => ({
   useRunEvents: () => undefined,
 }));
@@ -66,6 +47,7 @@ const {
   handleLifecycleToastResult,
   lifecycleActionVisibility,
 } = await import("./run-detail");
+mock.restore();
 type LifecycleToastState = import("./run-detail").LifecycleToastState;
 type RunDetailActionResult = import("./run-detail").RunDetailActionResult;
 
