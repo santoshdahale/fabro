@@ -256,7 +256,18 @@ async fn materialize_sandbox_path(state: &Arc<AppState>, run_id: &RunId) -> List
         return Ok(empty_envelope());
     };
 
-    let sandbox = reconnect_run_sandbox(state, run_id, &projection).await?;
+    let sandbox = match reconnect_run_sandbox(state, run_id, &projection).await {
+        Ok(sandbox) => sandbox,
+        Err(err) if err.status() == StatusCode::CONFLICT => {
+            return Ok(build_fallback_response(
+                &projection,
+                RunFilesMetaDegradedReason::SandboxGone,
+                run_id,
+                start,
+            ));
+        }
+        Err(err) => return Err(err),
+    };
 
     // Resolve HEAD (sha + commit time) in one round-trip.
     let (to_sha, to_sha_committed_at) = resolve_head_sha_and_time(sandbox.as_ref()).await?;

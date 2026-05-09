@@ -31,6 +31,10 @@ pub async fn reconnect(
     reconnect_for_run(record, daytona_api_key, None).await
 }
 
+#[allow(
+    unused_variables,
+    reason = "Feature-gated sandbox backends leave parameters unused on partial builds."
+)]
 pub async fn reconnect_for_run(
     record: &SandboxRecord,
     daytona_api_key: Option<String>,
@@ -39,6 +43,10 @@ pub async fn reconnect_for_run(
     reconnect_for_run_with_callback(record, daytona_api_key, run_id, None).await
 }
 
+#[allow(
+    unused_variables,
+    reason = "Feature-gated sandbox backends leave parameters unused on partial builds."
+)]
 pub async fn reconnect_for_run_with_callback(
     record: &SandboxRecord,
     daytona_api_key: Option<String>,

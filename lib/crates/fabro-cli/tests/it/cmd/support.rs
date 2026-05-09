@@ -220,7 +220,7 @@ fn run_completed_dry_run(context: &TestContext, workflow: &Path) -> RunSetup {
     };
     wait_for_event_names(&run_setup.run_dir, &[
         "run.completed",
-        "sandbox.cleanup.completed",
+        "sandbox.stop.completed",
     ]);
     run_setup
 }
@@ -1084,7 +1084,7 @@ async fn append_seeded_simple_completion_events(
         base_url,
         &run.run_id,
         None,
-        "sandbox.cleanup.started",
+        "sandbox.stop.started",
         serde_json::json!({
             "provider": "local",
         }),
@@ -1095,7 +1095,7 @@ async fn append_seeded_simple_completion_events(
         base_url,
         &run.run_id,
         None,
-        "sandbox.cleanup.completed",
+        "sandbox.stop.completed",
         serde_json::json!({
             "provider": "local",
             "duration_ms": 1,

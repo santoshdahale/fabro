@@ -988,7 +988,8 @@ fn attach_json_errors_without_prompting_for_human_input() {
                   "worktree_mode": "always"
                 },
                 "preserve": false,
-                "provider": "local"
+                "provider": "local",
+                "stop_on_terminal": true
               },
               "scm": {
                 "github": null,
