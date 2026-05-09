@@ -294,6 +294,9 @@ mod daytona_terminal {
                 match message {
                     Ok(ProviderMessage::Binary(bytes)) => return Ok(Some(bytes.to_vec())),
                     Ok(ProviderMessage::Text(text)) => {
+                        if is_daytona_terminal_control_text(text.as_str()) {
+                            continue;
+                        }
                         return Ok(Some(text.as_str().as_bytes().to_vec()));
                     }
                     Ok(ProviderMessage::Close(_))
@@ -505,6 +508,17 @@ mod daytona_terminal {
         format!("fabro-terminal-{:016x}", rand::rng().random::<u64>())
     }
 
+    fn is_daytona_terminal_control_text(text: &str) -> bool {
+        let Ok(value) = serde_json::from_str::<serde_json::Value>(text) else {
+            return false;
+        };
+        value
+            .as_object()
+            .and_then(|object| object.get("type"))
+            .and_then(serde_json::Value::as_str)
+            == Some("control")
+    }
+
     fn daytona_ws_request(
         ws_url: &str,
         api_key: &str,
@@ -639,6 +653,21 @@ mod daytona_terminal {
                 format!("{}/toolbox/sandbox-1", server.base_url())
             );
             proxy.assert_async().await;
+        }
+
+        #[test]
+        fn identifies_daytona_terminal_control_text() {
+            assert!(is_daytona_terminal_control_text(
+                r#"{"status":"connected","type":"control"}"#
+            ));
+            assert!(is_daytona_terminal_control_text(
+                r#"{"type":"control","status":"resized"}"#
+            ));
+            assert!(!is_daytona_terminal_control_text("hello\n"));
+            assert!(!is_daytona_terminal_control_text(
+                r#"{"type":"output","text":"hello"}"#
+            ));
+            assert!(!is_daytona_terminal_control_text("{"));
         }
     }
 }
