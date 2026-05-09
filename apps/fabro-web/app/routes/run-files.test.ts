@@ -1,13 +1,15 @@
 import { describe, expect, test } from "bun:test";
 
 import {
-  buildRunCommitOptions,
   deepLinkToastMessage,
   emptyTransitionToastMessage,
   extractRequestId,
-  fabroGeneratedCommitStage,
   normalizeRunFileScope,
 } from "./run-files";
+import {
+  buildRunCommitOptions,
+  fabroGeneratedCommitStage,
+} from "./run-files/commit-options";
 
 function buildRunFilesPayload({
   files = [],
