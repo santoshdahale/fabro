@@ -713,7 +713,7 @@ async fn materialize_committed_range_sandbox_path(
                 .then(|| i64::try_from(files_omitted_by_budget).unwrap_or(i64::MAX)),
             total_changed: i64::try_from(total_changed_before_cap).unwrap_or(i64::MAX),
             stats,
-            to_sha: Some(to_sha_wrapper(&to_sha)),
+            to_sha: Some(to_sha_wrapper(to_sha)),
             to_sha_committed_at,
             degraded: Some(false),
             degraded_reason: None,
