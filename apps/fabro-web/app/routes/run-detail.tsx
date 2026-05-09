@@ -61,7 +61,7 @@ import {
 const allTabs = [
   { name: "Overview", path: "", count: null, demoOnly: false },
   { name: "Stages", path: "/stages", count: null, demoOnly: false },
-  { name: "Diff", path: "/files", count: null, demoOnly: false },
+  { name: "Files Changed", path: "/files", count: null, demoOnly: false },
   { name: "Terminal", path: "/terminal", count: null, demoOnly: false, requiresSandbox: true },
   { name: "Billing", path: "/billing", count: null, demoOnly: false },
 ];
@@ -192,7 +192,7 @@ export default function RunDetail({ params }: { params: { id: string } }) {
   const hasSandbox = runHasSandbox(runStateQuery.data);
   const tabs = allTabs
     .map((tab) =>
-      tab.name === "Diff" ? { ...tab, count: filesCount } : tab,
+      tab.name === "Files Changed" ? { ...tab, count: filesCount } : tab,
     )
     .filter((t) => (!t.demoOnly || demoMode) && (!t.requiresSandbox || hasSandbox));
   const lifecycleToastStateRef = useRef<LifecycleToastState>(INITIAL_LIFECYCLE_TOAST_STATE);

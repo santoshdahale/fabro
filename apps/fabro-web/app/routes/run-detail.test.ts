@@ -364,7 +364,7 @@ describe("RunDetail full-height child routes", () => {
     expect(outletWrappers).toHaveLength(1);
   });
 
-  test("shows the Diff tab badge from run summary diff stats", async () => {
+  test("shows the Files Changed tab badge from run summary diff stats", async () => {
     const renderer = await renderRunDetail({
       initialEntry: "/runs/run_1/files",
       diffSummary:  {
@@ -403,7 +403,7 @@ describe("RunDetail full-height child routes", () => {
     expect(focusCalls).toEqual(["focus"]);
   });
 
-  test("hides the Diff tab badge when diff stats are absent", async () => {
+  test("hides the Files Changed tab badge when diff stats are absent", async () => {
     const renderer = await renderRunDetail({
       initialEntry: "/runs/run_1/files",
     });
