@@ -39,7 +39,7 @@ fn list() {
             "_version = 1\n\n[project]\ndirectory = \"..\"\n",
         )
         .write_temp(
-            "workflows/my_test_wf/workflow.toml",
+            ".fabro/workflows/my_test_wf/workflow.toml",
             "_version = 1\n\n[run]\ngoal = \"A test workflow\"\n",
         );
 
@@ -55,7 +55,7 @@ fn list() {
     User Workflows (~/.fabro/workflows)
       (none)
 
-    Project Workflows (workflows)
+    Project Workflows (.fabro/workflows)
     NAME        DESCRIPTION     
      my_test_wf  A test workflow
     ");

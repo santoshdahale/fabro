@@ -160,7 +160,7 @@ fn workflow_create_errors_without_project_config() {
 }
 
 #[test]
-fn workflow_create_json_uses_resolved_custom_root_paths() {
+fn workflow_create_json_ignores_deprecated_project_directory() {
     let context = test_context!();
     let project_dir = context.temp_dir.join("project");
     context.write_temp(
@@ -188,20 +188,24 @@ fn workflow_create_json_uses_resolved_custom_root_paths() {
     {
       "name": "hello-world",
       "created": [
-        "custom/fabro-data/workflows/hello-world/workflow.fabro",
-        "custom/fabro-data/workflows/hello-world/workflow.toml"
+        ".fabro/workflows/hello-world/workflow.fabro",
+        ".fabro/workflows/hello-world/workflow.toml"
       ]
     }
     "#);
 
     assert!(
         project_dir
-            .join("custom/fabro-data/workflows/hello-world/workflow.fabro")
+            .join(".fabro/workflows/hello-world/workflow.fabro")
             .exists()
     );
     assert!(
         project_dir
-            .join("custom/fabro-data/workflows/hello-world/workflow.toml")
+            .join(".fabro/workflows/hello-world/workflow.toml")
             .exists()
+    );
+    assert!(
+        !project_dir.join("custom/fabro-data/workflows").exists(),
+        "deprecated project.directory should not redirect workflow creation"
     );
 }

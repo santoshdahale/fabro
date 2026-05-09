@@ -12,8 +12,8 @@ pub struct ProjectLayer {
     pub name:        Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
-    /// The Fabro-managed project directory inside the repo. Defaults to
-    /// `.` after layering when unspecified.
+    /// Deprecated parse-only field. Project workflows always live under the
+    /// `.fabro` directory that contains `project.toml`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub directory:   Option<String>,
     #[serde(default, skip_serializing_if = "ReplaceMap::is_empty")]

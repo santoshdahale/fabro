@@ -1627,10 +1627,7 @@ mod runs {
 
     pub(super) fn settings() -> serde_json::Value {
         let settings = WorkflowSettings {
-            project:  ProjectNamespace {
-                directory: "/workspace/api-server".into(),
-                ..ProjectNamespace::default()
-            },
+            project:  ProjectNamespace::default(),
             workflow: WorkflowNamespace {
                 graph: "workflow.fabro".into(),
                 ..WorkflowNamespace::default()

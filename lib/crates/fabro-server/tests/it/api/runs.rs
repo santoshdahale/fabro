@@ -85,7 +85,7 @@ session_sandboxes = true
         format!("GET /api/v1/runs/{run_id}/settings"),
     )
     .await;
-    assert_eq!(body["project"]["directory"], ".");
+    assert!(body["project"].get("directory").is_none());
     assert_eq!(body["workflow"]["graph"], "workflow.fabro");
     assert_eq!(body["run"]["goal"]["type"], "inline");
     assert_eq!(body["run"]["goal"]["value"], "Ship it");

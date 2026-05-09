@@ -3,7 +3,6 @@ use cli_table::format::{Border, Separator};
 use cli_table::{Cell, CellStruct, Color, Style, Table};
 use fabro_config::project::{
     WorkflowInfo, WorkflowSource, discover_project_config, list_workflows_detailed,
-    resolve_fabro_root,
 };
 use fabro_util::printer::Printer;
 use fabro_util::terminal::Styles;
@@ -26,7 +25,9 @@ pub(super) fn list_command(_args: &WorkflowListArgs, base_ctx: &CommandContext) 
         );
     };
 
-    let fabro_root = resolve_fabro_root(&config_path);
+    let fabro_root = config_path
+        .parent()
+        .expect("project config should have a parent directory");
     let project_wf_dir = fabro_root.join("workflows");
     let user_wf_dir = Some(fabro_util::Home::from_env().workflows_dir());
 

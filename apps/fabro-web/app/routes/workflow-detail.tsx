@@ -44,7 +44,6 @@ function sampleSettings({
     project: {
       name: null,
       description: null,
-      directory: ".",
       metadata: {},
     },
     workflow: {

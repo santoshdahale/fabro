@@ -8,14 +8,18 @@ fn resolves_project_defaults_from_empty_settings() {
         .expect("empty settings should resolve")
         .project;
 
-    assert_eq!(project.directory, ".");
+    let json = serde_json::to_value(&project).expect("project settings should serialize");
+    assert!(
+        json.get("directory").is_none(),
+        "resolved project settings should not expose deprecated directory"
+    );
     assert!(project.name.is_none());
     assert!(project.description.is_none());
     assert!(project.metadata.is_empty());
 }
 
 #[test]
-fn resolves_project_directory_and_metadata() {
+fn resolves_project_metadata_and_ignores_deprecated_directory() {
     let project = WorkflowSettingsBuilder::from_toml(
         r#"
 _version = 1
@@ -34,7 +38,11 @@ team = "platform"
 
     assert_eq!(project.name.as_deref(), Some("Acme"));
     assert_eq!(project.description.as_deref(), Some("Automation"));
-    assert_eq!(project.directory, ".fabro");
+    let json = serde_json::to_value(&project).expect("project settings should serialize");
+    assert!(
+        json.get("directory").is_none(),
+        "resolved project settings should not expose deprecated directory"
+    );
     assert_eq!(
         project.metadata.get("team").map(String::as_str),
         Some("platform")

@@ -17,7 +17,6 @@
 export interface ProjectNamespace {
     'name': string | null;
     'description': string | null;
-    'directory': string;
     'metadata': { [key: string]: string; };
 }
 

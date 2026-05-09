@@ -6,7 +6,7 @@
 use std::path::Path;
 
 use anyhow::{Context, Result, bail};
-use fabro_config::project::{discover_project_config, resolve_fabro_root};
+use fabro_config::project::discover_project_config;
 
 use crate::args::WorkflowCreateArgs;
 use crate::command_context::CommandContext;
@@ -23,8 +23,10 @@ pub(super) fn create_command(args: &WorkflowCreateArgs, base_ctx: &CommandContex
         );
     };
 
-    let fabro_root = resolve_fabro_root(&config_path);
-    let created = write_workflow_scaffold(args, &fabro_root)?;
+    let fabro_root = config_path
+        .parent()
+        .expect("project config should have a parent directory");
+    let created = write_workflow_scaffold(args, fabro_root)?;
 
     if base_ctx.json_output() {
         let created: Vec<_> = created.iter().map(|path| relative_path(path)).collect();

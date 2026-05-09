@@ -113,7 +113,7 @@ fn rename_hint(key: &str) -> Option<String> {
         "artifact_storage" => "rename to `[server.artifacts]`",
         "storage_dir" | "data_dir" => "rename to `[server.storage] root`",
         "max_concurrent_runs" => "rename to `[server.scheduler]` field",
-        "fabro" => "rename to `[project]`; `fabro.root` becomes `project.directory`",
+        "fabro" => "rename to `[project]`; project workflows now live under `.fabro/workflows`",
         "git" => "split into `[run.git]` (local git behavior) and `[server.integrations.github]`",
         "github" => {
             "split into `[server.integrations.github]` (App identity/auth) and \

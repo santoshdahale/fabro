@@ -2,9 +2,6 @@
 # Dynamic and presence-gated defaults remain in Rust.
 _version = 1
 
-[project]
-directory = "."
-
 [workflow]
 graph = "workflow.fabro"
 

@@ -18,12 +18,13 @@ fn embedded_defaults() -> SettingsLayer {
 fn embedded_defaults_parse_successfully() {
     let defaults = embedded_defaults();
 
-    assert_eq!(
+    assert!(
         defaults
             .project
             .as_ref()
-            .and_then(|project| project.directory.as_deref()),
-        Some(".")
+            .and_then(|project| project.directory.as_deref())
+            .is_none(),
+        "built-in defaults should not materialize deprecated project.directory"
     );
     assert_eq!(
         defaults
@@ -38,12 +39,13 @@ fn embedded_defaults_parse_successfully() {
 fn apply_builtin_defaults_materializes_expected_layer() {
     let layer = SettingsLayer::default().combine(embedded_defaults());
 
-    assert_eq!(
+    assert!(
         layer
             .project
             .as_ref()
-            .and_then(|project| project.directory.as_deref()),
-        Some(".")
+            .and_then(|project| project.directory.as_deref())
+            .is_none(),
+        "built-in defaults should not materialize deprecated project.directory"
     );
     assert_eq!(
         layer

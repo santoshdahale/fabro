@@ -92,7 +92,12 @@ name = "gpt-5"
         WorkflowSettingsBuilder::from_toml(source).expect("workflow settings should resolve");
     let server = ServerSettingsBuilder::from_toml(source).expect("server settings should resolve");
 
-    assert_eq!(workflow_settings.project.directory, ".fabro");
+    let project_json = serde_json::to_value(&workflow_settings.project)
+        .expect("project settings should serialize");
+    assert!(
+        project_json.get("directory").is_none(),
+        "resolved project settings should not expose deprecated directory"
+    );
     assert_eq!(workflow_settings.workflow.graph, "graphs/workflow.dot");
     assert_eq!(server.server.storage.root.as_source(), "/srv/fabro");
     assert_eq!(
@@ -121,7 +126,12 @@ fn workflow_settings_resolve_defaults_and_expose_fields() {
     let resolved = fabro_config::WorkflowSettingsBuilder::from_layer(&settings)
         .expect("defaults should resolve");
 
-    assert_eq!(resolved.project.directory, ".");
+    let project_json =
+        serde_json::to_value(&resolved.project).expect("project settings should serialize");
+    assert!(
+        project_json.get("directory").is_none(),
+        "resolved project settings should not expose deprecated directory"
+    );
     assert_eq!(resolved.workflow.graph, "workflow.fabro");
     assert_eq!(resolved.run.execution.mode, RunMode::Normal);
 }

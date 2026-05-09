@@ -32,7 +32,10 @@ approval = "auto"
     .expect("settings should resolve");
 
     let json = serde_json::to_value(&settings).expect("workflow settings should serialize");
-    assert_eq!(json["project"]["directory"], "workspace");
+    assert!(
+        json["project"].get("directory").is_none(),
+        "resolved project settings should not expose deprecated directory"
+    );
     assert_eq!(json["workflow"]["graph"], "ship.fabro");
     assert_eq!(json["run"]["goal"]["type"], "inline");
     assert_eq!(json["run"]["goal"]["value"], "Ship it");

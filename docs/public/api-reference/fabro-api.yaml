@@ -7882,14 +7882,12 @@ components:
 
     ProjectNamespace:
       type: object
-      required: [name, description, directory, metadata]
+      required: [name, description, metadata]
       properties:
         name:
           type: ["string", "null"]
         description:
           type: ["string", "null"]
-        directory:
-          type: string
         metadata:
           $ref: "#/components/schemas/StringMap"
 
