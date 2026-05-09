@@ -8,6 +8,7 @@ import {
 import { CircleStackIcon, ClockIcon } from "@heroicons/react/20/solid";
 
 import {
+  DebugDnaStrip,
   DebugEventDetailsPanel,
   DebugEventRow,
   DetailsPanel,
@@ -17,6 +18,7 @@ import {
   debugCategoryLabel,
   formatElapsed,
 } from "../components/event-debug";
+import type { DebugCategory } from "../components/event-debug";
 import { StageSidebar } from "../components/stage-sidebar";
 import type { Stage } from "../components/stage-sidebar";
 import { EmptyState } from "../components/state";
@@ -1026,9 +1028,9 @@ function EventsToolbar({
   onTabChange: (tab: EventsTab) => void;
   selectedKinds: EventKind[];
   onKindsChange: (kinds: EventKind[]) => void;
-  selectedDebugCategories: string[];
-  onDebugCategoriesChange: (categories: string[]) => void;
-  availableDebugCategories: readonly string[];
+  selectedDebugCategories: DebugCategory[];
+  onDebugCategoriesChange: (categories: DebugCategory[]) => void;
+  availableDebugCategories: readonly DebugCategory[];
   search: string;
   onSearchChange: (value: string) => void;
   filteredCount: number;
@@ -1068,7 +1070,7 @@ function EventsToolbar({
               onChange={onKindsChange}
             />
           ) : (
-            <MultiSelectFilter<string>
+            <MultiSelectFilter<DebugCategory>
               selected={selectedDebugCategories}
               options={availableDebugCategories}
               labelOf={debugCategoryLabel}
@@ -1088,9 +1090,11 @@ function EventsToolbar({
           )}
         </div>
       )}
-      {isFiltering && totalCount > 0 && (
+      {totalCount > 0 && (tab === "debug" || isFiltering) && (
         <span className="text-xs tabular-nums text-fg-muted">
-          {filteredCount.toLocaleString()} of {totalCount.toLocaleString()} events
+          {isFiltering
+            ? `${filteredCount.toLocaleString()} of ${totalCount.toLocaleString()} events`
+            : `${totalCount.toLocaleString()} events`}
         </span>
       )}
       {model && (
@@ -1153,7 +1157,7 @@ export default function RunStages() {
   const [selectedKinds, setSelectedKinds] = useState<EventKind[]>([
     ...EVENT_KINDS,
   ]);
-  const [selectedDebugCategories, setSelectedDebugCategories] = useState<string[]>([]);
+  const [selectedDebugCategories, setSelectedDebugCategories] = useState<DebugCategory[]>([]);
   const [search, setSearch] = useState("");
   const filteredTurns = useMemo<{ turn: TurnType; index: number }[]>(() => {
     const kindSet = new Set(selectedKinds);
@@ -1198,8 +1202,8 @@ export default function RunStages() {
         : null,
     [debugEvents, openDebugSeq],
   );
-  const availableDebugCategories = useMemo<string[]>(() => {
-    const set = new Set<string>();
+  const availableDebugCategories = useMemo<DebugCategory[]>(() => {
+    const set = new Set<DebugCategory>();
     for (const event of debugEvents) {
       if (event.event) set.add(debugCategory(event.event));
     }
@@ -1259,7 +1263,7 @@ export default function RunStages() {
 
       <div className="flex min-h-0 min-w-0 flex-1 flex-col pt-3">
         <div className="shrink-0 border-b border-line">
-          <div className="pl-3 pr-4 sm:pr-6 lg:pr-8">
+          <div className="pl-3 pr-3">
             <EventsToolbar
               tab={effectiveTab}
               renderer={renderer}
@@ -1276,6 +1280,16 @@ export default function RunStages() {
               totalCount={effectiveTab === "primary" ? turns.length : debugEvents.length}
               model={stageModel}
             />
+            {effectiveTab === "debug" && (
+              <div className="pb-3">
+                <DebugDnaStrip
+                  events={debugEvents}
+                  selectedSeq={openDebugSeq}
+                  onSelect={setOpenDebugSeq}
+                  runStart={runStart}
+                />
+              </div>
+            )}
           </div>
         </div>
         <div className="min-h-0 flex-1 overflow-y-auto pt-2 pb-[calc(1.5rem+var(--fabro-interview-dock-clearance,0px))]">

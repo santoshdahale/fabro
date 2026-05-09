@@ -1,4 +1,5 @@
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { createPortal } from "react-dom";
 import {
   Listbox,
   ListboxButton,
@@ -17,27 +18,75 @@ import type { EventEnvelope } from "@qltysh/fabro-api-client";
 import { Tooltip } from "./ui";
 import { formatAbsoluteTs } from "../lib/format";
 
-const DEBUG_CATEGORY_TONE: Record<string, string> = {
-  agent: "bg-teal-500/15 text-teal-500",
-  command: "bg-mint/15 text-mint",
-  interview: "bg-coral/15 text-coral",
-  run: "bg-overlay-strong text-fg-2",
-  stage: "bg-amber/15 text-amber",
-  tool: "bg-mint/15 text-mint",
+export type DebugCategory =
+  | "agent"
+  | "command"
+  | "lifecycle"
+  | "human"
+  | "system";
+
+export const DEBUG_CATEGORIES: readonly DebugCategory[] = [
+  "agent",
+  "command",
+  "lifecycle",
+  "human",
+  "system",
+] as const;
+
+const PREFIX_TO_CATEGORY: Record<string, DebugCategory> = {
+  agent: "agent",
+  command: "command",
+  run: "lifecycle",
+  stage: "lifecycle",
+  parallel: "lifecycle",
+  subgraph: "lifecycle",
+  edge: "lifecycle",
+  loop: "lifecycle",
+  prompt: "lifecycle",
+  interview: "human",
 };
 
-export function debugCategory(eventName: string): string {
+const CATEGORY_LABEL: Record<DebugCategory, string> = {
+  agent: "Agent",
+  command: "Command",
+  lifecycle: "Lifecycle",
+  human: "Human",
+  system: "System",
+};
+
+const CATEGORY_TONE: Record<DebugCategory, string> = {
+  agent: "bg-teal-500/15 text-teal-500",
+  command: "bg-mint/15 text-mint",
+  lifecycle: "bg-amber/15 text-amber",
+  human: "bg-coral/15 text-coral",
+  system: "bg-overlay-strong text-fg-3",
+};
+
+const CATEGORY_COLOR: Record<DebugCategory, string> = {
+  agent: "var(--color-teal-500)",
+  command: "var(--color-mint)",
+  lifecycle: "var(--color-amber)",
+  human: "var(--color-coral)",
+  system: "var(--color-ice-300)",
+};
+
+export function debugCategory(eventName: string | null | undefined): DebugCategory {
+  if (!eventName) return "system";
   const dot = eventName.indexOf(".");
-  return dot < 0 ? eventName : eventName.slice(0, dot);
+  const prefix = dot < 0 ? eventName : eventName.slice(0, dot);
+  return PREFIX_TO_CATEGORY[prefix] ?? "system";
 }
 
-export function debugCategoryLabel(category: string): string {
-  if (!category) return "Other";
-  return category.charAt(0).toUpperCase() + category.slice(1);
+export function debugCategoryLabel(category: DebugCategory): string {
+  return CATEGORY_LABEL[category];
 }
 
-export function debugCategoryTone(category: string): string {
-  return DEBUG_CATEGORY_TONE[category] ?? "bg-overlay text-fg-muted";
+export function debugCategoryTone(category: DebugCategory): string {
+  return CATEGORY_TONE[category];
+}
+
+export function debugCategoryColor(category: DebugCategory): string {
+  return CATEGORY_COLOR[category];
 }
 
 export function formatElapsed(eventTs: string, runStart: string | undefined): string {
@@ -285,5 +334,156 @@ export function EventSearchInput({
         className="block w-full rounded-md bg-panel py-1.5 pl-8 pr-2.5 text-xs text-fg outline-1 -outline-offset-1 outline-line-strong placeholder:text-fg-muted focus:outline-2 focus:-outline-offset-1 focus:outline-teal-500 max-sm:text-base/5"
       />
     </div>
+  );
+}
+
+const STRIP_HEIGHT = 32;
+const BAR_NORMAL_HEIGHT = 22;
+const BAR_HOVER_HEIGHT = 26;
+const BAR_SELECTED_HEIGHT = 28;
+const BAR_WIDTH = 4;
+
+function friendlyEventName(eventName: string): string {
+  const parts = eventName.split(".");
+  if (parts.length <= 1) return eventName;
+  return parts.slice(1).join(".");
+}
+
+export function DebugDnaStrip({
+  events,
+  selectedSeq,
+  onSelect,
+  runStart,
+}: {
+  events: EventEnvelope[];
+  selectedSeq: number | null;
+  onSelect: (seq: number) => void;
+  runStart: string | undefined;
+}) {
+  const [hover, setHover] = useState<{
+    seq: number;
+    rect: DOMRect;
+  } | null>(null);
+
+  const range = useMemo(() => {
+    if (events.length === 0) return null;
+    let min = Number.POSITIVE_INFINITY;
+    let max = Number.NEGATIVE_INFINITY;
+    for (const event of events) {
+      const ms = Date.parse(event.ts);
+      if (Number.isNaN(ms)) continue;
+      if (ms < min) min = ms;
+      if (ms > max) max = ms;
+    }
+    if (!Number.isFinite(min) || !Number.isFinite(max)) return null;
+    const startCandidate = runStart ? Date.parse(runStart) : Number.NaN;
+    const start = Number.isFinite(startCandidate)
+      ? Math.min(startCandidate, min)
+      : min;
+    const duration = Math.max(1, max - start);
+    return { start, duration };
+  }, [events, runStart]);
+
+  if (!range) {
+    return (
+      <div
+        className="rounded-md bg-overlay"
+        style={{ height: STRIP_HEIGHT }}
+        aria-hidden="true"
+      />
+    );
+  }
+
+  const hoveredEvent =
+    hover != null ? events.find((e) => e.seq === hover.seq) ?? null : null;
+
+  return (
+    <div
+      className="relative rounded-md bg-overlay px-1.5"
+      style={{ height: STRIP_HEIGHT }}
+    >
+      <div className="relative h-full">
+        {events.map((event) => {
+          const ms = Date.parse(event.ts);
+          if (Number.isNaN(ms)) return null;
+          const pct = ((ms - range.start) / range.duration) * 100;
+          const category = debugCategory(event.event);
+          const color = debugCategoryColor(category);
+          const isSelected = event.seq === selectedSeq;
+          const isHovered = hover?.seq === event.seq;
+
+          let height = BAR_NORMAL_HEIGHT;
+          let opacity = 0.78;
+          let boxShadow = "none";
+          if (isSelected) {
+            height = BAR_SELECTED_HEIGHT;
+            opacity = 1;
+            boxShadow = "0 0 0 1px rgba(255,255,255,0.55)";
+          } else if (isHovered) {
+            height = BAR_HOVER_HEIGHT;
+            opacity = 1;
+          }
+          const top = (STRIP_HEIGHT - height) / 2;
+
+          return (
+            <div
+              key={event.seq}
+              role="button"
+              tabIndex={-1}
+              aria-label={`${debugCategoryLabel(category)} · ${event.event}`}
+              aria-pressed={isSelected}
+              onMouseEnter={(e) =>
+                setHover({
+                  seq: event.seq,
+                  rect: e.currentTarget.getBoundingClientRect(),
+                })
+              }
+              onMouseLeave={() =>
+                setHover((cur) => (cur?.seq === event.seq ? null : cur))
+              }
+              onClick={() => onSelect(event.seq)}
+              className="absolute -translate-x-1/2 cursor-pointer rounded-[1.5px] transition-all duration-100 ease-out"
+              style={{
+                left: `${pct}%`,
+                width: BAR_WIDTH,
+                height,
+                top,
+                opacity,
+                background: color,
+                boxShadow,
+              }}
+            />
+          );
+        })}
+      </div>
+      {hoveredEvent != null && hover != null && (
+        <DnaPopover event={hoveredEvent} anchorRect={hover.rect} runStart={runStart} />
+      )}
+    </div>
+  );
+}
+
+function DnaPopover({
+  event,
+  anchorRect,
+  runStart,
+}: {
+  event: EventEnvelope;
+  anchorRect: DOMRect;
+  runStart: string | undefined;
+}) {
+  if (typeof document === "undefined") return null;
+  const category = debugCategory(event.event);
+  const left = anchorRect.left + anchorRect.width / 2;
+  const top = anchorRect.top;
+  return createPortal(
+    <div
+      role="tooltip"
+      style={{ left, top }}
+      className="pointer-events-none fixed z-50 -translate-x-1/2 -translate-y-[calc(100%+8px)] whitespace-nowrap rounded-md bg-panel-alt px-2.5 py-1 text-xs text-fg shadow-lg outline-1 -outline-offset-1 outline-line-strong"
+    >
+      {`${debugCategoryLabel(category)} · ${friendlyEventName(event.event)} · ${formatElapsed(event.ts, runStart)}`}
+    </div>,
+    document.body,
   );
 }
