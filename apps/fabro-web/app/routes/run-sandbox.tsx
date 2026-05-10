@@ -7,14 +7,23 @@ import { formatAbsoluteTs } from "../lib/format";
 import { useRunSandboxDetails } from "../lib/queries";
 import type { SandboxDetails, SandboxResources, SandboxState } from "@qltysh/fabro-api-client";
 import FilesystemPanel from "./run-sandbox/filesystem-panel";
+import VncPanel from "./run-sandbox/vnc-panel";
 
 export const handle = { wide: true, fullHeight: true };
 
-export type SandboxMode = "terminal" | "filesystem";
+export type SandboxMode = "terminal" | "filesystem" | "vnc";
 
 export function normalizeSandboxMode(value: string | null): SandboxMode {
   if (value === "filesystem") return "filesystem";
+  if (value === "vnc") return "vnc";
   return "terminal";
+}
+
+// VNC is Daytona-only. Hide the tab for other providers so the user never
+// clicks into a guaranteed unsupported state. We only know the provider
+// after sandbox details have loaded; until then, treat VNC as available.
+function vncTabAvailable(provider: string | null | undefined): boolean {
+  return provider === "daytona" || provider == null;
 }
 
 const EMPTY_VALUE = "—";
@@ -203,11 +212,16 @@ function DetailsColumn({ details }: { details: SandboxDetails | null }) {
 
 export default function RunSandbox({ params }: { params: { id: string } }) {
   const sandboxQuery = useRunSandboxDetails(params.id);
+  const provider = sandboxQuery.data?.provider ?? null;
   const [searchParams, setSearchParams] = useSearchParams();
-  const mode = useMemo(
+  const requestedMode = useMemo(
     () => normalizeSandboxMode(searchParams.get("mode")),
     [searchParams],
   );
+  // If the URL points at VNC but the loaded provider doesn't support it,
+  // fall back to terminal rather than rendering a guaranteed-empty pane.
+  const mode: SandboxMode =
+    requestedMode === "vnc" && !vncTabAvailable(provider) ? "terminal" : requestedMode;
 
   const setMode = (next: SandboxMode) => {
     setSearchParams(
@@ -251,11 +265,17 @@ export default function RunSandbox({ params }: { params: { id: string } }) {
         <div
           className={`flex min-h-0 flex-1 flex-col pt-6 pl-6 ${TERMINAL_DOCK_CLEARANCE_CLASS}`}
         >
-          <ModeToggle mode={mode} onChange={setMode} />
+          <ModeToggle
+            mode={mode}
+            onChange={setMode}
+            vncAvailable={vncTabAvailable(provider)}
+          />
           {mode === "terminal" ? (
             <TerminalView runId={params.id} />
-          ) : (
+          ) : mode === "filesystem" ? (
             <FilesystemPanel runId={params.id} />
+          ) : (
+            <VncPanel runId={params.id} provider={provider} />
           )}
         </div>
       </div>
@@ -266,9 +286,10 @@ export default function RunSandbox({ params }: { params: { id: string } }) {
 interface ModeToggleProps {
   mode: SandboxMode;
   onChange: (mode: SandboxMode) => void;
+  vncAvailable: boolean;
 }
 
-function ModeToggle({ mode, onChange }: ModeToggleProps) {
+function ModeToggle({ mode, onChange, vncAvailable }: ModeToggleProps) {
   return (
     <div
       role="tablist"
@@ -285,6 +306,13 @@ function ModeToggle({ mode, onChange }: ModeToggleProps) {
         active={mode === "filesystem"}
         onClick={() => onChange("filesystem")}
       />
+      {vncAvailable && (
+        <ModeToggleButton
+          label="VNC"
+          active={mode === "vnc"}
+          onClick={() => onChange("vnc")}
+        />
+      )}
     </div>
   );
 }

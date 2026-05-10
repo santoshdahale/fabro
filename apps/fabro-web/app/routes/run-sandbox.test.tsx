@@ -16,9 +16,8 @@ mock.module("../lib/queries", () => ({
     isValidating: false,
     mutate:       mock(() => Promise.resolve(currentDetails)),
   }),
-  // FilesystemPanel imports these. They never run in this file's tests
-  // because mode=filesystem renders the panel without selecting a file, but
-  // the export shape needs to exist for the module evaluation to succeed.
+  // FilesystemPanel and VncPanel import these. They never run in this
+  // file's tests, but the export shape needs to exist for module evaluation.
   useSandboxFiles: () => ({
     data:         undefined,
     error:        undefined,
@@ -29,6 +28,13 @@ mock.module("../lib/queries", () => ({
     data:   undefined,
     error:  undefined,
     mutate: mock(() => Promise.resolve()),
+  }),
+  useSandboxVncPreview: () => ({
+    data:         undefined,
+    error:        undefined,
+    isLoading:    false,
+    isValidating: false,
+    mutate:       mock(() => Promise.resolve()),
   }),
 }));
 
@@ -195,9 +201,53 @@ describe("RunSandbox route", () => {
       (node) =>
         node.type === "button" && node.props.role === "tab",
     );
+    // Docker provider hides the VNC tab.
     expect(tabs).toHaveLength(2);
     const labels = tabs.map((tab) => tab.children.find((c) => typeof c === "string"));
     expect(labels).toEqual(["Terminal", "Filesystem"]);
+    const selected = tabs.find((tab) => tab.props["aria-selected"] === true);
+    expect(selected?.children.find((c) => typeof c === "string")).toBe("Terminal");
+  });
+
+  test("Daytona provider exposes a VNC tab", () => {
+    currentDetails = {
+      provider:     "daytona",
+      name:         "fabro-run-abc",
+      id:           null,
+      state:        "running",
+      native_state: null,
+      region:       null,
+      image:        null,
+      resources:    { cpu_cores: null, memory_bytes: null, disk_bytes: null },
+      labels:       {},
+      timestamps:   { created_at: null, last_activity_at: null },
+    };
+    const renderer = renderRoute();
+    const tabs = renderer.root.findAll(
+      (node) => node.type === "button" && node.props.role === "tab",
+    );
+    expect(tabs).toHaveLength(3);
+    const labels = tabs.map((tab) => tab.children.find((c) => typeof c === "string"));
+    expect(labels).toEqual(["Terminal", "Filesystem", "VNC"]);
+  });
+
+  test("Docker provider falls back to terminal when ?mode=vnc is requested", () => {
+    currentDetails = {
+      provider:     "docker",
+      name:         "fabro-run-abc",
+      id:           null,
+      state:        "running",
+      native_state: null,
+      region:       null,
+      image:        null,
+      resources:    { cpu_cores: null, memory_bytes: null, disk_bytes: null },
+      labels:       {},
+      timestamps:   { created_at: null, last_activity_at: null },
+    };
+    const renderer = renderRoute("/runs/run_1/sandbox?mode=vnc");
+    const tabs = renderer.root.findAll(
+      (node) => node.type === "button" && node.props.role === "tab",
+    );
     const selected = tabs.find((tab) => tab.props["aria-selected"] === true);
     expect(selected?.children.find((c) => typeof c === "string")).toBe("Terminal");
   });
@@ -238,7 +288,8 @@ describe("normalizeSandboxMode", () => {
     expect(normalizeSandboxMode("unknown")).toBe("terminal");
   });
 
-  test("accepts filesystem", () => {
+  test("accepts filesystem and vnc", () => {
     expect(normalizeSandboxMode("filesystem")).toBe("filesystem");
+    expect(normalizeSandboxMode("vnc")).toBe("vnc");
   });
 });

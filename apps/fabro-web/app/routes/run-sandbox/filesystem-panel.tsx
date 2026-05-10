@@ -320,8 +320,12 @@ function DirectoryPane({
   const directoriesRef = useRef(treeInputs.directories);
   directoriesRef.current = treeInputs.directories;
 
+  // useFileTree only consumes `options.paths` at model construction time, so
+  // start with the current snapshot and keep the model in sync via
+  // `resetPaths` whenever the listing changes.
+  const initialPathsRef = useRef(treeInputs.paths);
   const { model } = useFileTree({
-    paths:                   treeInputs.paths,
+    paths:                   initialPathsRef.current,
     flattenEmptyDirectories: false,
     initialExpansion:        "closed",
     icons:                   "standard",
@@ -343,12 +347,7 @@ function DirectoryPane({
     },
   });
 
-  const isFirstSyncRef = useRef(true);
   useEffect(() => {
-    if (isFirstSyncRef.current) {
-      isFirstSyncRef.current = false;
-      return;
-    }
     model.resetPaths(treeInputs.paths);
   }, [model, treeInputs.paths]);
 

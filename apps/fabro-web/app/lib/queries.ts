@@ -19,6 +19,7 @@ import type {
   SandboxFileListResponse,
   ServerSettings,
   SystemInfoResponse,
+  VncPreviewResponse,
   WorkflowDetailResponse,
   WorkflowSettings,
 } from "@qltysh/fabro-api-client";
@@ -208,6 +209,14 @@ export function useSandboxFiles(
     id && path ? queryKeys.runs.sandboxFiles(id, path, depth) : null,
     () => apiData(() => humanInTheLoopApi.listSandboxFiles(id!, path!, depth)),
     { keepPreviousData: true },
+  );
+}
+
+export function useSandboxVncPreview(id: string | undefined, enabled: boolean) {
+  return useSWR<VncPreviewResponse>(
+    id && enabled ? queryKeys.runs.sandboxVnc(id) : null,
+    () => apiData(() => humanInTheLoopApi.createSandboxVncPreview(id!)),
+    { revalidateOnFocus: false, revalidateOnReconnect: false, shouldRetryOnError: false },
   );
 }
 
