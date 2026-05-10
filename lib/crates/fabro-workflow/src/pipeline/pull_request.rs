@@ -329,7 +329,11 @@ async fn load_pull_request_diff(run_store: &RunStoreHandle) -> String {
             tracing::warn!(error = %err, "Failed to load final patch from store for PR");
         })
         .ok()
-        .and_then(|state| state.final_patch)
+        .and_then(|state| {
+            state
+                .conclusion
+                .and_then(|conclusion| conclusion.diff.patch)
+        })
         .unwrap_or_default()
 }
 
@@ -385,8 +389,8 @@ async fn build_pr_content_with_client(
     let run_state = run_state.or(loaded_run_state.as_ref());
     let conclusion = conclusion.or_else(|| run_state.and_then(|state| state.conclusion.as_ref()));
     let plan_text = run_state.and_then(read_plan_text);
-    let run_spec = run_state.and_then(|state| state.spec.clone());
-    let dot_source = run_state.and_then(|state| state.graph_source.clone());
+    let run_spec = run_state.map(|state| state.spec.clone());
+    let dot_source = run_state.and_then(|state| state.spec.graph_source.clone());
 
     let caps = truncation_caps(model);
     let truncated_diff = truncate_chars(diff, caps.diff);
@@ -650,7 +654,10 @@ mod tests {
     use fabro_llm::provider::{ProviderAdapter, StreamEventStream};
     use fabro_llm::types::{FinishReason, Message, Request, Response, StreamEvent, TokenCounts};
     use fabro_store::Database;
-    use fabro_types::{BilledTokenCounts, RunSpec, SuccessReason, first_event_seq, fixtures};
+    use fabro_types::{
+        BilledTokenCounts, RunProjection, RunSpec, SuccessReason, WorkflowSettings,
+        first_event_seq, fixtures,
+    };
     use fabro_vault::{SecretType, Vault};
     use futures::stream;
     use httpmock::Method::POST;
@@ -758,6 +765,27 @@ mod tests {
         Arc::new(EnvCredentialSource::new())
     }
 
+    fn test_projection() -> RunProjection {
+        RunProjection::new(
+            "Test run".to_string(),
+            RunSpec {
+                run_id:           fixtures::RUN_1,
+                settings:         WorkflowSettings::default(),
+                graph:            Graph::new("test"),
+                graph_source:     None,
+                workflow_slug:    None,
+                source_directory: None,
+                labels:           HashMap::new(),
+                provenance:       None,
+                manifest_blob:    None,
+                definition_blob:  None,
+                git:              None,
+                fork_source_ref:  None,
+            },
+            Utc::now(),
+        )
+    }
+
     fn openai_api_key_credential(key: &str) -> AuthCredential {
         AuthCredential {
             provider: fabro_model::Provider::OpenAi,
@@ -836,6 +864,7 @@ mod tests {
                 ..BilledTokenCounts::default()
             }),
             total_retries:        0,
+            diff:                 fabro_types::RunDiff::default(),
         }
     }
 
@@ -884,7 +913,7 @@ mod tests {
 
     #[test]
     fn read_plan_text_found() {
-        let mut state = RunProjection::default();
+        let mut state = test_projection();
         state.stage_entry("plan", 1, first_event_seq(1)).response =
             Some("This is the plan".to_string());
 
@@ -894,7 +923,7 @@ mod tests {
 
     #[test]
     fn read_plan_text_prefix_match() {
-        let mut state = RunProjection::default();
+        let mut state = test_projection();
         state
             .stage_entry("planning", 1, first_event_seq(1))
             .response = Some("Planning content".to_string());
@@ -905,7 +934,7 @@ mod tests {
 
     #[test]
     fn read_plan_text_prefers_alphabetically_first_plan_node() {
-        let mut state = RunProjection::default();
+        let mut state = test_projection();
         state
             .stage_entry("planning", 1, first_event_seq(1))
             .response = Some("Planning content".to_string());
@@ -918,7 +947,7 @@ mod tests {
 
     #[test]
     fn read_plan_text_not_found() {
-        let mut state = RunProjection::default();
+        let mut state = test_projection();
         state.stage_entry("implement", 1, first_event_seq(1));
 
         let result = read_plan_text(&state);
@@ -927,7 +956,7 @@ mod tests {
 
     #[test]
     fn read_plan_text_empty_state() {
-        let state = RunProjection::default();
+        let state = test_projection();
         let result = read_plan_text(&state);
         assert_eq!(result, None);
     }
@@ -1026,6 +1055,7 @@ mod tests {
             run_id:           fixtures::RUN_1,
             settings:         fabro_types::WorkflowSettings::default(),
             graph:            Graph::new("test"),
+            graph_source:     None,
             workflow_slug:    Some("test".to_string()),
             source_directory: Some("/tmp/project".to_string()),
             git:              Some(fabro_types::GitContext {
@@ -1091,6 +1121,7 @@ mod tests {
             run_id:           fixtures::RUN_1,
             settings:         fabro_types::WorkflowSettings::default(),
             graph:            Graph::new("test"),
+            graph_source:     None,
             workflow_slug:    Some("test".to_string()),
             source_directory: Some("/tmp/project".to_string()),
             git:              Some(fabro_types::GitContext {
@@ -1445,6 +1476,7 @@ mod tests {
             run_id:           fixtures::RUN_1,
             settings:         fabro_types::WorkflowSettings::default(),
             graph:            Graph::new("test"),
+            graph_source:     None,
             workflow_slug:    None,
             source_directory: Some(tmp.path().display().to_string()),
             git:              None,
@@ -1474,6 +1506,12 @@ mod tests {
         })
         .await
         .unwrap();
+        append_event(&run_store, &fixtures::RUN_1, &Event::RunStarting)
+            .await
+            .unwrap();
+        append_event(&run_store, &fixtures::RUN_1, &Event::RunRunning)
+            .await
+            .unwrap();
         append_event(&run_store, &fixtures::RUN_1, &Event::WorkflowRunCompleted {
             duration_ms:          1,
             artifact_count:       0,
@@ -1555,6 +1593,7 @@ mod tests {
             run_id:           fixtures::RUN_1,
             settings:         fabro_types::WorkflowSettings::default(),
             graph:            Graph::new("test"),
+            graph_source:     None,
             workflow_slug:    Some("test".to_string()),
             source_directory: Some("/tmp/project".to_string()),
             git:              None,
@@ -1723,6 +1762,7 @@ mod tests {
             run_id:           fixtures::RUN_1,
             settings:         fabro_types::WorkflowSettings::default(),
             graph:            Graph::new("test"),
+            graph_source:     None,
             workflow_slug:    None,
             source_directory: None,
             git:              None,
@@ -1752,6 +1792,12 @@ mod tests {
         })
         .await
         .unwrap();
+        append_event(&run_store, &fixtures::RUN_1, &Event::RunStarting)
+            .await
+            .unwrap();
+        append_event(&run_store, &fixtures::RUN_1, &Event::RunRunning)
+            .await
+            .unwrap();
         append_event(&run_store, &fixtures::RUN_1, &Event::WorkflowRunCompleted {
             duration_ms:          1,
             artifact_count:       0,

@@ -181,10 +181,7 @@ pub(crate) async fn attach_run_with_client(
     printer: Printer,
 ) -> Result<ExitCode> {
     let state = client.get_run_state(run_id).await?;
-    let auto_approve = state
-        .spec
-        .as_ref()
-        .is_some_and(|record| record.settings.run.execution.approval == ApprovalMode::Auto);
+    let auto_approve = state.spec.settings.run.execution.approval == ApprovalMode::Auto;
     let events = client.list_run_events(run_id, None, None).await?;
     let replay_events = events.clone();
     let next_seq = events.last().map_or(1, |event| event.seq.saturating_add(1));
@@ -682,11 +679,7 @@ fn json_pending_interview_requires_manual_input(json_output: bool, auto_approve:
 }
 
 fn state_is_terminal(state: &server_client::RunProjection) -> bool {
-    state.conclusion.is_some()
-        || state
-            .status
-            .as_ref()
-            .is_some_and(|status| status.is_terminal())
+    state.conclusion.is_some() || state.status.is_terminal()
 }
 
 fn emit_progress_line(
@@ -786,9 +779,9 @@ fn state_exit_code(state: &server_client::RunProjection) -> Option<ExitCode> {
     }
 
     match state.status {
-        Some(RunStatus::Succeeded { .. }) => Some(ExitCode::from(0)),
-        Some(status) if status.is_terminal() => Some(ExitCode::from(1)),
-        Some(_) | None => None,
+        RunStatus::Succeeded { .. } => Some(ExitCode::from(0)),
+        status if status.is_terminal() => Some(ExitCode::from(1)),
+        _ => None,
     }
 }
 
@@ -836,22 +829,37 @@ mod tests {
         Box::leak(Box::new(Styles::new(false)))
     }
 
-    fn terminal_run_state_response() -> serde_json::Value {
+    fn terminal_run_state_response(run_id: RunId) -> serde_json::Value {
+        let spec = fabro_types::RunSpec {
+            run_id,
+            settings: fabro_types::WorkflowSettings::default(),
+            graph: fabro_types::Graph::new("test"),
+            graph_source: None,
+            workflow_slug: None,
+            source_directory: None,
+            labels: std::collections::HashMap::default(),
+            provenance: None,
+            manifest_blob: None,
+            definition_blob: None,
+            git: None,
+            fork_source_ref: None,
+        };
         serde_json::json!({
-            "spec": null,
-            "graph_source": null,
+            "spec": serde_json::to_value(spec).unwrap(),
             "start": null,
             "status": {
                 "kind": "failed",
                 "reason": "cancelled"
             },
             "status_updated_at": "2026-04-05T12:00:02Z",
-            "checkpoint": null,
+            "last_event_at": "2026-04-05T12:00:02Z",
+            "pending_control": null,
             "checkpoints": [],
             "conclusion": null,
             "sandbox": null,
-            "final_patch": null,
             "pull_request": null,
+            "superseded_by": null,
+            "pending_interviews": {},
             "stages": {}
         })
     }
@@ -1039,7 +1047,7 @@ mod tests {
                 .path(format!("/api/v1/runs/{run_id}/state"));
             then.status(200)
                 .header("Content-Type", "application/json")
-                .body(terminal_run_state_response().to_string());
+                .body(terminal_run_state_response(run_id).to_string());
         });
         let client = server_client::Client::new_no_proxy(&server.base_url()).unwrap();
 

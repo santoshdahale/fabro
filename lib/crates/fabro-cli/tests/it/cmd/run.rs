@@ -12,7 +12,7 @@ use httpmock::MockServer;
 use serde_json::Value;
 
 use super::support::{output_stderr, wait_for_event_names};
-use crate::support::{run_output_filters, unique_run_id};
+use crate::support::{run_output_filters, run_projection_json, unique_run_id};
 
 fn run_status_response(run_id: &str, status: &str) -> serde_json::Value {
     let status = match status {
@@ -28,12 +28,16 @@ fn run_status_response(run_id: &str, status: &str) -> serde_json::Value {
     })
 }
 
-fn remote_run_state_response() -> serde_json::Value {
-    serde_json::json!({
-        "spec": null,
-        "graph_source": null,
-        "start": null,
-        "status": null,
+fn remote_run_state_response(run_id: &str) -> serde_json::Value {
+    let mut state = run_projection_json(
+        run_id,
+        &serde_json::json!({
+            "kind": "succeeded",
+            "reason": "completed"
+        }),
+    );
+    state["checkpoints"] = serde_json::json!([{
+        "seq": 1,
         "checkpoint": {
             "timestamp": "2026-04-05T12:00:01Z",
             "current_node": "exit",
@@ -48,21 +52,18 @@ fn remote_run_state_response() -> serde_json::Value {
             "loop_failure_signatures": {},
             "restart_failure_signatures": {},
             "node_visits": {}
-        },
-        "checkpoints": [],
-        "conclusion": {
+        }
+    }]);
+    state["conclusion"] = serde_json::json!({
             "timestamp": "2026-04-05T12:00:01Z",
             "status": "succeeded",
             "duration_ms": 12,
             "stages": [],
             "billing": null,
             "total_retries": 0,
-        },
-        "sandbox": null,
-        "final_patch": null,
-        "pull_request": null,
-        "stages": {}
-    })
+            "diff": {}
+    });
+    state
 }
 
 fn run_completed_event(run_id: &str) -> serde_json::Value {
@@ -553,7 +554,7 @@ fn remote_foreground_run_consumes_paginated_events_and_prints_server_backed_summ
             .path(format!("/api/v1/runs/{run_id}/state"));
         then.status(200)
             .header("Content-Type", "application/json")
-            .body(remote_run_state_response().to_string());
+            .body(remote_run_state_response(run_id.as_str()).to_string());
     });
     server.mock(|when, then| {
         when.method("GET")

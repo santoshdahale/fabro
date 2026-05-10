@@ -77,11 +77,12 @@ async fn start_run(
     };
 
     if resume {
-        if run_state.checkpoint.is_none() {
+        if run_state.current_checkpoint().is_none() {
             return ApiError::new(StatusCode::CONFLICT, "no checkpoint to resume from")
                 .into_response();
         }
-    } else if let Some(status) = run_state.status {
+    } else {
+        let status = run_state.status;
         if !matches!(
             status,
             RunStatus::Submitted | RunStatus::Queued | RunStatus::Starting
@@ -94,19 +95,12 @@ async fn start_run(
         }
     }
 
-    if run_state.spec.is_none() {
-        return ApiError::new(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            "run spec missing from store",
-        )
-        .into_response();
-    }
     let title = run_state.title().into_owned();
     let run_dir = Storage::new(state.server_storage_dir())
         .run_scratch(&id)
         .root()
         .to_path_buf();
-    let dot_source = run_state.graph_source.unwrap_or_default();
+    let dot_source = run_state.spec.graph_source.clone().unwrap_or_default();
     if let Err(err) =
         workflow_event::append_event(&run_store, &id, &workflow_event::Event::RunQueued).await
     {
@@ -782,13 +776,7 @@ async fn archive_status_response(state: &AppState, id: RunId) -> Response {
                 .into_response();
         }
     };
-    let Some(status) = projection.status else {
-        return ApiError::new(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            "run has no status after archive/unarchive",
-        )
-        .into_response();
-    };
+    let status = projection.status;
     let title = projection.title().into_owned();
     let web_url = state.run_web_url(&id);
     (

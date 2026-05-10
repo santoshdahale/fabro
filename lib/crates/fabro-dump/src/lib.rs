@@ -62,7 +62,7 @@ impl RunDump {
 
         push_json_entry(&mut entries, "run.json", &SerializableProjection(state))?;
 
-        if let Some(graph_source) = state.graph_source.as_ref() {
+        if let Some(graph_source) = state.spec.graph_source.as_ref() {
             entries.push(RunDumpEntry::text("graph.fabro", graph_source.clone()));
         }
 
@@ -158,11 +158,11 @@ impl RunDump {
         dump.entries
             .push(RunDumpEntry::bytes("events.jsonl", events_jsonl));
 
-        for (seq, checkpoint) in &state.checkpoints {
+        for record in &state.checkpoints {
             push_json_entry_path(
                 &mut dump.entries,
-                &PathBuf::from("checkpoints").join(format!("{seq:04}.json")),
-                checkpoint,
+                &PathBuf::from("checkpoints").join(format!("{:04}.json", record.seq)),
+                &record.checkpoint,
             )?;
         }
 
@@ -472,8 +472,9 @@ mod tests {
     use fabro_types::graph::Graph;
     use fabro_types::run::RunSpec;
     use fabro_types::{
-        Checkpoint, Conclusion, RunStatus, SandboxRecord, StageCompletion, StageOutcome,
-        StartRecord, SuccessReason, WorkflowSettings, first_event_seq, fixtures,
+        Checkpoint, CheckpointRecord, Conclusion, RunDiff, RunStatus, SandboxRecord,
+        StageCompletion, StageOutcome, StartRecord, SuccessReason, WorkflowSettings,
+        first_event_seq, fixtures,
     };
     use futures::executor;
 
@@ -484,6 +485,7 @@ mod tests {
             run_id:           fixtures::RUN_1,
             settings:         WorkflowSettings::default(),
             graph:            Graph::new("ship"),
+            graph_source:     Some("digraph Ship {}".to_string()),
             workflow_slug:    Some("demo".to_string()),
             source_directory: Some("/tmp/project".to_string()),
             git:              Some(fabro_types::GitContext {
@@ -523,11 +525,8 @@ mod tests {
     #[test]
     fn from_projection_uses_stages_layout_and_collapses_top_level_metadata_files() {
         let stage_id = StageId::new("build", 2);
-        let mut projection = RunProjection::default();
-        projection.spec = Some(sample_run_spec());
-        projection.graph_source = Some("digraph Ship {}".to_string());
+        let mut projection = RunProjection::new("Demo".to_string(), sample_run_spec(), Utc::now());
         projection.start = Some(StartRecord {
-            run_id:     fixtures::RUN_1,
             start_time: Utc
                 .with_ymd_and_hms(2026, 4, 20, 12, 0, 0)
                 .single()
@@ -535,10 +534,14 @@ mod tests {
             run_branch: Some("fabro/run/demo".to_string()),
             base_sha:   Some("deadbeef".to_string()),
         });
-        projection.status = Some(RunStatus::Succeeded {
+        projection.status = RunStatus::Succeeded {
             reason: SuccessReason::Completed,
+        };
+        projection.checkpoints.push(CheckpointRecord {
+            seq:        7,
+            checkpoint: sample_checkpoint(),
+            diff:       RunDiff::default(),
         });
-        projection.checkpoint = Some(sample_checkpoint());
         projection.conclusion = Some(Conclusion {
             timestamp:            Utc
                 .with_ymd_and_hms(2026, 4, 20, 12, 5, 0)
@@ -551,6 +554,7 @@ mod tests {
             stages:               Vec::new(),
             billing:              None,
             total_retries:        0,
+            diff:                 RunDiff::default(),
         });
         projection.sandbox = Some(SandboxRecord {
             provider:          "local".to_string(),
@@ -615,10 +619,10 @@ mod tests {
         let round_tripped: RunProjection = serde_json::from_value(value.clone()).unwrap();
         let node = round_tripped.stage(&stage_id).expect("node should exist");
 
-        assert!(round_tripped.spec.is_some());
+        assert_eq!(round_tripped.spec.run_id, fixtures::RUN_1);
         assert!(round_tripped.start.is_some());
-        assert!(round_tripped.status.is_some());
-        assert!(round_tripped.checkpoint.is_some());
+        assert!(round_tripped.status.is_terminal());
+        assert!(round_tripped.current_checkpoint().is_some());
         assert!(round_tripped.conclusion.is_some());
         assert!(round_tripped.sandbox.is_some());
         assert_eq!(node.prompt, None);
@@ -633,7 +637,7 @@ mod tests {
 
     #[test]
     fn from_projection_prefixes_stage_paths_but_not_artifact_paths() {
-        let mut projection = RunProjection::default();
+        let mut projection = RunProjection::new("Demo".to_string(), sample_run_spec(), Utc::now());
         projection
             .stage_entry("zebra", 1, first_event_seq(1))
             .prompt = Some("first".to_string());
@@ -661,7 +665,7 @@ mod tests {
 
     #[test]
     fn add_artifact_bytes_places_orphans_under_sentinel() {
-        let mut projection = RunProjection::default();
+        let mut projection = RunProjection::new("Demo".to_string(), sample_run_spec(), Utc::now());
         projection
             .stage_entry("known", 1, first_event_seq(1))
             .prompt = Some("present".to_string());

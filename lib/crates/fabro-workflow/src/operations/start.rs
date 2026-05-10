@@ -119,21 +119,20 @@ pub async fn start(run_dir: &Path, services: StartServices) -> Result<Started, E
         .state()
         .await
         .map_err(|err| Error::engine(err.to_string()))?;
-    if state.checkpoint.is_some() {
+    if state.current_checkpoint().is_some() {
         return Err(Error::Precondition(
             "checkpoint already exists in the run store — did you mean to resume?".to_string(),
         ));
     }
 
-    if let Some(status) = state.status {
-        if !matches!(
-            status,
-            RunStatus::Submitted | RunStatus::Queued | RunStatus::Starting
-        ) {
-            return Err(Error::Precondition(format!(
-                "cannot start run: status is {status}, expected submitted"
-            )));
-        }
+    let status = state.status;
+    if !matches!(
+        status,
+        RunStatus::Submitted | RunStatus::Queued | RunStatus::Starting
+    ) {
+        return Err(Error::Precondition(format!(
+            "cannot start run: status is {status}, expected submitted"
+        )));
     }
 
     Box::pin(execute_persisted_run(run_dir, None, services)).await
@@ -295,7 +294,7 @@ impl RunSession {
                 meta_branch: Some(metadata_branch_name(&record.run_id.to_string())),
             })
         });
-        let definition_blob = state.spec.as_ref().and_then(|run| run.definition_blob);
+        let definition_blob = state.spec.definition_blob;
         let accepted_definition = match definition_blob {
             Some(blob_id) => {
                 Some(load_accepted_run_definition(&services.run_store, blob_id).await?)
@@ -1426,6 +1425,7 @@ mod tests {
             stages:               vec![],
             billing:              None,
             total_retries:        0,
+            diff:                 fabro_types::RunDiff::default(),
         };
         let run_store = store.open_run(&fixtures::RUN_1).await.unwrap();
         crate::event::append_event(&run_store, &fixtures::RUN_1, &Event::CheckpointCompleted {

@@ -33,6 +33,7 @@ export interface RunSpec {
     'run_id': string;
     'settings': WorkflowSettings;
     'graph': { [key: string]: any; };
+    'graph_source'?: string | null;
     'workflow_slug'?: string | null;
     'source_directory'?: string | null;
     'labels'?: { [key: string]: string; };

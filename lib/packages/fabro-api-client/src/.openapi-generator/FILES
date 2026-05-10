@@ -46,6 +46,7 @@ models/board-column-definition.ts
 models/board-column.ts
 models/check-run-status.ts
 models/check-run.ts
+models/checkpoint-record.ts
 models/close-run-pull-request-response.ts
 models/code-location.ts
 models/command-log-response.ts
@@ -56,6 +57,7 @@ models/completion-response.ts
 models/completion-tool-choice.ts
 models/completion-tool-definition.ts
 models/completion-usage.ts
+models/conclusion.ts
 models/create-completion-request.ts
 models/create-run-pull-request-request.ts
 models/create-secret-request.ts
@@ -239,6 +241,7 @@ models/run-commit-person.ts
 models/run-commit.ts
 models/run-commits-meta.ts
 models/run-control-action.ts
+models/run-diff.ts
 models/run-error.ts
 models/run-event.ts
 models/run-execution-settings.ts
@@ -256,7 +259,6 @@ models/run-mode.ts
 models/run-model-settings.ts
 models/run-namespace.ts
 models/run-prepare-settings.ts
-models/run-projection-checkpoints-inner-inner.ts
 models/run-projection.ts
 models/run-provenance.ts
 models/run-pull-request.ts
@@ -321,6 +323,8 @@ models/stage-handler.ts
 models/stage-outcome.ts
 models/stage-projection.ts
 models/stage-state.ts
+models/stage-summary.ts
+models/start-record.ts
 models/start-run-request.ts
 models/steer-run-request.ts
 models/submit-answer-multi-selected-request.ts

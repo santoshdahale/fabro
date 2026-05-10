@@ -160,16 +160,21 @@ impl RunDatabase {
         let events = list_events_from(&self.inner.db, &self.inner.run_id, next_seq).await?;
         let mut cache = self.inner.projection_cache.lock().await;
         for event in &events {
-            cache.state.apply_event(event)?;
+            apply_cached_projection_event(&mut cache.state, event)?;
             cache.last_seq = event.seq;
         }
-        Ok(cache.state.clone())
+        cache.state.clone().ok_or_else(|| {
+            Error::InvalidEvent(format!(
+                "run {} has no run.created event",
+                self.inner.run_id
+            ))
+        })
     }
 
     async fn cache_event(&self, event: &EventEnvelope) -> Result<()> {
         {
             let mut projection_cache = self.inner.projection_cache.lock().await;
-            projection_cache.state.apply_event(event)?;
+            apply_cached_projection_event(&mut projection_cache.state, event)?;
             projection_cache.last_seq = event.seq;
         }
         let mut recent_events = self.inner.recent_events.lock().await;
@@ -226,10 +231,29 @@ impl RunDatabase {
             .apply_event(&self.inner.run_id, &event)
             .await
         {
-            self.inner
-                .shared_projection_cache
-                .remove(&self.inner.run_id)
-                .await;
+            match Self::build_cached_projection(&self.inner.db, &self.inner.run_id).await {
+                Ok(Some(entry)) => {
+                    self.inner.shared_projection_cache.replace(entry).await;
+                    return Ok(seq);
+                }
+                Ok(None) => {
+                    self.inner
+                        .shared_projection_cache
+                        .remove(&self.inner.run_id)
+                        .await;
+                }
+                Err(rebuild_err) => {
+                    self.inner
+                        .shared_projection_cache
+                        .remove(&self.inner.run_id)
+                        .await;
+                    warn!(
+                        run_id = %self.inner.run_id,
+                        error = %rebuild_err,
+                        "Failed to rebuild run projection cache after append"
+                    );
+                }
+            }
             warn!(
                 run_id = %self.inner.run_id,
                 error = %err,
@@ -356,6 +380,18 @@ impl RunDatabase {
     pub async fn state(&self) -> Result<RunProjection> {
         self.projected_state().await
     }
+}
+
+fn apply_cached_projection_event(
+    state: &mut Option<RunProjection>,
+    event: &EventEnvelope,
+) -> Result<()> {
+    if let Some(projection) = state {
+        projection.apply_event(event)?;
+    } else {
+        *state = Some(RunProjection::apply_events(std::slice::from_ref(event))?);
+    }
+    Ok(())
 }
 
 async fn recover_next_seq<R>(
@@ -509,7 +545,7 @@ mod tests {
     use std::sync::Arc;
     use std::time::Duration;
 
-    use fabro_types::{RunId, StageId};
+    use fabro_types::{Graph, RunId, StageId, WorkflowSettings};
     use object_store::memory::InMemory;
     use serde_json::json;
 
@@ -534,6 +570,24 @@ mod tests {
 
     fn stage_prompt_payload(run_id: &RunId, idx: u32, node_id: Option<&str>) -> EventPayload {
         stage_prompt_payload_for_stage(run_id, idx, node_id, None)
+    }
+
+    fn run_created_payload(run_id: &RunId) -> EventPayload {
+        EventPayload::new(
+            json!({
+                "id": "evt-created",
+                "ts": "2026-04-09T11:59:00Z",
+                "run_id": run_id.to_string(),
+                "event": "run.created",
+                "properties": {
+                    "settings": WorkflowSettings::default(),
+                    "graph": Graph::new("test"),
+                    "run_dir": "/tmp/test",
+                },
+            }),
+            run_id,
+        )
+        .unwrap()
     }
 
     fn stage_prompt_payload_for_stage(
@@ -571,7 +625,11 @@ mod tests {
         let object_store = Arc::new(InMemory::new());
         let store = Database::new(object_store, "", Duration::from_millis(1), None);
         let run_id: RunId = "01JT56VE4Z5NZ814GZN2JZD65A".parse().unwrap();
-        store.create_run(&run_id).await.unwrap()
+        let run = store.create_run(&run_id).await.unwrap();
+        run.append_event(&run_created_payload(&run_id))
+            .await
+            .unwrap();
+        run
     }
 
     #[tokio::test]
@@ -594,7 +652,7 @@ mod tests {
             .unwrap();
 
         let seqs: Vec<u32> = events.iter().map(|e| e.seq).collect();
-        assert_eq!(seqs, vec![1, 3]);
+        assert_eq!(seqs, vec![2, 4]);
     }
 
     #[tokio::test]
@@ -614,7 +672,7 @@ mod tests {
             .unwrap();
 
         let seqs: Vec<u32> = events.iter().map(|e| e.seq).collect();
-        assert_eq!(seqs, vec![2]);
+        assert_eq!(seqs, vec![3]);
     }
 
     #[tokio::test]
@@ -628,14 +686,14 @@ mod tests {
                 .unwrap();
         }
 
-        // alpha events live at seqs 1, 3, 5. Start at seq=2 should skip seq=1.
+        // alpha events live at seqs 2, 4, 6. Start at seq=3 should skip seq=2.
         let events = run
-            .list_events_for_stage_from_with_limit(&StageId::new("alpha", 1), 2, 100)
+            .list_events_for_stage_from_with_limit(&StageId::new("alpha", 1), 3, 100)
             .await
             .unwrap();
 
         let seqs: Vec<u32> = events.iter().map(|e| e.seq).collect();
-        assert_eq!(seqs, vec![3, 5]);
+        assert_eq!(seqs, vec![4, 6]);
     }
 
     #[tokio::test]
@@ -663,7 +721,7 @@ mod tests {
             .unwrap();
 
         let seqs: Vec<u32> = events.iter().map(|e| e.seq).collect();
-        assert_eq!(seqs, vec![201, 202, 203]);
+        assert_eq!(seqs, vec![202, 203, 204]);
     }
 
     #[tokio::test]
@@ -715,6 +773,6 @@ mod tests {
             .unwrap();
 
         let seqs: Vec<u32> = events.iter().map(|e| e.seq).collect();
-        assert_eq!(seqs, vec![2]);
+        assert_eq!(seqs, vec![3]);
     }
 }

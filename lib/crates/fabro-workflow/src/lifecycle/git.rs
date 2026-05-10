@@ -9,7 +9,7 @@ use fabro_core::outcome::NodeResult;
 use fabro_core::state::ExecutionState;
 use fabro_dump::RunDump;
 use fabro_types::run_event::{MetadataSnapshotFailureKind, MetadataSnapshotPhase};
-use fabro_types::{DiffSummary, RunId};
+use fabro_types::{CheckpointRecord, DiffSummary, RunDiff, RunId};
 use fabro_util::error::collect_causes;
 use fabro_util::time::elapsed_ms;
 
@@ -196,7 +196,11 @@ impl RunLifecycle<WorkflowGraph> for GitLifecycle {
                 self.emit_metadata_snapshot_started(phase, &meta_branch, Some(&scope));
                 match self.run_store.state().await {
                     Ok(mut projection) => {
-                        projection.checkpoint = Some(checkpoint);
+                        projection.checkpoints.push(CheckpointRecord {
+                            seq: 0,
+                            checkpoint,
+                            diff: RunDiff::default(),
+                        });
                         match RunDump::from_projection(&projection) {
                             Ok(dump) => {
                                 self.write_metadata_snapshot(
@@ -1164,6 +1168,7 @@ mod tests {
             stages:               Vec::new(),
             billing:              None,
             total_retries:        0,
+            diff:                 fabro_types::RunDiff::default(),
         };
         write_finalize_commit(
             lifecycle.run_options.as_ref(),

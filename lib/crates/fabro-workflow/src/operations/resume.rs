@@ -14,15 +14,14 @@ pub async fn resume(run_dir: &Path, services: StartServices) -> Result<Started, 
         .await
         .map_err(|err| Error::engine(err.to_string()))?;
 
-    if let Some(status) = state.status {
-        super::archive::ensure_not_archived(Some(status), &services.run_id)?;
-        if matches!(status, RunStatus::Succeeded { .. }) {
-            return Err(Error::Precondition(
-                "run already finished successfully — nothing to resume".to_string(),
-            ));
-        }
+    let status = state.status;
+    super::archive::ensure_not_archived(Some(status), &services.run_id)?;
+    if matches!(status, RunStatus::Succeeded { .. }) {
+        return Err(Error::Precondition(
+            "run already finished successfully — nothing to resume".to_string(),
+        ));
     }
-    if let Some(conclusion) = state.conclusion {
+    if let Some(conclusion) = state.conclusion.as_ref() {
         if matches!(
             conclusion.status,
             StageOutcome::Succeeded | StageOutcome::PartiallySucceeded | StageOutcome::Skipped
@@ -34,9 +33,10 @@ pub async fn resume(run_dir: &Path, services: StartServices) -> Result<Started, 
     }
 
     let checkpoint = state
-        .checkpoint
+        .current_checkpoint()
+        .cloned()
         .ok_or_else(|| Error::Precondition("no checkpoint to resume from".to_string()))?;
-    let definition_blob = state.spec.as_ref().and_then(|run| run.definition_blob);
+    let definition_blob = state.spec.definition_blob;
 
     cleanup_resume_artifacts(run_dir);
     append_event_to_sink(

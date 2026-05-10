@@ -101,7 +101,7 @@ fn load_run_checkpoint(run_dir: &Path) -> Result<Checkpoint, Box<dyn std::error:
                 let state = runtime.block_on(async {
                     for attempt in 0..20 {
                         let state = run.state().await?;
-                        if state.checkpoint.is_some() || attempt == 19 {
+                        if state.current_checkpoint().is_some() || attempt == 19 {
                             return Ok::<_, fabro_store::Error>(state);
                         }
                         tokio::time::sleep(std::time::Duration::from_millis(10)).await;
@@ -139,7 +139,7 @@ fn load_run_checkpoint(run_dir: &Path) -> Result<Checkpoint, Box<dyn std::error:
         runtime.block_on(async {
             for attempt in 0..20 {
                 let state = run.state().await?;
-                if state.checkpoint.is_some() || attempt == 19 {
+                if state.current_checkpoint().is_some() || attempt == 19 {
                     return Ok::<_, fabro_store::Error>(state);
                 }
                 tokio::time::sleep(std::time::Duration::from_millis(10)).await;
@@ -148,7 +148,8 @@ fn load_run_checkpoint(run_dir: &Path) -> Result<Checkpoint, Box<dyn std::error:
         })?
     };
     state
-        .checkpoint
+        .current_checkpoint()
+        .cloned()
         .ok_or_else(|| "checkpoint should exist in run store".into())
 }
 
@@ -1247,7 +1248,8 @@ async fn daytona_git_checkpoint_with_shadow_branch() {
     let projection: fabro_store::RunProjection =
         serde_json::from_slice(run_json.stdout.as_bytes()).expect("run.json should parse");
     let checkpoint = projection
-        .checkpoint
+        .current_checkpoint()
+        .cloned()
         .expect("shadow branch should contain checkpoint data");
     assert!(
         !checkpoint.completed_nodes.is_empty(),

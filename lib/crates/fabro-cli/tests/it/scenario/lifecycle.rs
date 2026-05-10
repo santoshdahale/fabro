@@ -146,7 +146,7 @@ fn dry_run_create_start_attach_works_with_default_run_lookup() {
     fabro_json_snapshot!(
         context,
         serde_json::json!({
-            "status": state.status.map(|status| match status {
+            "status": match state.status {
                 fabro_types::RunStatus::Submitted => "submitted",
                 fabro_types::RunStatus::Queued => "queued",
                 fabro_types::RunStatus::Starting => "starting",
@@ -158,7 +158,7 @@ fn dry_run_create_start_attach_works_with_default_run_lookup() {
                 fabro_types::RunStatus::Failed { .. } => "failed",
                 fabro_types::RunStatus::Dead => "dead",
                 fabro_types::RunStatus::Archived { .. } => "archived",
-            }),
+            },
             "has_conclusion": state.conclusion.is_some(),
         }),
         @r#"
@@ -332,9 +332,7 @@ digraph FooWorkflow {
         .assert()
         .success();
 
-    let run_spec = run_state(&context.find_run_dir(&run_id))
-        .spec
-        .expect("run spec should exist");
+    let run_spec = run_state(&context.find_run_dir(&run_id)).spec;
     fabro_json_snapshot!(
         context,
         serde_json::json!({

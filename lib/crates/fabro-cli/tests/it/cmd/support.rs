@@ -451,7 +451,7 @@ pub(crate) fn write_gated_workflow(path: &Path, name: &str, goal: &str) -> Workf
 pub(crate) fn wait_for_status(run_dir: &Path, expected: &[&str]) -> String {
     let deadline = Instant::now() + command_timeout();
     loop {
-        if let Some(status) = run_state(run_dir).status.map(|status| match status {
+        let status = match run_state(run_dir).status {
             fabro_types::RunStatus::Submitted => "submitted",
             fabro_types::RunStatus::Queued => "queued",
             fabro_types::RunStatus::Starting => "starting",
@@ -463,10 +463,9 @@ pub(crate) fn wait_for_status(run_dir: &Path, expected: &[&str]) -> String {
             fabro_types::RunStatus::Failed { .. } => "failed",
             fabro_types::RunStatus::Dead => "dead",
             fabro_types::RunStatus::Archived { .. } => "archived",
-        }) {
-            if expected.contains(&status) {
-                return status.to_string();
-            }
+        };
+        if expected.contains(&status) {
+            return status.to_string();
         }
         assert!(
             Instant::now() < deadline,

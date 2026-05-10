@@ -645,7 +645,7 @@ digraph Test {
 }
 
 #[test]
-fn runner_reports_missing_run_spec_without_prefetching_events() {
+fn runner_reports_malformed_run_state_without_prefetching_events() {
     let context = auth_context();
     let server = MockServer::start();
     let run_id = unique_run_id();
@@ -658,16 +658,6 @@ fn runner_reports_missing_run_spec_without_prefetching_events() {
             .header("Content-Type", "application/json")
             .body(
                 serde_json::json!({
-                    "spec": null,
-                    "graph_source": null,
-                    "start": null,
-                    "status": null,
-                    "checkpoint": null,
-                    "checkpoints": [],
-                    "conclusion": null,
-                    "sandbox": null,
-                    "final_patch": null,
-                    "pull_request": null,
                     "stages": {}
                 })
                 .to_string(),
@@ -699,14 +689,14 @@ fn runner_reports_missing_run_spec_without_prefetching_events() {
 
     assert!(
         !output.status.success(),
-        "worker should fail when run spec is missing:\nstdout:\n{}\nstderr:\n{}",
+        "worker should fail when run state is malformed:\nstdout:\n{}\nstderr:\n{}",
         String::from_utf8_lossy(&output.stdout),
         String::from_utf8_lossy(&output.stderr)
     );
     state_mock.assert();
     events_mock.assert_calls(0);
     assert!(
-        output_stderr(&output).contains("has no run spec in store"),
+        output_stderr(&output).contains("Invalid Response Payload"),
         "{}",
         output_stderr(&output)
     );
@@ -848,9 +838,7 @@ fn worker_exits_after_sigterm_cancel_even_when_stdin_stays_open() {
         String::from_utf8_lossy(&output.stderr)
     );
 
-    let status_record = run_state(&run_dir)
-        .status
-        .expect("cancelled run should have a status record");
+    let status_record = run_state(&run_dir).status;
     assert_eq!(status_record, fabro_types::RunStatus::Failed {
         reason: FailureReason::Cancelled,
     });

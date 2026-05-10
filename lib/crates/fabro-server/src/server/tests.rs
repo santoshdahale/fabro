@@ -21,7 +21,7 @@ use fabro_types::settings::ServerAuthMethod;
 use fabro_types::{
     AttrValue, AuthMethod, CommandTermination, FailureCategory, FailureDetail, Graph,
     InterviewQuestionRecord, Node, Outcome, QuestionType, RunBlobId, RunId, RunSpec, SuccessReason,
-    SystemActorKind, fixtures,
+    SystemActorKind, WorkflowSettings, fixtures,
 };
 use fabro_util::check_report::CheckStatus;
 use httpmock::Method::{GET, POST};
@@ -2209,11 +2209,77 @@ async fn create_durable_run_with_events(
     events: &[workflow_event::Event],
 ) {
     let run_store = state.store.create_run(&run_id).await.unwrap();
+    if !matches!(
+        events.first(),
+        Some(workflow_event::Event::RunCreated { .. })
+    ) {
+        append_default_run_created(&run_store, run_id).await;
+    }
+    let needs_running = events.iter().any(|event| {
+        matches!(
+            event,
+            workflow_event::Event::WorkflowRunCompleted { .. }
+                | workflow_event::Event::WorkflowRunFailed { .. }
+        )
+    });
+    let has_starting = events
+        .iter()
+        .any(|event| matches!(event, workflow_event::Event::RunStarting));
+    let has_running = events
+        .iter()
+        .any(|event| matches!(event, workflow_event::Event::RunRunning));
     for event in events {
+        if needs_running
+            && !has_starting
+            && matches!(
+                event,
+                workflow_event::Event::WorkflowRunCompleted { .. }
+                    | workflow_event::Event::WorkflowRunFailed { .. }
+            )
+        {
+            workflow_event::append_event(&run_store, &run_id, &workflow_event::Event::RunStarting)
+                .await
+                .unwrap();
+        }
+        if needs_running
+            && !has_running
+            && matches!(
+                event,
+                workflow_event::Event::WorkflowRunCompleted { .. }
+                    | workflow_event::Event::WorkflowRunFailed { .. }
+            )
+        {
+            workflow_event::append_event(&run_store, &run_id, &workflow_event::Event::RunRunning)
+                .await
+                .unwrap();
+        }
         workflow_event::append_event(&run_store, &run_id, event)
             .await
             .unwrap();
     }
+}
+
+async fn append_default_run_created(run_store: &fabro_store::RunDatabase, run_id: RunId) {
+    workflow_event::append_event(run_store, &run_id, &workflow_event::Event::RunCreated {
+        run_id,
+        title: None,
+        settings: serde_json::to_value(WorkflowSettings::default()).unwrap(),
+        graph: serde_json::to_value(Graph::new("test")).unwrap(),
+        workflow_source: None,
+        workflow_config: None,
+        labels: std::collections::BTreeMap::default(),
+        run_dir: "/tmp".to_string(),
+        source_directory: None,
+        workflow_slug: None,
+        db_prefix: None,
+        provenance: None,
+        manifest_blob: None,
+        git: None,
+        fork_source_ref: None,
+        web_url: None,
+    })
+    .await
+    .unwrap();
 }
 
 /// Append a stage lifecycle event with an explicit `StageScope`, so the
@@ -3226,6 +3292,13 @@ async fn append_raw_run_event(
 
 async fn create_unreadable_durable_run(state: &Arc<AppState>, run_id: RunId) {
     let run_store = state.store.create_run(&run_id).await.unwrap();
+    append_default_run_created(&run_store, run_id).await;
+    workflow_event::append_event(&run_store, &run_id, &workflow_event::Event::RunStarting)
+        .await
+        .unwrap();
+    workflow_event::append_event(&run_store, &run_id, &workflow_event::Event::RunRunning)
+        .await
+        .unwrap();
     let payload = fabro_store::EventPayload::new(
         json!({
             "id": "evt-unreadable-run-completed",
@@ -3408,6 +3481,7 @@ async fn create_completed_run_ready_for_pull_request(
         run_id,
         settings: fabro_types::WorkflowSettings::default(),
         graph,
+        graph_source: None,
         workflow_slug: Some("test".to_string()),
         source_directory: Some("/tmp/project".to_string()),
         git: git.clone(),
@@ -4375,6 +4449,7 @@ async fn get_run_stage_command_log_returns_cas_slice() {
     let app = crate::test_support::build_test_router(Arc::clone(&state));
     let run_id = RunId::new();
     let run_store = state.store.create_run(&run_id).await.unwrap();
+    append_default_run_created(&run_store, run_id).await;
     let output_blob = run_store
         .write_blob(&serde_json::to_vec("hello world").unwrap())
         .await
@@ -4438,6 +4513,7 @@ async fn get_run_stage_command_log_prefers_scratch_when_cas_ref_exists() {
     let run_id = RunId::new();
     let stage_id = StageId::new("script_node", 1);
     let run_store = state.store.create_run(&run_id).await.unwrap();
+    append_default_run_created(&run_store, run_id).await;
     let output_blob = run_store
         .write_blob(&serde_json::to_vec("cas log").unwrap())
         .await
@@ -5909,7 +5985,7 @@ async fn create_run_persists_run_spec() {
         .await
         .unwrap();
 
-    assert!(run_state.spec.is_some());
+    assert_eq!(run_state.spec.graph.name, "Test");
 }
 
 #[tokio::test]
@@ -6489,8 +6565,7 @@ async fn start_run_transitions_to_queued() {
         .state()
         .await
         .unwrap()
-        .status
-        .unwrap();
+        .status;
     assert_eq!(status, RunStatus::Queued);
 }
 
@@ -7498,7 +7573,7 @@ async fn delete_run_force_removes_unreadable_durable_run() {
 }
 
 #[tokio::test]
-async fn delete_run_without_force_keeps_unreadable_durable_run() {
+async fn delete_run_without_force_keeps_active_durable_run() {
     let state = test_app_state();
     let app = crate::test_support::build_test_router(Arc::clone(&state));
     let run_id = RunId::new();
@@ -7510,7 +7585,7 @@ async fn delete_run_without_force_keeps_unreadable_durable_run() {
         .body(Body::empty())
         .unwrap();
     let response = app.clone().oneshot(req).await.unwrap();
-    response_json!(response, StatusCode::INTERNAL_SERVER_ERROR).await;
+    response_json!(response, StatusCode::CONFLICT).await;
 
     let req = Request::builder()
         .method("GET")
@@ -7927,8 +8002,7 @@ level = "debug"
         .state()
         .await
         .unwrap()
-        .spec
-        .expect("run spec should exist");
+        .spec;
     let resolved_run = &run_spec.settings.run;
 
     // Verify a sampling of the persisted v2 settings, including inherited
@@ -8021,7 +8095,7 @@ async fn cancel_queued_run_succeeds() {
     assert_eq!(board_item.unwrap()["column"].as_str(), Some("failed"));
 
     let run_store = state.store.open_run_reader(&run_id).await.unwrap();
-    let status = run_store.state().await.unwrap().status.unwrap();
+    let status = run_store.state().await.unwrap().status;
     assert_eq!(status, RunStatus::Failed {
         reason: FailureReason::Cancelled,
     });
@@ -8349,7 +8423,7 @@ async fn startup_reconciliation_marks_inflight_runs_terminal() {
         .state()
         .await
         .unwrap();
-    assert_eq!(run_1.status.unwrap(), RunStatus::Submitted);
+    assert_eq!(run_1.status, RunStatus::Submitted);
 
     let run_2 = state
         .store
@@ -8359,7 +8433,7 @@ async fn startup_reconciliation_marks_inflight_runs_terminal() {
         .state()
         .await
         .unwrap();
-    let run_2_status = run_2.status.unwrap();
+    let run_2_status = run_2.status;
     assert_eq!(run_2_status, RunStatus::Failed {
         reason: FailureReason::Terminated,
     });
@@ -8372,7 +8446,7 @@ async fn startup_reconciliation_marks_inflight_runs_terminal() {
         .state()
         .await
         .unwrap();
-    let run_3_status = run_3.status.unwrap();
+    let run_3_status = run_3.status;
     assert_eq!(run_3_status, RunStatus::Failed {
         reason: FailureReason::Cancelled,
     });
@@ -8444,7 +8518,7 @@ async fn shutdown_active_workers_terminates_process_groups() {
         .state()
         .await
         .unwrap();
-    let run_status = run_state.status.unwrap();
+    let run_status = run_state.status;
     assert_eq!(run_status, RunStatus::Failed {
         reason: FailureReason::Terminated,
     });
@@ -8542,15 +8616,14 @@ provider = "local"
 
     let mut status_record = None;
     for _ in 0..50 {
-        if let Some(record) = run_store.state().await.unwrap().status {
-            if record
-                == (RunStatus::Failed {
-                    reason: FailureReason::Cancelled,
-                })
-            {
-                status_record = Some(record);
-                break;
-            }
+        let record = run_store.state().await.unwrap().status;
+        if record
+            == (RunStatus::Failed {
+                reason: FailureReason::Cancelled,
+            })
+        {
+            status_record = Some(record);
+            break;
         }
         tokio::time::sleep(std::time::Duration::from_millis(20)).await;
     }

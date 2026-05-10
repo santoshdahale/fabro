@@ -15,13 +15,17 @@
 
 // May contain unused imports in some cases
 // @ts-ignore
-import type { InterviewQuestionRecord } from './interview-question-record';
+import type { RunCheckpoint } from './run-checkpoint';
+// May contain unused imports in some cases
+// @ts-ignore
+import type { RunDiff } from './run-diff';
 
 /**
- * Pending interview question plus the time it entered the unresolved set.
+ * Sequence-tagged checkpoint history entry with the diff observed at that checkpoint.
  */
-export interface PendingInterviewRecord {
-    'question': InterviewQuestionRecord;
-    'started_at': string;
+export interface CheckpointRecord {
+    'seq': number;
+    'checkpoint': RunCheckpoint;
+    'diff': RunDiff;
 }
 

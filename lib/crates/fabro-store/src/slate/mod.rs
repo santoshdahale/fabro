@@ -464,6 +464,7 @@ mod tests {
             run_id: test_run_id(label),
             settings: WorkflowSettings::default(),
             graph,
+            graph_source: None,
             workflow_slug: Some("night-sky".to_string()),
             source_directory: Some(format!("/tmp/{label}")),
             labels: std::collections::HashMap::from([("team".to_string(), "infra".to_string())]),
@@ -533,10 +534,10 @@ mod tests {
     }
 
     async fn append_completed(run: &RunDatabase, label: &str, created_at: DateTime<Utc>) {
-        append_created(run, label, created_at).await;
+        append_running(run, label, created_at).await;
         run.append_event(&event_payload(
             label,
-            "2026-03-27T12:00:02Z",
+            "2026-03-27T12:00:03Z",
             "run.completed",
             &serde_json::json!({
                 "duration_ms": 3210,
@@ -555,6 +556,14 @@ mod tests {
         run.append_event(&event_payload(
             label,
             "2026-03-27T12:00:01Z",
+            "run.starting",
+            &serde_json::json!({}),
+        ))
+        .await
+        .unwrap();
+        run.append_event(&event_payload(
+            label,
+            "2026-03-27T12:00:02Z",
             "run.running",
             &serde_json::json!({}),
         ))
@@ -592,7 +601,7 @@ mod tests {
         });
 
         let reopened = store.open_run(&test_run_id("run-1")).await.unwrap();
-        let stored = reopened.state().await.unwrap().spec.unwrap();
+        let stored = reopened.state().await.unwrap().spec;
         assert_eq!(stored.run_id, test_run_id("run-1"));
 
         store.delete_run(&test_run_id("run-1")).await.unwrap();
@@ -736,11 +745,27 @@ mod tests {
 
         let reader = store.open_run_reader(&test_run_id("run-1")).await.unwrap();
         let state = reader.state().await.unwrap();
-        assert_eq!(state.spec.unwrap().run_id, test_run_id("run-1"));
+        assert_eq!(state.spec.run_id, test_run_id("run-1"));
 
         run.append_event(&event_payload(
             "run-1",
             "2026-03-27T12:00:02Z",
+            "run.starting",
+            &serde_json::json!({}),
+        ))
+        .await
+        .unwrap();
+        run.append_event(&event_payload(
+            "run-1",
+            "2026-03-27T12:00:03Z",
+            "run.running",
+            &serde_json::json!({}),
+        ))
+        .await
+        .unwrap();
+        run.append_event(&event_payload(
+            "run-1",
+            "2026-03-27T12:00:04Z",
             "run.completed",
             &serde_json::json!({
                 "duration_ms": 3210,
@@ -753,9 +778,9 @@ mod tests {
         .await
         .unwrap();
 
-        let recent = reader.list_events_from_with_limit(2, 10).await.unwrap();
+        let recent = reader.list_events_from_with_limit(4, 10).await.unwrap();
         assert_eq!(recent.len(), 1);
-        assert_eq!(recent[0].seq, 2);
+        assert_eq!(recent[0].seq, 4);
     }
 
     #[tokio::test]
@@ -793,11 +818,8 @@ mod tests {
             vec![test_run_id("run-2"), test_run_id("run-1")]
         );
         assert_eq!(entries[0].summary.status, RunStatus::Running);
-        assert_eq!(
-            entries[0].projection.spec().unwrap().run_id,
-            test_run_id("run-2")
-        );
-        assert_eq!(entries[0].last_seq, 2);
+        assert_eq!(entries[0].projection.spec().run_id, test_run_id("run-2"));
+        assert_eq!(entries[0].last_seq, 3);
 
         let filtered = reopened
             .list_cached_runs(&ListRunsQuery {
@@ -927,6 +949,14 @@ mod tests {
         run.append_event(&event_payload(
             "run-1",
             "2026-03-27T12:00:01Z",
+            "run.starting",
+            &serde_json::json!({}),
+        ))
+        .await
+        .unwrap();
+        run.append_event(&event_payload(
+            "run-1",
+            "2026-03-27T12:00:02Z",
             "run.running",
             &serde_json::json!({}),
         ))
@@ -934,7 +964,7 @@ mod tests {
         .unwrap();
         run.append_event(&event_payload_with_node(
             "run-1",
-            "2026-03-27T12:00:02Z",
+            "2026-03-27T12:00:03Z",
             "stage.started",
             &serde_json::json!({
                 "index": 0,
@@ -948,7 +978,7 @@ mod tests {
         .unwrap();
         run.append_event(&event_payload_with_node(
             "run-1",
-            "2026-03-27T12:00:03Z",
+            "2026-03-27T12:00:04Z",
             "interview.started",
             &serde_json::json!({
                 "question_id": "q-1",
@@ -966,7 +996,7 @@ mod tests {
         .unwrap();
         run.append_event(&event_payload_with_node(
             "run-1",
-            "2026-03-27T12:00:04Z",
+            "2026-03-27T12:00:05Z",
             "checkpoint.completed",
             &serde_json::json!({
                 "status": "running",
@@ -992,7 +1022,7 @@ mod tests {
             .unwrap()
             .unwrap();
         assert_eq!(cached.summary.status, RunStatus::Running);
-        assert_eq!(cached.last_seq, 5);
+        assert_eq!(cached.last_seq, 6);
         assert_eq!(
             cached
                 .projection
@@ -1008,8 +1038,7 @@ mod tests {
         assert_eq!(
             cached
                 .projection
-                .checkpoint
-                .as_ref()
+                .current_checkpoint()
                 .unwrap()
                 .git_commit_sha
                 .as_deref(),
@@ -1026,15 +1055,13 @@ mod tests {
         assert_eq!(
             projected[0]
                 .1
-                .checkpoint
-                .as_ref()
+                .current_checkpoint()
                 .unwrap()
                 .git_commit_sha
                 .as_deref(),
             cached
                 .projection
-                .checkpoint
-                .as_ref()
+                .current_checkpoint()
                 .unwrap()
                 .git_commit_sha
                 .as_deref()

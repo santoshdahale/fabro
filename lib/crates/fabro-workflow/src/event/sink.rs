@@ -212,14 +212,14 @@ impl StoreProgressLogger {
 mod tests {
     use std::sync::Arc;
 
-    use ::fabro_types::{RunNoticeLevel, fixtures};
+    use ::fabro_types::{Graph, RunNoticeLevel, WorkflowSettings, fixtures};
     use tokio::sync::Mutex as AsyncMutex;
 
     use super::*;
     use crate::event::test_support::user_principal;
     use crate::event::{
-        Emitter, Event, build_redacted_event_payload, event_payload_from_redacted_json,
-        to_run_event,
+        Emitter, Event, append_event, build_redacted_event_payload,
+        event_payload_from_redacted_json, to_run_event,
     };
 
     #[tokio::test]
@@ -231,6 +231,26 @@ mod tests {
             None,
         );
         let run_store = store.create_run(&fixtures::RUN_7).await.unwrap();
+        append_event(&run_store, &fixtures::RUN_7, &Event::RunCreated {
+            run_id:           fixtures::RUN_7,
+            title:            None,
+            settings:         serde_json::to_value(WorkflowSettings::default()).unwrap(),
+            graph:            serde_json::to_value(Graph::new("test")).unwrap(),
+            workflow_source:  None,
+            workflow_config:  None,
+            labels:           std::collections::BTreeMap::new(),
+            run_dir:          "/tmp/test".to_string(),
+            source_directory: None,
+            workflow_slug:    None,
+            db_prefix:        None,
+            provenance:       None,
+            manifest_blob:    None,
+            git:              None,
+            fork_source_ref:  None,
+            web_url:          None,
+        })
+        .await
+        .unwrap();
         let stored = to_run_event(&fixtures::RUN_7, &Event::RunNotice {
             level:            RunNoticeLevel::Warn,
             code:             "example".to_string(),
@@ -243,7 +263,7 @@ mod tests {
         let events = run_store.list_events().await.unwrap();
         let line = events
             .into_iter()
-            .next()
+            .find(|event| event.event.event_name() == "run.notice")
             .map(|event| event.event.to_value().unwrap())
             .unwrap();
         assert!(line.get("id").is_some());

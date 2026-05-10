@@ -130,6 +130,9 @@ async fn initialized(
     })
     .await
     .expect("failed to seed run.created event in run store");
+    append_event(&run_store, &run_options.run_id, &Event::RunStarting)
+        .await
+        .expect("failed to seed run.starting event in run store");
     let emitter = bound_emitter(run_options.run_id, &emitter);
     let store_logger = StoreProgressLogger::new(run_store.clone());
     store_logger.register(emitter.as_ref());

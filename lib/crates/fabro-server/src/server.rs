@@ -1681,10 +1681,8 @@ async fn delete_run_sandbox_resource(
             );
         }
     };
-    let delete_started = matches!(projection.status, Some(RunStatus::Removing));
-    let can_mark_removing = projection
-        .status
-        .is_some_and(|status| status.can_transition_to(RunStatus::Removing));
+    let delete_started = matches!(projection.status, RunStatus::Removing);
+    let can_mark_removing = projection.status.can_transition_to(RunStatus::Removing);
     if !delete_started && can_mark_removing {
         workflow_event::append_event(&run_store, &id, &workflow_event::Event::RunRemoving)
             .await
@@ -1693,9 +1691,7 @@ async fn delete_run_sandbox_resource(
             })?;
     }
 
-    let preserve = projection
-        .spec()
-        .is_some_and(|spec| spec.settings.run.sandbox.preserve);
+    let preserve = projection.spec().settings.run.sandbox.preserve;
     let Some(record) = projection.sandbox else {
         return Ok(DeleteRunOutcome::NoContent);
     };
@@ -2096,7 +2092,7 @@ async fn persist_shutdown_run_failures(
     for run_id in run_ids {
         let run_store = state.store.open_run(&run_id).await?;
         let run_state = run_store.state().await?;
-        if run_state.status.is_some_and(RunStatus::is_terminal) {
+        if run_state.status.is_terminal() {
             continue;
         }
 
@@ -2486,7 +2482,7 @@ async fn append_worker_exit_failure(
         }
     };
 
-    let terminal = state.status.is_some_and(RunStatus::is_terminal);
+    let terminal = state.status.is_terminal();
     if terminal {
         return;
     }
@@ -3032,7 +3028,7 @@ async fn execute_run_in_process(state: Arc<AppState>, run_id: RunId) {
 
     // Accumulate aggregate usage after execution completes.
     if let Some(ref projection) = final_projection {
-        if projection.checkpoint.is_some() {
+        if projection.current_checkpoint().is_some() {
             let mut agg = state
                 .aggregate_billing
                 .lock()
@@ -3092,7 +3088,7 @@ async fn execute_run_in_process(state: Arc<AppState>, run_id: RunId) {
         }
         managed_run.checkpoint = final_projection
             .as_ref()
-            .and_then(|projection| projection.checkpoint.clone());
+            .and_then(|projection| projection.current_checkpoint().cloned());
         managed_run.run_dir = Some(run_dir);
         clear_live_run_state(managed_run);
     }
@@ -3340,7 +3336,7 @@ async fn execute_run_subprocess(state: Arc<AppState>, run_id: RunId) {
         }
     };
 
-    if final_state.checkpoint.is_some() {
+    if final_state.current_checkpoint().is_some() {
         let mut agg = state
             .aggregate_billing
             .lock()
@@ -3353,8 +3349,8 @@ async fn execute_run_subprocess(state: Arc<AppState>, run_id: RunId) {
 
     let mut runs = state.runs.lock().expect("runs lock poisoned");
     if let Some(managed_run) = runs.get_mut(&run_id) {
-        if let Some(status) = final_state.status {
-            managed_run.status = status;
+        if final_state.status != managed_run.status {
+            managed_run.status = final_state.status;
         } else if !wait_status.success() {
             managed_run.status = RunStatus::Failed {
                 reason: FailureReason::Terminated,
@@ -3365,7 +3361,7 @@ async fn execute_run_subprocess(state: Arc<AppState>, run_id: RunId) {
             .as_ref()
             .and_then(|conclusion| conclusion.failure_reason.clone())
             .or_else(|| managed_run.error.clone());
-        managed_run.checkpoint = final_state.checkpoint;
+        managed_run.checkpoint = final_state.current_checkpoint().cloned();
         managed_run.run_dir = Some(run_dir);
         clear_live_run_state(managed_run);
     }
@@ -3447,7 +3443,7 @@ async fn append_control_request(
 async fn reject_if_archived(state: &AppState, run_id: &RunId) -> Option<Response> {
     let run_store = state.store.open_run_reader(run_id).await.ok()?;
     let projection = run_store.state().await.ok()?;
-    let status = projection.status?;
+    let status = projection.status;
     matches!(status, RunStatus::Archived { .. }).then(|| {
         ApiError::new(
             StatusCode::CONFLICT,

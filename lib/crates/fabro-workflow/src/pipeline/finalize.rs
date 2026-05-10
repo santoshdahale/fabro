@@ -81,7 +81,7 @@ pub(crate) async fn build_conclusion_from_store(
         .unwrap_or_default();
     let checkpoint = projection
         .as_ref()
-        .and_then(|state| state.checkpoint.as_ref());
+        .and_then(|state| state.current_checkpoint());
 
     build_conclusion_from_parts(
         checkpoint,
@@ -183,6 +183,7 @@ fn build_conclusion_from_parts(
         stages,
         billing: projection_billing.billing_if_present(),
         total_retries,
+        diff: fabro_types::RunDiff::default(),
     }
 }
 
@@ -557,7 +558,7 @@ pub async fn finalize(executed: Executed, options: &FinalizeOptions) -> Result<C
         .unwrap_or_default();
     let checkpoint = projection
         .as_ref()
-        .and_then(|state| state.checkpoint.as_ref());
+        .and_then(|state| state.current_checkpoint());
     let conclusion = build_conclusion_from_parts(
         checkpoint,
         &projection_billing,
@@ -647,7 +648,7 @@ mod tests {
     use fabro_store::{Database, EventEnvelope, RunDatabase, RunProjection};
     use fabro_types::run_event::{MetadataSnapshotFailureKind, MetadataSnapshotPhase};
     use fabro_types::{
-        BilledModelUsage, BilledTokenCounts, EventBody, RunBlobId, RunEvent, RunId,
+        BilledModelUsage, BilledTokenCounts, EventBody, RunBlobId, RunEvent, RunId, RunSpec,
         StageCompletion, WorkflowSettings, first_event_seq, fixtures,
     };
     use object_store::memory::InMemory;
@@ -838,6 +839,27 @@ mod tests {
         }
     }
 
+    fn test_projection() -> RunProjection {
+        RunProjection::new(
+            "Test run".to_string(),
+            RunSpec {
+                run_id:           test_run_id(),
+                settings:         WorkflowSettings::default(),
+                graph:            Graph::new("test"),
+                graph_source:     None,
+                workflow_slug:    None,
+                source_directory: None,
+                labels:           HashMap::new(),
+                provenance:       None,
+                manifest_blob:    None,
+                definition_blob:  None,
+                git:              None,
+                fork_source_ref:  None,
+            },
+            chrono::Utc::now(),
+        )
+    }
+
     fn test_usage(model_id: &str, input_tokens: i64, output_tokens: i64) -> BilledModelUsage {
         serde_json::from_value(serde_json::json!({
             "input": {
@@ -862,7 +884,7 @@ mod tests {
 
     #[test]
     fn conclusion_stage_order_follows_projection_first_event_order() {
-        let mut projection = RunProjection::default();
+        let mut projection = test_projection();
         projection.stage_entry("zebra", 1, first_event_seq(1));
         projection.stage_entry("apple", 1, first_event_seq(2));
         let projection_order = stage_projection_order(&projection);
@@ -894,7 +916,7 @@ mod tests {
 
     #[test]
     fn conclusion_includes_skipped_stage_from_projection_checkpoint_fallback() {
-        let mut projection = RunProjection::default();
+        let mut projection = test_projection();
         projection.stage_entry("skipped", 1, first_event_seq(4));
         projection.stage_entry("finished", 1, first_event_seq(5));
         let projection_order = stage_projection_order(&projection);
@@ -929,7 +951,7 @@ mod tests {
 
     #[test]
     fn conclusion_billing_sums_retry_visit_usage_from_projection() {
-        let mut projection = RunProjection::default();
+        let mut projection = test_projection();
         let failed_usage = test_usage("gpt-old", 100, 10);
         let success_usage = test_usage("gpt-new", 200, 20);
         let failed = projection.stage_entry("verify", 1, first_event_seq(1));
@@ -1074,6 +1096,7 @@ mod tests {
             stages:               Vec::new(),
             billing:              None,
             total_retries:        0,
+            diff:                 fabro_types::RunDiff::default(),
         };
         let emitter = Arc::new(Emitter::new(test_run_id()));
         let events = record_events(&emitter);
@@ -1136,6 +1159,7 @@ mod tests {
             stages:               Vec::new(),
             billing:              None,
             total_retries:        0,
+            diff:                 fabro_types::RunDiff::default(),
         };
 
         write_finalize_commit(&run_options, &services, &conclusion).await;
@@ -1187,6 +1211,7 @@ mod tests {
             stages:               Vec::new(),
             billing:              None,
             total_retries:        0,
+            diff:                 fabro_types::RunDiff::default(),
         };
 
         write_finalize_commit(&run_options, &services, &conclusion).await;

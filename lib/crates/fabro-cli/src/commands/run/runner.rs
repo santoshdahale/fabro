@@ -75,10 +75,7 @@ pub(crate) async fn execute(
         .state()
         .await
         .with_context(|| format!("failed to load run state for {run_id}"))?;
-    let run_spec = run_state
-        .spec
-        .as_ref()
-        .ok_or_else(|| anyhow!("Run {run_id} has no run spec in store"))?;
+    let run_spec = &run_state.spec;
     let artifact_sink = Some(ArtifactSink::Uploader(build_artifact_uploader(
         run_id,
         client.clone_for_reuse(),

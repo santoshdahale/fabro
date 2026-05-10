@@ -451,6 +451,7 @@ mod tests {
     ) {
         let store = test_store();
         let run_store = store.create_run(&fixtures::RUN_1).await.unwrap();
+        seed_created(&run_store).await;
         let mut services = EngineServices::test_default();
         services.run = services
             .run
@@ -459,6 +460,34 @@ mod tests {
         let logger = crate::event::StoreProgressLogger::new(run_store.clone());
         logger.register(services.run.emitter.as_ref());
         (services, run_store, logger)
+    }
+
+    async fn seed_created(run_store: &RunDatabase) {
+        crate::event::append_event(
+            run_store,
+            &fixtures::RUN_1,
+            &crate::event::Event::RunCreated {
+                run_id:           fixtures::RUN_1,
+                title:            None,
+                settings:         serde_json::to_value(fabro_types::WorkflowSettings::default())
+                    .unwrap(),
+                graph:            serde_json::to_value(fabro_types::Graph::new("test")).unwrap(),
+                workflow_source:  None,
+                workflow_config:  None,
+                labels:           std::collections::BTreeMap::default(),
+                run_dir:          "/tmp".to_string(),
+                source_directory: None,
+                workflow_slug:    None,
+                db_prefix:        None,
+                provenance:       None,
+                manifest_blob:    None,
+                git:              None,
+                fork_source_ref:  None,
+                web_url:          None,
+            },
+        )
+        .await
+        .unwrap();
     }
 
     fn test_context() -> Context {

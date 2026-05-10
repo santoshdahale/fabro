@@ -15,19 +15,16 @@
 
 // May contain unused imports in some cases
 // @ts-ignore
-import type { DiffSummary } from './diff-summary';
+import type { CheckpointRecord } from './checkpoint-record';
+// May contain unused imports in some cases
+// @ts-ignore
+import type { Conclusion } from './conclusion';
 // May contain unused imports in some cases
 // @ts-ignore
 import type { PendingInterviewRecord } from './pending-interview-record';
 // May contain unused imports in some cases
 // @ts-ignore
-import type { RunCheckpoint } from './run-checkpoint';
-// May contain unused imports in some cases
-// @ts-ignore
 import type { RunControlAction } from './run-control-action';
-// May contain unused imports in some cases
-// @ts-ignore
-import type { RunProjectionCheckpointsInnerInner } from './run-projection-checkpoints-inner-inner';
 // May contain unused imports in some cases
 // @ts-ignore
 import type { RunSpec } from './run-spec';
@@ -37,6 +34,9 @@ import type { RunStatus } from './run-status';
 // May contain unused imports in some cases
 // @ts-ignore
 import type { StageProjection } from './stage-projection';
+// May contain unused imports in some cases
+// @ts-ignore
+import type { StartRecord } from './start-record';
 
 /**
  * Raw internal run projection derived from the event log.
@@ -46,25 +46,21 @@ export interface RunProjection {
      * Resolved run title from the event log.
      */
     'title'?: string;
-    'spec'?: RunSpec | null;
-    'graph_source'?: string | null;
-    'start'?: { [key: string]: any; } | null;
-    'status'?: RunStatus | null;
-    'status_updated_at'?: string | null;
-    'last_event_at'?: string | null;
+    'spec': RunSpec;
+    'start'?: StartRecord | null;
+    'status': RunStatus;
+    'status_updated_at': string;
+    'last_event_at': string;
     'pending_control'?: RunControlAction | null;
-    'checkpoint'?: RunCheckpoint | null;
     /**
-     * Sequence-tagged checkpoint history entries as `[seq, checkpoint]`.
+     * Sequence-tagged checkpoint history entries.
      */
-    'checkpoints'?: Array<Array<RunProjectionCheckpointsInnerInner>>;
-    'conclusion'?: { [key: string]: any; } | null;
+    'checkpoints': Array<CheckpointRecord>;
+    'conclusion'?: Conclusion | null;
     'sandbox'?: { [key: string]: any; } | null;
-    'final_patch'?: string | null;
-    'diff_summary'?: DiffSummary | null;
     'pull_request'?: { [key: string]: any; } | null;
     'superseded_by'?: string | null;
-    'pending_interviews'?: { [key: string]: PendingInterviewRecord; };
+    'pending_interviews': { [key: string]: PendingInterviewRecord; };
     /**
      * Map from StageId (`node_id@visit`) to stage projection data.
      */

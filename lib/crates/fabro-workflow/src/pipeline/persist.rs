@@ -37,11 +37,9 @@ pub(crate) async fn load_from_store(
         .state()
         .await
         .map_err(|err| Error::engine(err.to_string()))?;
-    let run_spec = state
-        .spec
-        .ok_or_else(|| Error::Precondition("run spec missing from store".to_string()))?;
+    let run_spec = state.spec;
     let graph = run_spec.graph.clone();
-    let source = state.graph_source.unwrap_or_default();
+    let source = run_spec.graph_source.clone().unwrap_or_default();
 
     Ok(Persisted::new(
         graph,
@@ -135,6 +133,7 @@ mod tests {
                 ..fabro_types::WorkflowSettings::default()
             },
             graph,
+            graph_source: None,
             workflow_slug: Some("ship".to_string()),
             source_directory: Some("/tmp/project".to_string()),
             git: Some(fabro_types::GitContext {

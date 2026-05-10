@@ -39,6 +39,10 @@ impl RunProjectionCache {
         cache.extend(entries.into_iter().map(|entry| (entry.run_id, entry)));
     }
 
+    pub(crate) async fn replace(&self, entry: CachedRunProjection) {
+        self.entries.lock().await.insert(entry.run_id, entry);
+    }
+
     pub(crate) async fn list(&self, query: &ListRunsQuery) -> Vec<CachedRunProjection> {
         let cache = self.entries.lock().await;
         let mut entries = cache
@@ -81,12 +85,16 @@ impl RunProjectionCache {
         let mut cache = self.entries.lock().await;
         let Some(entry) = cache.get(run_id) else {
             if event.seq == 1 {
-                let mut projection = RunProjection::default();
-                projection.apply_event(event)?;
+                let projection = RunProjection::apply_events(std::slice::from_ref(event))?;
                 cache.insert(
                     *run_id,
                     CachedRunProjection::from_projection(*run_id, projection, event.seq),
                 );
+            } else {
+                return Err(Error::InvalidEvent(format!(
+                    "projection cache cannot initialize run {run_id} from event seq {}",
+                    event.seq
+                )));
             }
             return Ok(());
         };

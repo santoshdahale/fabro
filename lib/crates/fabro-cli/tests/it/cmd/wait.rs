@@ -3,7 +3,7 @@ use httpmock::MockServer;
 use serde_json::json;
 
 use super::support::{setup_seeded_completed_dry_run, setup_seeded_created_dry_run};
-use crate::support::unique_run_id;
+use crate::support::{run_projection_json, unique_run_id};
 
 fn remote_run_summary(run_id: &str, status: &serde_json::Value) -> serde_json::Value {
     json!({
@@ -169,7 +169,16 @@ fn wait_blocked_run_times_out_without_treating_it_as_terminal() {
             .path(format!("/api/v1/runs/{}/state", run_id.as_str()));
         then.status(200)
             .header("content-type", "application/json")
-            .body("{}");
+            .body(
+                run_projection_json(
+                    run_id.as_str(),
+                    &json!({
+                        "kind": "blocked",
+                        "blocked_reason": "human_input_required"
+                    }),
+                )
+                .to_string(),
+            );
     });
 
     let mut cmd = context.command();

@@ -18,6 +18,7 @@ fn run_spec_round_trips_templated_settings() {
         run_id:           fixtures::RUN_1,
         settings:         templated_settings(),
         graph:            Graph::new("ship"),
+        graph_source:     None,
         workflow_slug:    Some("demo".to_string()),
         source_directory: Some("/Users/client/project".to_string()),
         labels:           HashMap::from([("team".to_string(), "platform".to_string())]),

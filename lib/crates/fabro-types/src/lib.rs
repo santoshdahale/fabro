@@ -47,7 +47,7 @@ pub use checkpoint::Checkpoint;
 pub use command_output::{CommandOutputStream, CommandTermination};
 pub use conclusion::{Conclusion, StageSummary};
 pub use dense::{ServerSettings, UserSettings, WorkflowSettings};
-pub use diff::{DiffStats, DiffSummary};
+pub use diff::{DiffStats, DiffSummary, RunDiff};
 pub use event_envelope::EventEnvelope;
 pub use failure_signature::FailureSignature;
 pub use graph::{
@@ -73,7 +73,9 @@ pub use run_event::{
     RunEvent, RunNoticeCode, RunNoticeLevel, SessionCapability,
 };
 pub use run_id::{RunId, fixtures};
-pub use run_projection::{PendingInterviewRecord, RunProjection, StageProjection, first_event_seq};
+pub use run_projection::{
+    CheckpointRecord, PendingInterviewRecord, RunProjection, StageProjection, first_event_seq,
+};
 pub use run_summary::RunSummary;
 pub use run_title::{RunTitleError, infer_run_title, normalize_explicit_run_title};
 pub use sandbox_details::{SandboxDetails, SandboxResources, SandboxState, SandboxTimestamps};

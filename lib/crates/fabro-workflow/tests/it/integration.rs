@@ -125,7 +125,7 @@ fn load_run_checkpoint(run_dir: &Path) -> Result<Checkpoint, Box<dyn std::error:
                 let state = runtime.block_on(async {
                     for attempt in 0..20 {
                         let state = run.state().await?;
-                        if state.checkpoint.is_some() || attempt == 19 {
+                        if state.current_checkpoint().is_some() || attempt == 19 {
                             return Ok::<_, fabro_store::Error>(state);
                         }
                         tokio::time::sleep(Duration::from_millis(10)).await;
@@ -163,7 +163,7 @@ fn load_run_checkpoint(run_dir: &Path) -> Result<Checkpoint, Box<dyn std::error:
         runtime.block_on(async {
             for attempt in 0..20 {
                 let state = run.state().await?;
-                if state.checkpoint.is_some() || attempt == 19 {
+                if state.current_checkpoint().is_some() || attempt == 19 {
                     return Ok::<_, fabro_store::Error>(state);
                 }
                 tokio::time::sleep(Duration::from_millis(10)).await;
@@ -172,7 +172,8 @@ fn load_run_checkpoint(run_dir: &Path) -> Result<Checkpoint, Box<dyn std::error:
         })?
     };
     state
-        .checkpoint
+        .current_checkpoint()
+        .cloned()
         .ok_or_else(|| "checkpoint should exist in run store".into())
 }
 
@@ -567,7 +568,10 @@ async fn end_to_end_branching_pipeline() {
         .expect("run should succeed");
     assert_eq!(outcome.status, StageOutcome::Succeeded);
 
-    let checkpoint = state.checkpoint.expect("checkpoint should be captured");
+    let checkpoint = state
+        .current_checkpoint()
+        .cloned()
+        .expect("checkpoint should be captured");
     assert!(
         checkpoint
             .completed_nodes
@@ -687,7 +691,10 @@ async fn end_to_end_human_gate_pipeline() {
         .expect("run should succeed");
     assert_eq!(outcome.status, StageOutcome::Succeeded);
 
-    let checkpoint = state.checkpoint.expect("checkpoint should be captured");
+    let checkpoint = state
+        .current_checkpoint()
+        .cloned()
+        .expect("checkpoint should be captured");
     assert!(
         checkpoint.completed_nodes.contains(&"reject".to_string()),
         "should have traversed reject path"
@@ -796,7 +803,10 @@ async fn human_gate_interrupted_input_fails_closed_without_fail_route() {
         "unexpected outcome: {outcome:?}"
     );
 
-    let checkpoint = state.checkpoint.expect("checkpoint should be captured");
+    let checkpoint = state
+        .current_checkpoint()
+        .cloned()
+        .expect("checkpoint should be captured");
     assert!(
         checkpoint.node_outcomes.contains_key("gate"),
         "gate outcome should be checkpointed before termination"
@@ -896,7 +906,10 @@ async fn human_gate_interrupted_input_routes_via_outcome_fail_condition() {
         .expect("interrupted human gate should follow explicit fail route");
     assert_eq!(outcome.status, StageOutcome::Succeeded);
 
-    let checkpoint = state.checkpoint.expect("checkpoint should be captured");
+    let checkpoint = state
+        .current_checkpoint()
+        .cloned()
+        .expect("checkpoint should be captured");
     assert!(
         checkpoint
             .completed_nodes
@@ -1133,7 +1146,10 @@ async fn goal_gate_routes_to_retry_target_when_present() {
         .expect("run should eventually succeed after retry");
     assert_eq!(outcome.status, StageOutcome::Succeeded);
 
-    let checkpoint = state.checkpoint.expect("checkpoint should be captured");
+    let checkpoint = state
+        .current_checkpoint()
+        .cloned()
+        .expect("checkpoint should be captured");
     // gated_work should appear in completed nodes (at least twice -- first fail,
     // then succeed)
     let gated_work_count = checkpoint
@@ -1523,7 +1539,10 @@ async fn pipeline_with_many_nodes() {
         .expect("large pipeline should succeed");
     assert_eq!(outcome.status, StageOutcome::Succeeded);
 
-    let checkpoint = state.checkpoint.expect("checkpoint should be captured");
+    let checkpoint = state
+        .current_checkpoint()
+        .cloned()
+        .expect("checkpoint should be captured");
     // All 10 step nodes should be in completed_nodes
     for name in &node_names {
         assert!(
@@ -1973,7 +1992,10 @@ async fn end_to_end_parallel_fan_out_fan_in() {
         .expect("parallel pipeline should succeed");
     assert_eq!(outcome.status, StageOutcome::Succeeded);
 
-    let checkpoint = state.checkpoint.expect("checkpoint should be captured");
+    let checkpoint = state
+        .current_checkpoint()
+        .cloned()
+        .expect("checkpoint should be captured");
 
     // The parallel node (fan_out) and fan_in_node should be in completed_nodes.
     // Branch nodes run inside the parallel handler, so they are not recorded
@@ -2087,7 +2109,10 @@ async fn resume_from_checkpoint_completes_pipeline() {
     assert_eq!(outcome.status, StageOutcome::Succeeded);
 
     // Verify checkpoint written after resume contains step_b
-    let final_cp = state.checkpoint.expect("checkpoint should be captured");
+    let final_cp = state
+        .current_checkpoint()
+        .cloned()
+        .expect("checkpoint should be captured");
     assert!(
         final_cp.completed_nodes.contains(&"step_b".to_string()),
         "step_b should have been executed after resume"
@@ -2227,7 +2252,10 @@ async fn graph_goal_in_context() {
         .await
         .expect("run");
 
-    let cp = state.checkpoint.expect("checkpoint should exist");
+    let cp = state
+        .current_checkpoint()
+        .cloned()
+        .expect("checkpoint should exist");
     assert_eq!(
         cp.context_values.get("graph.goal"),
         Some(&serde_json::json!("Ship the widget"))
@@ -2346,7 +2374,10 @@ async fn context_flow_between_stages() {
         .await
         .expect("run");
 
-    let cp = state.checkpoint.expect("checkpoint should exist");
+    let cp = state
+        .current_checkpoint()
+        .cloned()
+        .expect("checkpoint should exist");
     assert_eq!(
         cp.context_values.get("last_stage"),
         Some(&serde_json::json!("step_b"))
@@ -2513,7 +2544,10 @@ async fn codergen_without_backend_simulated() {
         .await
         .expect("run");
 
-    let cp = state.checkpoint.expect("checkpoint should exist");
+    let cp = state
+        .current_checkpoint()
+        .cloned()
+        .expect("checkpoint should exist");
     let last_response = cp
         .context_values
         .get("last_response")
@@ -2858,7 +2892,10 @@ async fn scenario_parallel_expert_review() {
         .expect("run");
     assert_eq!(outcome.status, StageOutcome::Succeeded);
 
-    let cp = state.checkpoint.expect("checkpoint should exist");
+    let cp = state
+        .current_checkpoint()
+        .cloned()
+        .expect("checkpoint should exist");
     let results = cp
         .context_values
         .get("parallel.results")
@@ -2945,7 +2982,10 @@ async fn scenario_node_retries_on_retry_status() {
         .expect("run");
     assert_eq!(outcome.status, StageOutcome::Succeeded);
 
-    let cp = state.checkpoint.expect("checkpoint should exist");
+    let cp = state
+        .current_checkpoint()
+        .cloned()
+        .expect("checkpoint should exist");
     let retry_count = cp
         .node_retries
         .get("flaky")
@@ -3078,7 +3118,10 @@ async fn scenario_bug_triage_router() {
         .expect("run");
     assert_eq!(outcome.status, StageOutcome::Succeeded);
 
-    let cp = state.checkpoint.expect("checkpoint should exist");
+    let cp = state
+        .current_checkpoint()
+        .cloned()
+        .expect("checkpoint should exist");
     assert!(
         cp.completed_nodes.contains(&"critical".to_string()),
         "critical should be selected (highest weight)"
@@ -3140,7 +3183,10 @@ async fn scenario_crash_recovery() {
         .expect("run");
     assert_eq!(outcome.status, StageOutcome::Succeeded);
 
-    let cp = state.checkpoint.expect("checkpoint should be captured");
+    let cp = state
+        .current_checkpoint()
+        .cloned()
+        .expect("checkpoint should be captured");
     assert!(cp.completed_nodes.contains(&"b".to_string()));
     assert!(cp.completed_nodes.contains(&"c".to_string()));
     assert!(cp.completed_nodes.contains(&"a".to_string()));
@@ -3249,7 +3295,10 @@ async fn manager_loop_stop_condition_satisfied_e2e() {
         .await
         .expect("run");
 
-    let cp = state.checkpoint.expect("checkpoint should be captured");
+    let cp = state
+        .current_checkpoint()
+        .cloned()
+        .expect("checkpoint should be captured");
     let manager_outcome = cp.node_outcomes.get("manager").expect("manager outcome");
     assert_eq!(manager_outcome.status, StageOutcome::Succeeded);
     assert!(
@@ -3331,7 +3380,10 @@ async fn manager_loop_max_cycles_exceeded_e2e() {
         .await
         .expect("run");
 
-    let cp = state.checkpoint.expect("checkpoint should be captured");
+    let cp = state
+        .current_checkpoint()
+        .cloned()
+        .expect("checkpoint should be captured");
     let manager_outcome = cp.node_outcomes.get("manager").expect("manager outcome");
     assert_eq!(manager_outcome.status, StageOutcome::Failed {
         retry_requested: false,
@@ -3475,7 +3527,10 @@ async fn conditional_branching_success_fail_paths() {
         .expect("run");
     assert_eq!(outcome.status, StageOutcome::Succeeded);
 
-    let cp = state.checkpoint.expect("checkpoint should exist");
+    let cp = state
+        .current_checkpoint()
+        .cloned()
+        .expect("checkpoint should exist");
     assert!(cp.completed_nodes.contains(&"fail_path".to_string()));
     assert!(!cp.completed_nodes.contains(&"success_path".to_string()));
 }
@@ -3530,7 +3585,10 @@ async fn edge_selection_condition_match_wins_over_weight() {
         .await
         .expect("run");
 
-    let cp = state.checkpoint.expect("checkpoint should exist");
+    let cp = state
+        .current_checkpoint()
+        .cloned()
+        .expect("checkpoint should exist");
     assert!(cp.completed_nodes.contains(&"cond_target".to_string()));
     assert!(!cp.completed_nodes.contains(&"weighted_target".to_string()));
 }
@@ -3580,7 +3638,10 @@ async fn edge_selection_weight_breaks_ties() {
         .await
         .expect("run");
 
-    let cp = state.checkpoint.expect("checkpoint should exist");
+    let cp = state
+        .current_checkpoint()
+        .cloned()
+        .expect("checkpoint should exist");
     assert!(cp.completed_nodes.contains(&"high".to_string()));
     assert!(!cp.completed_nodes.contains(&"low".to_string()));
 }
@@ -3622,7 +3683,10 @@ async fn edge_selection_lexical_tiebreak() {
         .await
         .expect("run");
 
-    let cp = state.checkpoint.expect("checkpoint should exist");
+    let cp = state
+        .current_checkpoint()
+        .cloned()
+        .expect("checkpoint should exist");
     assert!(cp.completed_nodes.contains(&"alpha".to_string()));
     assert!(!cp.completed_nodes.contains(&"beta".to_string()));
 }
@@ -3683,7 +3747,10 @@ async fn context_updates_visible_across_nodes() {
         .await
         .expect("run");
 
-    let cp = state.checkpoint.expect("checkpoint should exist");
+    let cp = state
+        .current_checkpoint()
+        .cloned()
+        .expect("checkpoint should exist");
     assert!(cp.completed_nodes.contains(&"yes".to_string()));
     assert!(!cp.completed_nodes.contains(&"no".to_string()));
 }
@@ -3786,7 +3853,10 @@ async fn custom_handler_registration_and_execution() {
         .await
         .expect("run");
 
-    let cp = state.checkpoint.expect("checkpoint should exist");
+    let cp = state
+        .current_checkpoint()
+        .cloned()
+        .expect("checkpoint should exist");
     assert_eq!(
         cp.context_values.get("custom.ran"),
         Some(&serde_json::json!("true"))
@@ -3957,7 +4027,10 @@ async fn manager_loop_runs_child_engine_e2e() {
         .expect("manager loop E2E should succeed");
     assert_eq!(outcome.status, StageOutcome::Succeeded);
 
-    let checkpoint = state.checkpoint.expect("checkpoint should be captured");
+    let checkpoint = state
+        .current_checkpoint()
+        .cloned()
+        .expect("checkpoint should be captured");
     assert!(
         checkpoint
             .completed_nodes
@@ -4092,7 +4165,10 @@ async fn manager_loop_context_flows_e2e() {
     assert_eq!(outcome.status, StageOutcome::Succeeded);
 
     // Check that child's context updates were propagated through the manager
-    let checkpoint = state.checkpoint.expect("checkpoint should be captured");
+    let checkpoint = state
+        .current_checkpoint()
+        .cloned()
+        .expect("checkpoint should be captured");
     let sup_outcome = checkpoint.node_outcomes.get("supervisor").unwrap();
     assert_eq!(
         sup_outcome.context_updates.get("review.result"),
@@ -4271,7 +4347,10 @@ async fn import_e2e_through_engine() {
         .expect("import E2E should succeed");
     assert_eq!(outcome.status, StageOutcome::Succeeded);
 
-    let checkpoint = state.checkpoint.expect("checkpoint should be captured");
+    let checkpoint = state
+        .current_checkpoint()
+        .cloned()
+        .expect("checkpoint should be captured");
     assert!(
         checkpoint
             .completed_nodes
@@ -5343,7 +5422,10 @@ async fn fidelity_stored_in_checkpoint_context() {
         .await
         .expect("run");
 
-    let cp = state.checkpoint.expect("checkpoint should be captured");
+    let cp = state
+        .current_checkpoint()
+        .cloned()
+        .expect("checkpoint should be captured");
     assert_eq!(
         cp.context_values.get("internal.fidelity"),
         Some(&serde_json::json!("summary:low")),
@@ -6005,7 +6087,10 @@ async fn fidelity_checkpoint_roundtrip_preserves_fidelity() {
         .expect("run");
 
     // Save and load again to verify roundtrip
-    let cp1 = state.checkpoint.expect("checkpoint should be captured");
+    let cp1 = state
+        .current_checkpoint()
+        .cloned()
+        .expect("checkpoint should be captured");
     assert_eq!(
         cp1.context_values.get("internal.fidelity"),
         Some(&serde_json::json!("summary:high")),
@@ -6172,7 +6257,10 @@ async fn fidelity_resume_preserves_context_values_across_checkpoint() {
     );
 
     // Verify the final checkpoint still has the fidelity
-    let final_cp = state.checkpoint.expect("checkpoint should be captured");
+    let final_cp = state
+        .current_checkpoint()
+        .cloned()
+        .expect("checkpoint should be captured");
     assert_eq!(
         final_cp.context_values.get("internal.fidelity"),
         Some(&serde_json::json!("summary:low")),
@@ -6917,6 +7005,7 @@ async fn workflow_run_with_vault_only_openai_codex_builds_pr_body() {
             stages:               Vec::new(),
             billing:              None,
             total_retries:        0,
+            diff:                 fabro_types::RunDiff::default(),
         }),
         None,
     )
@@ -7006,7 +7095,10 @@ async fn human_gate_freeform_only_routes_text() {
         .expect("run should succeed");
     assert_eq!(outcome.status, StageOutcome::Succeeded);
 
-    let checkpoint = state.checkpoint.expect("checkpoint should be captured");
+    let checkpoint = state
+        .current_checkpoint()
+        .cloned()
+        .expect("checkpoint should be captured");
     assert!(
         checkpoint
             .completed_nodes
@@ -7137,7 +7229,10 @@ async fn human_gate_freeform_with_fixed_choice_match() {
         .expect("run should succeed");
     assert_eq!(outcome.status, StageOutcome::Succeeded);
 
-    let checkpoint = state.checkpoint.expect("checkpoint should be captured");
+    let checkpoint = state
+        .current_checkpoint()
+        .cloned()
+        .expect("checkpoint should be captured");
     assert!(
         checkpoint.completed_nodes.contains(&"approve".to_string()),
         "fixed choice match should route to approve"
@@ -7254,7 +7349,10 @@ async fn human_gate_freeform_fallback_on_unmatched_text() {
         .expect("run should succeed");
     assert_eq!(outcome.status, StageOutcome::Succeeded);
 
-    let checkpoint = state.checkpoint.expect("checkpoint should be captured");
+    let checkpoint = state
+        .current_checkpoint()
+        .cloned()
+        .expect("checkpoint should be captured");
     assert!(
         checkpoint
             .completed_nodes
@@ -11927,7 +12025,10 @@ async fn e2e_failure_signature_persisted_in_context() {
     assert_eq!(outcome.status, StageOutcome::Succeeded);
 
     // Verify checkpoint has failure_signature in context
-    let cp = state.checkpoint.expect("checkpoint should be captured");
+    let cp = state
+        .current_checkpoint()
+        .cloned()
+        .expect("checkpoint should be captured");
     let sig_value = cp
         .context_values
         .get("failure_signature")
@@ -11987,7 +12088,10 @@ async fn e2e_failure_signature_hint_overrides_reason_in_context() {
     };
     let (_outcome, state) = engine.run_with_state(&graph, &run_options).await.unwrap();
 
-    let cp = state.checkpoint.expect("checkpoint should be captured");
+    let cp = state
+        .current_checkpoint()
+        .cloned()
+        .expect("checkpoint should be captured");
     let sig_str = cp
         .context_values
         .get("failure_signature")
@@ -12047,7 +12151,10 @@ async fn e2e_signature_maps_persist_in_checkpoint() {
     assert_eq!(outcome.status, StageOutcome::Succeeded);
 
     // Verify signature maps persisted to the run state checkpoint.
-    let cp = state.checkpoint.expect("checkpoint should be captured");
+    let cp = state
+        .current_checkpoint()
+        .cloned()
+        .expect("checkpoint should be captured");
     // The pipeline had 3 deterministic failures at "work" before succeeding.
     // loop_failure_signatures should have recorded them.
     assert!(
@@ -12246,7 +12353,10 @@ async fn e2e_circuit_breaker_does_not_fire_below_limit() {
     );
 
     // Verify signatures were tracked but didn't trigger abort
-    let cp = state.checkpoint.expect("checkpoint should exist");
+    let cp = state
+        .current_checkpoint()
+        .cloned()
+        .expect("checkpoint should exist");
     let total_failures: usize = cp.loop_failure_signatures.values().sum();
     assert_eq!(
         total_failures, 4,

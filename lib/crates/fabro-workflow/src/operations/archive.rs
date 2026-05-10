@@ -57,9 +57,7 @@ pub async fn archive(
         .state()
         .await
         .map_err(|err| Error::engine(err.to_string()))?;
-    let current = projection.status.ok_or_else(|| {
-        Error::Precondition(format!("run {run_id} has no status; cannot archive"))
-    })?;
+    let current = projection.status;
 
     if matches!(current, RunStatus::Archived { .. }) {
         return Ok(ArchiveOutcome::AlreadyArchived);
@@ -104,9 +102,7 @@ pub async fn unarchive(
         .state()
         .await
         .map_err(|err| Error::engine(err.to_string()))?;
-    let current = projection.status.ok_or_else(|| {
-        Error::Precondition(format!("run {run_id} has no status; cannot unarchive"))
-    })?;
+    let current = projection.status;
 
     if let RunStatus::Archived { prior } = current {
         event::append_event(&run_store, run_id, &Event::RunUnarchived { actor })
@@ -151,6 +147,13 @@ mod tests {
 
     async fn seed_succeeded(store: &Database, run_id: &RunId) {
         let run_store = store.create_run(run_id).await.unwrap();
+        seed_created(&run_store, run_id).await;
+        event::append_event(&run_store, run_id, &Event::RunStarting)
+            .await
+            .unwrap();
+        event::append_event(&run_store, run_id, &Event::RunRunning)
+            .await
+            .unwrap();
         event::append_event(&run_store, run_id, &Event::WorkflowRunCompleted {
             duration_ms:          10,
             artifact_count:       0,
@@ -168,6 +171,13 @@ mod tests {
 
     async fn seed_failed(store: &Database, run_id: &RunId) {
         let run_store = store.create_run(run_id).await.unwrap();
+        seed_created(&run_store, run_id).await;
+        event::append_event(&run_store, run_id, &Event::RunStarting)
+            .await
+            .unwrap();
+        event::append_event(&run_store, run_id, &Event::RunRunning)
+            .await
+            .unwrap();
         event::append_event(&run_store, run_id, &Event::WorkflowRunFailed {
             error:          crate::error::Error::engine("boom"),
             duration_ms:    10,
@@ -182,14 +192,42 @@ mod tests {
 
     async fn seed_running(store: &Database, run_id: &RunId) {
         let run_store = store.create_run(run_id).await.unwrap();
+        seed_created(&run_store, run_id).await;
+        event::append_event(&run_store, run_id, &Event::RunStarting)
+            .await
+            .unwrap();
         event::append_event(&run_store, run_id, &Event::RunRunning)
             .await
             .unwrap();
     }
 
+    async fn seed_created(run_store: &fabro_store::RunDatabase, run_id: &RunId) {
+        event::append_event(run_store, run_id, &Event::RunCreated {
+            run_id:           *run_id,
+            title:            None,
+            settings:         serde_json::to_value(fabro_types::WorkflowSettings::default())
+                .unwrap(),
+            graph:            serde_json::to_value(fabro_types::Graph::new("test")).unwrap(),
+            workflow_source:  None,
+            workflow_config:  None,
+            labels:           std::collections::BTreeMap::default(),
+            run_dir:          "/tmp".to_string(),
+            source_directory: None,
+            workflow_slug:    None,
+            db_prefix:        None,
+            provenance:       None,
+            manifest_blob:    None,
+            git:              None,
+            fork_source_ref:  None,
+            web_url:          None,
+        })
+        .await
+        .unwrap();
+    }
+
     async fn current_status(store: &Database, run_id: &RunId) -> RunStatus {
         let run_store = store.open_run_reader(run_id).await.unwrap();
-        run_store.state().await.unwrap().status.unwrap()
+        run_store.state().await.unwrap().status
     }
 
     async fn event_count(store: &Database, run_id: &RunId) -> usize {
@@ -222,14 +260,11 @@ mod tests {
             .state()
             .await
             .unwrap();
-        assert_eq!(
-            projection.status,
-            Some(RunStatus::Archived {
-                prior: TerminalStatus::Succeeded {
-                    reason: SuccessReason::Completed,
-                },
-            })
-        );
+        assert_eq!(projection.status, RunStatus::Archived {
+            prior: TerminalStatus::Succeeded {
+                reason: SuccessReason::Completed,
+            },
+        });
     }
 
     #[tokio::test]
@@ -302,12 +337,9 @@ mod tests {
             .state()
             .await
             .unwrap();
-        assert_eq!(
-            projection.status,
-            Some(RunStatus::Succeeded {
-                reason: SuccessReason::Completed,
-            })
-        );
+        assert_eq!(projection.status, RunStatus::Succeeded {
+            reason: SuccessReason::Completed,
+        });
     }
 
     #[tokio::test]

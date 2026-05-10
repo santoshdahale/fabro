@@ -610,26 +610,30 @@ mod tests {
     }
 
     fn metadata_dump() -> RunDump {
-        let mut projection = RunProjection::default();
-        projection.spec = Some(RunSpec {
-            run_id:           fabro_types::fixtures::RUN_1,
-            settings:         WorkflowSettings::default(),
-            graph:            fabro_types::Graph::new("metadata"),
-            workflow_slug:    Some("metadata".to_string()),
-            source_directory: Some("/Users/client/project".to_string()),
-            git:              Some(GitContext {
-                origin_url:   "https://github.com/fabro-sh/fabro.git".to_string(),
-                branch:       "main".to_string(),
-                sha:          None,
-                dirty:        DirtyStatus::Clean,
-                push_outcome: PreRunPushOutcome::NotAttempted,
-            }),
-            labels:           HashMap::new(),
-            provenance:       None,
-            manifest_blob:    None,
-            definition_blob:  None,
-            fork_source_ref:  None,
-        });
+        let projection = RunProjection::new(
+            "Metadata".to_string(),
+            RunSpec {
+                run_id:           fabro_types::fixtures::RUN_1,
+                settings:         WorkflowSettings::default(),
+                graph:            fabro_types::Graph::new("metadata"),
+                graph_source:     None,
+                workflow_slug:    Some("metadata".to_string()),
+                source_directory: Some("/Users/client/project".to_string()),
+                git:              Some(GitContext {
+                    origin_url:   "https://github.com/fabro-sh/fabro.git".to_string(),
+                    branch:       "main".to_string(),
+                    sha:          None,
+                    dirty:        DirtyStatus::Clean,
+                    push_outcome: PreRunPushOutcome::NotAttempted,
+                }),
+                labels:           HashMap::new(),
+                provenance:       None,
+                manifest_blob:    None,
+                definition_blob:  None,
+                fork_source_ref:  None,
+            },
+            chrono::Utc::now(),
+        );
 
         let mut dump = RunDump::from_projection(&projection).unwrap();
         dump.add_file_bytes("binary/payload.bin", vec![0, 159, 146, 150]);

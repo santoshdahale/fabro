@@ -133,7 +133,7 @@ pub(crate) async fn print_run_summary_with_client(
     printer: Printer,
 ) -> Result<()> {
     let run_state = client.get_run_state(run_id).await?;
-    let checkpoint = run_state.checkpoint.clone();
+    let checkpoint = run_state.current_checkpoint().cloned();
     let conclusion = run_state.conclusion.clone();
     let pr_url = run_state
         .pull_request

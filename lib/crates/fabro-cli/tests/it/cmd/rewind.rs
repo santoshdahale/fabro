@@ -93,7 +93,7 @@ fn rewind_target_updates_metadata_and_resume_hint() {
     let state = run_state(&setup.run.run_dir);
     assert!(matches!(
         state.status,
-        Some(fabro_types::RunStatus::Archived { .. })
+        fabro_types::RunStatus::Archived { .. }
     ));
     let new_run_id = state
         .superseded_by
@@ -101,8 +101,8 @@ fn rewind_target_updates_metadata_and_resume_hint() {
     let replacement = run_state_by_id(&context, &new_run_id.to_string());
     assert_eq!(
         replacement
-            .checkpoint
-            .and_then(|checkpoint| checkpoint.git_commit_sha),
+            .current_checkpoint()
+            .and_then(|checkpoint| checkpoint.git_commit_sha.clone()),
         Some(setup.step_one_sha)
     );
 }
@@ -158,7 +158,7 @@ fn rewind_archives_source_and_records_superseded_by() {
     let state = run_state(&setup.run.run_dir);
     assert!(matches!(
         state.status,
-        Some(fabro_types::RunStatus::Archived { .. })
+        fabro_types::RunStatus::Archived { .. }
     ));
     assert!(state.superseded_by.is_some());
 }

@@ -240,10 +240,7 @@ async fn run_concluded(
         .get_run_state(run_id)
         .await
         .context("Failed to read run state from server while following events")?;
-    Ok(state.conclusion.is_some()
-        || state
-            .status
-            .is_some_and(fabro_types::RunStatus::is_terminal))
+    Ok(state.conclusion.is_some() || state.status.is_terminal())
 }
 
 async fn flush_remaining_store_events(

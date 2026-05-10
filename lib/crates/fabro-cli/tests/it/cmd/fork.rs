@@ -96,15 +96,13 @@ fn fork_from_earlier_checkpoint_uses_expected_sha() {
     let run_snapshot = run_state_by_id(&context, new_run_id);
     assert_eq!(
         run_snapshot
-            .checkpoint
-            .as_ref()
+            .current_checkpoint()
             .map(|checkpoint| checkpoint.current_node.as_str()),
         Some("step_one")
     );
     assert_eq!(
         run_snapshot
-            .checkpoint
-            .as_ref()
+            .current_checkpoint()
             .and_then(|checkpoint| checkpoint.git_commit_sha.as_deref()),
         Some(setup.step_one_sha.as_str())
     );
@@ -112,16 +110,16 @@ fn fork_from_earlier_checkpoint_uses_expected_sha() {
     assert_eq!(
         run_snapshot
             .spec
+            .fork_source_ref
             .as_ref()
-            .and_then(|spec| spec.fork_source_ref.as_ref())
             .map(|source| source.checkpoint_sha.as_str()),
         Some(setup.step_one_sha.as_str())
     );
     assert_eq!(
         run_snapshot
             .spec
+            .fork_source_ref
             .as_ref()
-            .and_then(|spec| spec.fork_source_ref.as_ref())
             .map(|source| source.source_run_id.to_string()),
         Some(setup.run.run_id.clone())
     );

@@ -116,7 +116,9 @@ pub fn billing_rollup_from_projection(projection: &RunProjection) -> ProjectionB
 fn is_boundary_stage(projection: &RunProjection, node_id: &str) -> bool {
     projection
         .spec()
-        .and_then(|spec| spec.graph().nodes.get(node_id))
+        .graph()
+        .nodes
+        .get(node_id)
         .is_some_and(|node| matches!(node.handler_type(), Some("start" | "exit")))
 }
 
@@ -154,9 +156,17 @@ mod tests {
         .unwrap()
     }
 
+    fn test_projection() -> RunProjection {
+        RunProjection::new(
+            "Test run".to_string(),
+            run_spec_with_boundary_nodes(),
+            chrono::Utc::now(),
+        )
+    }
+
     #[test]
     fn rollup_groups_stage_rows_by_node_and_sums_retry_visit_usage() {
-        let mut projection = RunProjection::default();
+        let mut projection = test_projection();
         let failed_usage = test_usage("gpt-old", 100, 10);
         let success_usage = test_usage("gpt-new", 200, 20);
         let first = projection.stage_entry("verify", 1, first_event_seq(1));
@@ -215,7 +225,7 @@ mod tests {
 
     #[test]
     fn rollup_includes_completed_non_llm_stage_rows_with_zero_billing() {
-        let mut projection = RunProjection::default();
+        let mut projection = test_projection();
         let stage = projection.stage_entry("build", 1, first_event_seq(1));
         stage.duration_ms = Some(25);
         stage.completion = Some(StageCompletion {
@@ -239,8 +249,8 @@ mod tests {
 
     #[test]
     fn rollup_excludes_workflow_boundary_stage_rows() {
-        let mut projection = RunProjection::default();
-        projection.spec = Some(run_spec_with_boundary_nodes());
+        let mut projection = test_projection();
+        projection.spec = run_spec_with_boundary_nodes();
         let start = projection.stage_entry("start", 1, first_event_seq(1));
         start.duration_ms = Some(25);
         start.completion = Some(StageCompletion {
@@ -287,6 +297,7 @@ mod tests {
             run_id: fixtures::RUN_1,
             settings: WorkflowSettings::default(),
             graph,
+            graph_source: None,
             workflow_slug: None,
             source_directory: None,
             labels: HashMap::new(),

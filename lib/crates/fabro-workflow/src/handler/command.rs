@@ -222,7 +222,7 @@ mod tests {
     use bytes::Bytes;
     use fabro_graphviz::graph::AttrValue;
     use fabro_store::{Database, RunDatabase, StageId};
-    use fabro_types::fixtures;
+    use fabro_types::{Graph, RunProjection, RunSpec, WorkflowSettings, fixtures};
     use object_store::memory::InMemory;
     use tokio::sync::Mutex;
 
@@ -239,7 +239,24 @@ mod tests {
     #[async_trait::async_trait]
     impl RunStoreBackend for MemoryRunStoreBackend {
         async fn load_state(&self) -> anyhow::Result<fabro_store::RunProjection> {
-            Ok(fabro_store::RunProjection::default())
+            Ok(RunProjection::new(
+                "Test run".to_string(),
+                RunSpec {
+                    run_id:           fixtures::RUN_1,
+                    settings:         WorkflowSettings::default(),
+                    graph:            Graph::new("test"),
+                    graph_source:     None,
+                    workflow_slug:    None,
+                    source_directory: None,
+                    labels:           std::collections::HashMap::default(),
+                    provenance:       None,
+                    manifest_blob:    None,
+                    definition_blob:  None,
+                    git:              None,
+                    fork_source_ref:  None,
+                },
+                chrono::Utc::now(),
+            ))
         }
 
         async fn list_events(&self) -> anyhow::Result<Vec<fabro_store::EventEnvelope>> {
@@ -305,6 +322,7 @@ mod tests {
     ) {
         let store = test_store();
         let run_store = store.create_run(&fixtures::RUN_1).await.unwrap();
+        seed_created(&run_store).await;
         let mut services = EngineServices::test_default();
         services.run = services
             .run
@@ -313,6 +331,33 @@ mod tests {
         let logger = crate::event::StoreProgressLogger::new(run_store.clone());
         logger.register(services.run.emitter.as_ref());
         (services, run_store, logger)
+    }
+
+    async fn seed_created(run_store: &RunDatabase) {
+        crate::event::append_event(
+            run_store,
+            &fixtures::RUN_1,
+            &crate::event::Event::RunCreated {
+                run_id:           fixtures::RUN_1,
+                title:            None,
+                settings:         serde_json::to_value(WorkflowSettings::default()).unwrap(),
+                graph:            serde_json::to_value(Graph::new("test")).unwrap(),
+                workflow_source:  None,
+                workflow_config:  None,
+                labels:           std::collections::BTreeMap::default(),
+                run_dir:          "/tmp".to_string(),
+                source_directory: None,
+                workflow_slug:    None,
+                db_prefix:        None,
+                provenance:       None,
+                manifest_blob:    None,
+                git:              None,
+                fork_source_ref:  None,
+                web_url:          None,
+            },
+        )
+        .await
+        .unwrap();
     }
 
     #[tokio::test]

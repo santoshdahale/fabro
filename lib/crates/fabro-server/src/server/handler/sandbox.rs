@@ -629,7 +629,7 @@ mod tests {
 mod retrieve_sandbox_tests {
     use axum::body::{Body, to_bytes};
     use axum::http::{Request, StatusCode};
-    use fabro_types::RunId;
+    use fabro_types::{Graph, RunId, WorkflowSettings};
     use serde_json::{Value, json};
     use tower::ServiceExt;
 
@@ -648,6 +648,25 @@ mod retrieve_sandbox_tests {
             .await
             .expect("response body should fit in memory");
         serde_json::from_slice(&bytes).expect("response body should be valid JSON")
+    }
+
+    async fn append_run_created(run_store: &fabro_store::RunDatabase, run_id: &RunId) {
+        let payload = fabro_store::EventPayload::new(
+            json!({
+                "id": "evt-run-created",
+                "ts": "2026-05-09T11:59:00Z",
+                "run_id": run_id,
+                "event": "run.created",
+                "properties": {
+                    "settings": WorkflowSettings::default(),
+                    "graph": Graph::new("test"),
+                    "run_dir": "/tmp/test",
+                },
+            }),
+            run_id,
+        )
+        .expect("run.created payload should validate");
+        run_store.append_event(&payload).await.unwrap();
     }
 
     #[tokio::test]
@@ -674,11 +693,12 @@ mod retrieve_sandbox_tests {
         let state = test_app_state();
         let app = build_test_router(state.clone());
         let run_id = RunId::new();
-        state
+        let run_store = state
             .store_ref()
             .create_run(&run_id)
             .await
             .expect("test run should be creatable");
+        append_run_created(&run_store, &run_id).await;
         let response = app
             .oneshot(req_get(&format!("/api/v1/runs/{run_id}/sandbox")))
             .await
@@ -704,6 +724,7 @@ mod retrieve_sandbox_tests {
             .create_run(&run_id)
             .await
             .expect("test run should be creatable");
+        append_run_created(&run_store, &run_id).await;
         let payload = fabro_store::EventPayload::new(
             json!({
                 "id": "evt-sandbox-init",
@@ -742,6 +763,7 @@ mod retrieve_sandbox_tests {
             .create_run(&run_id)
             .await
             .expect("test run should be creatable");
+        append_run_created(&run_store, &run_id).await;
         let payload = fabro_store::EventPayload::new(
             json!({
                 "id": "evt-sandbox-init",

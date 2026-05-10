@@ -83,6 +83,8 @@ pub struct RunSpec {
     pub settings:         WorkflowSettings,
     pub graph:            Graph,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub graph_source:     Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub workflow_slug:    Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub source_directory: Option<String>,

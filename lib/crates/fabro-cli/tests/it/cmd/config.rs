@@ -346,8 +346,7 @@ fn create_explicit_workflow_path_uses_project_config_relative_to_workflow() {
         });
 
     let state = run_state(&run_dir);
-    let run_spec =
-        serde_json::to_value(state.spec.as_ref().expect("run spec should exist")).unwrap();
+    let run_spec = serde_json::to_value(&state.spec).unwrap();
     assert_eq!(
         run_spec["settings"]["run"]["execution"]["approval"].as_str(),
         Some("auto")

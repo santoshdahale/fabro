@@ -204,7 +204,7 @@ where
 ///    IDOR-safe.
 /// 3. Reconnect and start the sandbox, then build a structured diff.
 /// 4. On garbage-collected base commits for aggregate scopes, fall through to a
-///    degraded response built from `RunProjection.final_patch`.
+///    degraded response built from the terminal conclusion diff.
 ///
 /// All logging emits a single `tracing::info!` with an allowlisted field
 /// set enforced by [`RunFilesMetrics::emit`] — no paths, contents, or raw
@@ -777,17 +777,21 @@ async fn sandbox_git_stdout(
     Ok(res.stdout)
 }
 
-/// Build the degraded response from the stored `final_patch`.
-/// When `final_patch` is `None`, returns the empty envelope (UI maps this to
-/// R4(c)). Keeps the same `FileDiff[]` shape as live responses, but leaves
-/// contents unavailable because the server only has a unified patch.
+/// Build the degraded response from the stored terminal diff patch.
+/// When `conclusion.diff.patch` is `None`, returns the empty envelope (UI maps
+/// this to R4(c)). Keeps the same `FileDiff[]` shape as live responses, but
+/// leaves contents unavailable because the server only has a unified patch.
 fn build_fallback_response(
     projection: &fabro_store::RunProjection,
     reason: RunFilesMetaDegradedReason,
     run_id: &RunId,
     start: Instant,
 ) -> PaginatedRunFileList {
-    let Some(patch) = projection.final_patch.as_deref() else {
+    let Some(patch) = projection
+        .conclusion
+        .as_ref()
+        .and_then(|conclusion| conclusion.diff.patch.as_deref())
+    else {
         return empty_envelope(RunFilesMetaSource::FinalPatch, RunFilesMetaScope::Committed);
     };
 
@@ -2365,8 +2369,38 @@ index 1111111..2222222 160000
     }
 
     fn fallback_projection(patch: &str) -> fabro_store::RunProjection {
-        let mut projection = fabro_store::RunProjection::default();
-        projection.final_patch = Some(patch.to_string());
+        let mut projection = fabro_store::RunProjection::new(
+            "Test run".to_string(),
+            fabro_types::RunSpec {
+                run_id:           fabro_types::fixtures::RUN_1,
+                settings:         fabro_types::WorkflowSettings::default(),
+                graph:            fabro_types::Graph::new("test"),
+                graph_source:     None,
+                workflow_slug:    None,
+                source_directory: None,
+                labels:           HashMap::default(),
+                provenance:       None,
+                manifest_blob:    None,
+                definition_blob:  None,
+                git:              None,
+                fork_source_ref:  None,
+            },
+            chrono::Utc::now(),
+        );
+        projection.conclusion = Some(fabro_types::Conclusion {
+            timestamp:            chrono::Utc::now(),
+            status:               fabro_types::StageOutcome::Succeeded,
+            duration_ms:          1,
+            failure_reason:       None,
+            final_git_commit_sha: None,
+            stages:               Vec::new(),
+            billing:              None,
+            total_retries:        0,
+            diff:                 fabro_types::RunDiff {
+                patch:   Some(patch.to_string()),
+                summary: None,
+            },
+        });
         projection
     }
 

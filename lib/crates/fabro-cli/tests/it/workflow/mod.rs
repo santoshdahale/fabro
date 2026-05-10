@@ -38,19 +38,15 @@ pub(super) fn read_conclusion(run_dir: &Path) -> Value {
 }
 
 pub(super) fn read_run_spec(run_dir: &Path) -> Value {
-    serde_json::to_value(
-        run_state(run_dir)
-            .spec
-            .expect("run store run spec should exist"),
-    )
-    .expect("run spec should serialize")
+    serde_json::to_value(run_state(run_dir).spec).expect("run spec should serialize")
 }
 
 pub(super) fn completed_nodes(run_dir: &Path) -> Vec<String> {
-    let cp = run_state(run_dir)
-        .checkpoint
+    let state = run_state(run_dir);
+    let cp = state
+        .current_checkpoint()
         .expect("run store checkpoint should exist");
-    cp.completed_nodes
+    cp.completed_nodes.clone()
 }
 
 pub(super) fn has_event(run_dir: &Path, event_name: &str) -> bool {

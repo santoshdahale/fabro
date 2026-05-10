@@ -9,7 +9,7 @@ pub(crate) use auth_harness::{
 pub(crate) use auth_tokens::{TEST_SESSION_SECRET, issue_test_github_jwt, issue_test_worker_jwt};
 use fabro_store::EventEnvelope;
 use fabro_test::{EnvVars, TestContext, preserve_coverage_env};
-use fabro_types::RunId;
+use fabro_types::{Graph, RunId, RunSpec, WorkflowSettings};
 
 pub(crate) fn run_output_filters(context: &TestContext) -> Vec<(String, String)> {
     let mut filters = context.filters();
@@ -36,6 +36,40 @@ pub(crate) fn fatal_error_line(stderr: &[u8]) -> String {
 
 pub(crate) fn unique_run_id() -> String {
     RunId::new().to_string()
+}
+
+pub(crate) fn run_projection_json(run_id: &str, status: &serde_json::Value) -> serde_json::Value {
+    let run_id = run_id.parse::<RunId>().expect("test run id should parse");
+    let spec = RunSpec {
+        run_id,
+        settings: WorkflowSettings::default(),
+        graph: Graph::new("Remote Workflow"),
+        graph_source: None,
+        workflow_slug: Some("remote-workflow".to_string()),
+        source_directory: Some("/srv/repo".to_string()),
+        labels: std::collections::HashMap::default(),
+        provenance: None,
+        manifest_blob: None,
+        definition_blob: None,
+        git: None,
+        fork_source_ref: None,
+    };
+
+    serde_json::json!({
+        "spec": serde_json::to_value(spec).expect("run spec should serialize"),
+        "start": null,
+        "status": status,
+        "status_updated_at": "2026-04-05T12:00:01Z",
+        "last_event_at": "2026-04-05T12:00:01Z",
+        "pending_control": null,
+        "checkpoints": [],
+        "conclusion": null,
+        "sandbox": null,
+        "pull_request": null,
+        "superseded_by": null,
+        "pending_interviews": {},
+        "stages": {}
+    })
 }
 
 pub(crate) fn parse_event_envelopes(response: &serde_json::Value) -> Vec<EventEnvelope> {

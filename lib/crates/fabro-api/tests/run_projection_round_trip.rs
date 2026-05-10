@@ -1,7 +1,7 @@
 use std::any::{TypeId, type_name};
 
 use fabro_api::types::RunProjection as ApiRunProjection;
-use fabro_types::RunProjection;
+use fabro_types::{Graph, RunProjection, RunSpec, WorkflowSettings};
 use serde_json::json;
 
 #[test]
@@ -12,28 +12,29 @@ fn run_projection_reuses_canonical_type() {
 #[test]
 fn run_projection_round_trips_populated_projection() {
     let value = json!({
-        "spec": null,
-        "graph_source": null,
+        "title": "Test run",
+        "spec": run_spec_json(),
         "start": null,
-        "status": null,
-        "status_updated_at": null,
-        "last_event_at": null,
+        "status": { "kind": "submitted" },
+        "status_updated_at": "2026-04-29T12:34:00Z",
+        "last_event_at": "2026-04-29T12:34:00Z",
         "pending_control": "pause",
-        "checkpoint": null,
-        "checkpoints": [[
-            7,
+        "checkpoints": [
             {
+                "seq": 7,
+                "checkpoint": {
                 "timestamp": "2026-04-29T12:34:56Z",
                 "current_node": "build",
                 "completed_nodes": ["build"],
                 "node_retries": {},
                 "context_values": {},
                 "node_visits": { "build": 2 }
+                },
+                "diff": {}
             }
-        ]],
+        ],
         "conclusion": null,
         "sandbox": null,
-        "final_patch": null,
         "pull_request": null,
         "superseded_by": null,
         "pending_interviews": {
@@ -73,7 +74,8 @@ fn run_projection_round_trips_populated_projection() {
                     "reasoning_tokens": 0,
                     "cache_read_tokens": 0,
                     "cache_write_tokens": 0
-                }
+                },
+                "state": "running"
             }
         }
     });
@@ -85,18 +87,16 @@ fn run_projection_round_trips_populated_projection() {
 #[test]
 fn run_projection_round_trips_with_pending_control_unset() {
     let value = json!({
-        "spec": null,
-        "graph_source": null,
+        "title": "Test run",
+        "spec": run_spec_json(),
         "start": null,
-        "status": null,
-        "status_updated_at": null,
-        "last_event_at": null,
+        "status": { "kind": "submitted" },
+        "status_updated_at": "2026-04-29T12:34:00Z",
+        "last_event_at": "2026-04-29T12:34:00Z",
         "pending_control": null,
-        "checkpoint": null,
         "checkpoints": [],
         "conclusion": null,
         "sandbox": null,
-        "final_patch": null,
         "pull_request": null,
         "superseded_by": null,
         "pending_interviews": {},
@@ -105,6 +105,24 @@ fn run_projection_round_trips_with_pending_control_unset() {
 
     let projection: RunProjection = serde_json::from_value(value.clone()).unwrap();
     assert_eq!(serde_json::to_value(projection).unwrap(), value);
+}
+
+fn run_spec_json() -> serde_json::Value {
+    serde_json::to_value(RunSpec {
+        run_id:           fabro_types::fixtures::RUN_1,
+        settings:         WorkflowSettings::default(),
+        graph:            Graph::new("test"),
+        graph_source:     Some("digraph test {}".to_string()),
+        workflow_slug:    None,
+        source_directory: None,
+        labels:           std::collections::HashMap::new(),
+        provenance:       None,
+        manifest_blob:    None,
+        definition_blob:  None,
+        git:              None,
+        fork_source_ref:  None,
+    })
+    .unwrap()
 }
 
 fn assert_same_type<T: 'static, U: 'static>() {

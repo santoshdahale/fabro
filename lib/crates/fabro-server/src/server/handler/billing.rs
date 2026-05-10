@@ -39,14 +39,15 @@ async fn list_run_stages(
     let projection = cached.projection;
 
     let now = Utc::now();
-    let graph = projection.spec().map(fabro_types::RunSpec::graph);
+    let graph = projection.spec().graph();
     let stages = projection
         .iter_stages()
         .map(|(stage_id, stage)| {
             let handler = stage.handler.unwrap_or_else(|| {
                 StageHandler::from_handler_type(
                     graph
-                        .and_then(|g| g.nodes.get(stage_id.node_id()))
+                        .nodes
+                        .get(stage_id.node_id())
                         .and_then(|n| n.handler_type()),
                 )
             });
@@ -195,12 +196,13 @@ fn stage_has_billing_row(stage: &StageProjection) -> bool {
         || stage.duration_ms.is_some()
         || !stage.usage.is_zero()
         || stage.started_at.is_some()
-        || stage.state.is_some()
 }
 
 fn is_boundary_stage(projection: &RunProjection, node_id: &str) -> bool {
     projection
         .spec()
-        .and_then(|spec| spec.graph().nodes.get(node_id))
+        .graph()
+        .nodes
+        .get(node_id)
         .is_some_and(|node| matches!(node.handler_type(), Some("start" | "exit")))
 }

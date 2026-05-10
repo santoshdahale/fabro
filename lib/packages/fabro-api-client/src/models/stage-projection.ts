@@ -68,7 +68,10 @@ export interface StageProjection {
     'duration_ms'?: number | null;
     'usage': BilledTokenCounts;
     'model'?: BillingModelRef | null;
-    'state'?: StageState | null;
+    /**
+     * Lifecycle state of the stage projection.
+     */
+    'state': StageState;
 }
 
 

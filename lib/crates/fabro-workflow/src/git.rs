@@ -455,6 +455,27 @@ mod tests {
 
         let store = test_store();
         let run = store.create_run(&fixtures::RUN_1).await.unwrap();
+        append_event(&run, &fixtures::RUN_1, &Event::RunCreated {
+            run_id:           fixtures::RUN_1,
+            title:            None,
+            settings:         serde_json::to_value(fabro_types::WorkflowSettings::default())
+                .unwrap(),
+            graph:            serde_json::to_value(fabro_types::Graph::new("test")).unwrap(),
+            workflow_source:  None,
+            workflow_config:  None,
+            labels:           std::collections::BTreeMap::default(),
+            run_dir:          "/tmp".to_string(),
+            source_directory: None,
+            workflow_slug:    None,
+            db_prefix:        None,
+            provenance:       None,
+            manifest_blob:    None,
+            git:              None,
+            fork_source_ref:  None,
+            web_url:          None,
+        })
+        .await
+        .unwrap();
         append_event(&run, &fixtures::RUN_1, &Event::Prompt {
             stage:    "work".into(),
             visit:    2,

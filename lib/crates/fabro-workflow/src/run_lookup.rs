@@ -437,6 +437,7 @@ mod tests {
             run_id:           fixtures::RUN_1,
             settings:         WorkflowSettings::default(),
             graph:            Graph::new("test"),
+            graph_source:     None,
             workflow_slug:    Some("test".to_string()),
             source_directory: Some("/tmp/project".to_string()),
             git:              Some(fabro_types::GitContext {

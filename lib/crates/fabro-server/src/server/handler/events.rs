@@ -4,8 +4,8 @@ use super::super::{
     ApiError, AppState, AppendEventResponse, BroadcastStream, Event, EventBody, EventEnvelope,
     EventPayload, HashSet, IntoResponse, Json, KeepAlive, PaginatedEventList, PaginationMeta, Path,
     Query, RequireRunScoped, RequireRunStageScoped, RequiredUser, Response, Router, RunEvent,
-    RunId, RunStatus, Sse, State, StatusCode, StreamExt, UnboundedReceiverStream, broadcast, get,
-    mpsc, parse_run_id_path, parse_stage_id_path, redact_jsonl_line, reject_if_archived,
+    RunId, Sse, State, StatusCode, StreamExt, UnboundedReceiverStream, broadcast, get, mpsc,
+    parse_run_id_path, parse_stage_id_path, redact_jsonl_line, reject_if_archived,
     update_live_run_from_event,
 };
 
@@ -130,7 +130,7 @@ fn attach_event_is_terminal(event: &EventEnvelope) -> bool {
 }
 
 fn run_projection_is_active(state: &fabro_store::RunProjection) -> bool {
-    state.status.is_some_and(RunStatus::is_active)
+    state.status.is_active()
 }
 
 async fn append_run_event(
@@ -401,7 +401,7 @@ mod stage_events_tests {
     use axum::body::{Body, to_bytes};
     use axum::http::{Request, StatusCode, header};
     use fabro_store::EventPayload;
-    use fabro_types::RunId;
+    use fabro_types::{Graph, RunId, WorkflowSettings};
     use fabro_workflow::event as workflow_event;
     use http_body_util::BodyExt;
     use serde_json::json;
@@ -420,6 +420,29 @@ mod stage_events_tests {
 
     fn make_event(run_id: &RunId, idx: u32, node_id: Option<&str>) -> EventPayload {
         make_event_with_stage_id(run_id, idx, node_id, None)
+    }
+
+    async fn append_run_created(run_store: &fabro_store::RunDatabase, run_id: &RunId) {
+        workflow_event::append_event(run_store, run_id, &workflow_event::Event::RunCreated {
+            run_id:           *run_id,
+            title:            None,
+            settings:         serde_json::to_value(WorkflowSettings::default()).unwrap(),
+            graph:            serde_json::to_value(Graph::new("test")).unwrap(),
+            workflow_source:  None,
+            workflow_config:  None,
+            labels:           std::collections::BTreeMap::new(),
+            run_dir:          "/tmp/test".to_string(),
+            source_directory: None,
+            workflow_slug:    None,
+            db_prefix:        None,
+            provenance:       None,
+            manifest_blob:    None,
+            git:              None,
+            fork_source_ref:  None,
+            web_url:          None,
+        })
+        .await
+        .expect("run.created should append");
     }
 
     fn make_event_with_stage_id(
@@ -521,6 +544,7 @@ mod stage_events_tests {
             .create_run(&run_id)
             .await
             .expect("test run should be creatable");
+        append_run_created(&run_store, &run_id).await;
         for event in [
             workflow_event::Event::RunSubmitted {
                 definition_blob: None,
@@ -556,6 +580,7 @@ mod stage_events_tests {
             .create_run(&run_id)
             .await
             .expect("test run should be creatable");
+        append_run_created(&run_store, &run_id).await;
 
         // Seed 200 unrelated 'beta' events first so any node-blind
         // truncation would lose the sparse 'alpha' tail. Then 3 'alpha'
@@ -594,7 +619,7 @@ mod stage_events_tests {
         let body = body_json(response).await;
         let data = body["data"].as_array().expect("data is array");
         let seqs: Vec<u64> = data.iter().map(|e| e["seq"].as_u64().unwrap()).collect();
-        assert_eq!(seqs, vec![202, 203, 204]);
+        assert_eq!(seqs, vec![203, 204, 205]);
         assert_eq!(body["meta"]["has_more"], false);
     }
 
@@ -603,7 +628,7 @@ mod stage_events_tests {
         let (run_id, app) = seed_run_with_mixed_events().await;
         let response = app
             .oneshot(req_get(&format!(
-                "/api/v1/runs/{run_id}/stages/alpha@1/events?since_seq=203"
+                "/api/v1/runs/{run_id}/stages/alpha@1/events?since_seq=204"
             )))
             .await
             .unwrap();
@@ -616,7 +641,7 @@ mod stage_events_tests {
             .iter()
             .map(|e| e["seq"].as_u64().unwrap())
             .collect();
-        assert_eq!(seqs, vec![203, 204]);
+        assert_eq!(seqs, vec![204, 205]);
     }
 
     #[tokio::test]
@@ -633,7 +658,7 @@ mod stage_events_tests {
         let body = body_json(response).await;
         let data = body["data"].as_array().unwrap();
         assert_eq!(data.len(), 1);
-        assert_eq!(data[0]["seq"].as_u64().unwrap(), 202);
+        assert_eq!(data[0]["seq"].as_u64().unwrap(), 203);
         assert_eq!(body["meta"]["has_more"], true);
     }
 
@@ -709,6 +734,7 @@ mod stage_events_tests {
             .create_run(&run_id)
             .await
             .expect("test run should be creatable");
+        append_run_created(&run_store, &run_id).await;
         run_store
             .append_event(&make_event_with_stage_id(
                 &run_id,
@@ -743,6 +769,6 @@ mod stage_events_tests {
             .iter()
             .map(|e| e["seq"].as_u64().unwrap())
             .collect();
-        assert_eq!(seqs, vec![2]);
+        assert_eq!(seqs, vec![3]);
     }
 }

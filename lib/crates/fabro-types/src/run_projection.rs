@@ -5,40 +5,42 @@ use std::num::NonZeroU32;
 use chrono::{DateTime, Utc};
 
 use crate::{
-    BilledTokenCounts, Checkpoint, Conclusion, DiffSummary, InterviewQuestionRecord,
-    InvalidTransition, ModelRef, PullRequestRecord, RunControlAction, RunId, RunSpec, RunStatus,
+    BilledTokenCounts, Checkpoint, Conclusion, InterviewQuestionRecord, InvalidTransition,
+    ModelRef, PullRequestRecord, RunControlAction, RunDiff, RunId, RunSpec, RunStatus,
     SandboxRecord, StageCompletion, StageHandler, StageId, StageState, StartRecord,
 };
 
-#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
-#[serde(default)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct RunProjection {
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub title:              String,
-    pub spec:               Option<RunSpec>,
-    pub graph_source:       Option<String>,
+    pub spec:               RunSpec,
     pub start:              Option<StartRecord>,
-    pub status:             Option<RunStatus>,
-    pub status_updated_at:  Option<DateTime<Utc>>,
-    pub last_event_at:      Option<DateTime<Utc>>,
+    pub status:             RunStatus,
+    pub status_updated_at:  DateTime<Utc>,
+    pub last_event_at:      DateTime<Utc>,
     pub pending_control:    Option<RunControlAction>,
-    pub checkpoint:         Option<Checkpoint>,
-    pub checkpoints:        Vec<(u32, Checkpoint)>,
+    pub checkpoints:        Vec<CheckpointRecord>,
     pub conclusion:         Option<Conclusion>,
     pub sandbox:            Option<SandboxRecord>,
-    pub final_patch:        Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub diff_summary:       Option<DiffSummary>,
     pub pull_request:       Option<PullRequestRecord>,
     pub superseded_by:      Option<RunId>,
     pub pending_interviews: BTreeMap<String, PendingInterviewRecord>,
     stages:                 HashMap<StageId, StageProjection>,
 }
 
-#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct PendingInterviewRecord {
     pub question:   InterviewQuestionRecord,
-    pub started_at: Option<DateTime<Utc>>,
+    pub started_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct CheckpointRecord {
+    pub seq:        u32,
+    pub checkpoint: Checkpoint,
+    #[serde(default)]
+    pub diff:       RunDiff,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -69,8 +71,7 @@ pub struct StageProjection {
     pub usage:             BilledTokenCounts,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub model:             Option<ModelRef>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub state:             Option<StageState>,
+    pub state:             StageState,
 }
 
 /// Convert a 1-based event sequence number into the `NonZeroU32` form used for
@@ -102,21 +103,14 @@ impl StageProjection {
             termination: None,
             started_at: None,
             handler: None,
-            state: None,
+            state: StageState::Running,
         }
     }
 
-    /// Effective lifecycle state derived from stored event data.
-    ///
-    /// Falls back to deriving from `completion` for projections that predate
-    /// the stored `state` field, so old serialized projections still work
-    /// without a backfill.
+    /// Effective lifecycle state for this stage.
     #[must_use]
     pub fn effective_state(&self) -> StageState {
-        self.state.unwrap_or_else(|| match &self.completion {
-            Some(completion) => StageState::from(completion.outcome),
-            None => StageState::Running,
-        })
+        self.state
     }
 
     /// Live wall-clock runtime in seconds.
@@ -149,20 +143,38 @@ impl StageProjection {
         *self = Self::new(self.first_event_seq);
         self.started_at = Some(started_at);
         self.handler = Some(handler);
-        self.state = Some(StageState::Running);
+        self.state = StageState::Running;
     }
 }
 
 impl RunProjection {
+    #[must_use]
+    pub fn new(title: String, spec: RunSpec, created_at: DateTime<Utc>) -> Self {
+        Self {
+            title,
+            spec,
+            start: None,
+            status: RunStatus::Submitted,
+            status_updated_at: created_at,
+            last_event_at: created_at,
+            pending_control: None,
+            checkpoints: Vec::new(),
+            conclusion: None,
+            sandbox: None,
+            pull_request: None,
+            superseded_by: None,
+            pending_interviews: BTreeMap::new(),
+            stages: HashMap::new(),
+        }
+    }
+
     #[must_use]
     pub fn title(&self) -> Cow<'_, str> {
         if !self.title.trim().is_empty() {
             return Cow::Borrowed(&self.title);
         }
 
-        Cow::Owned(crate::infer_run_title(
-            self.spec.as_ref().map_or("", |spec| spec.graph.goal()),
-        ))
+        Cow::Owned(crate::infer_run_title(self.spec.graph.goal()))
     }
 
     pub fn stage(&self, stage: &StageId) -> Option<&StageProjection> {
@@ -217,20 +229,20 @@ impl RunProjection {
         visits
     }
 
-    pub fn spec(&self) -> Option<&RunSpec> {
-        self.spec.as_ref()
+    pub fn spec(&self) -> &RunSpec {
+        &self.spec
     }
 
-    pub fn status(&self) -> Option<RunStatus> {
+    pub fn status(&self) -> RunStatus {
         self.status
     }
 
     pub fn is_terminal(&self) -> bool {
-        self.status().is_some_and(RunStatus::is_terminal)
+        self.status().is_terminal()
     }
 
     pub fn current_checkpoint(&self) -> Option<&Checkpoint> {
-        self.checkpoint.as_ref()
+        self.checkpoints.last().map(|record| &record.checkpoint)
     }
 
     pub fn pending_interviews(&self) -> &BTreeMap<String, PendingInterviewRecord> {
@@ -262,15 +274,10 @@ impl RunProjection {
         ts: DateTime<Utc>,
     ) -> Result<(), InvalidTransition> {
         match self.status {
-            Some(current) if current == new => Ok(()),
-            Some(current) => {
-                self.status = Some(current.transition_to(new)?);
-                self.status_updated_at = Some(ts);
-                Ok(())
-            }
-            None => {
-                self.status = Some(new);
-                self.status_updated_at = Some(ts);
+            current if current == new => Ok(()),
+            current => {
+                self.status = current.transition_to(new)?;
+                self.status_updated_at = ts;
                 Ok(())
             }
         }
@@ -280,6 +287,8 @@ impl RunProjection {
 #[cfg(test)]
 mod title_tests {
     use std::collections::HashMap;
+
+    use chrono::Utc;
 
     use crate::{AttrValue, Graph, RunId, RunProjection, RunSpec, WorkflowSettings};
 
@@ -291,30 +300,31 @@ mod title_tests {
                 .insert("goal".to_string(), AttrValue::String(goal.to_string()));
         }
 
-        RunProjection {
-            spec: Some(RunSpec {
-                run_id: RunId::new(),
-                settings: WorkflowSettings::default(),
-                graph,
-                workflow_slug: None,
-                source_directory: None,
-                labels: HashMap::new(),
-                provenance: None,
-                manifest_blob: None,
-                definition_blob: None,
-                git: None,
-                fork_source_ref: None,
-            }),
-            ..RunProjection::default()
-        }
+        let spec = RunSpec {
+            run_id: RunId::new(),
+            settings: WorkflowSettings::default(),
+            graph,
+            graph_source: None,
+            workflow_slug: None,
+            source_directory: None,
+            labels: HashMap::new(),
+            provenance: None,
+            manifest_blob: None,
+            definition_blob: None,
+            git: None,
+            fork_source_ref: None,
+        };
+        RunProjection::new(String::new(), spec, Utc::now())
+    }
+
+    fn projection() -> RunProjection {
+        projection_with_goal(None)
     }
 
     #[test]
     fn run_title_returns_stored_title_when_present() {
-        let projection = RunProjection {
-            title: "Stored title".to_string(),
-            ..RunProjection::default()
-        };
+        let mut projection = projection();
+        projection.title = "Stored title".to_string();
 
         assert_eq!(projection.title(), "Stored title");
     }
@@ -334,8 +344,8 @@ mod title_tests {
     }
 
     #[test]
-    fn run_title_falls_back_when_spec_is_unavailable() {
-        let projection = RunProjection::default();
+    fn run_title_falls_back_when_goal_is_unavailable() {
+        let projection = projection();
 
         assert_eq!(projection.title(), "Untitled run");
     }
@@ -343,17 +353,42 @@ mod title_tests {
 
 #[cfg(test)]
 mod iter_stages_tests {
+    use std::collections::HashMap;
     use std::num::NonZeroU32;
 
+    use chrono::Utc;
+
     use super::RunProjection;
+    use crate::{Graph, RunId, RunSpec, WorkflowSettings};
 
     fn seq(n: u32) -> NonZeroU32 {
         NonZeroU32::new(n).unwrap()
     }
 
+    fn projection() -> RunProjection {
+        RunProjection::new(
+            "Test run".to_string(),
+            RunSpec {
+                run_id:           RunId::new(),
+                settings:         WorkflowSettings::default(),
+                graph:            Graph::new("test"),
+                graph_source:     None,
+                workflow_slug:    None,
+                source_directory: None,
+                labels:           HashMap::default(),
+                provenance:       None,
+                manifest_blob:    None,
+                definition_blob:  None,
+                git:              None,
+                fork_source_ref:  None,
+            },
+            Utc::now(),
+        )
+    }
+
     #[test]
     fn iter_stages_yields_chronological_order_across_nodes() {
-        let mut p = RunProjection::default();
+        let mut p = projection();
         // Insert in non-monotonic seq order to exercise the sort.
         p.stage_entry("c", 1, seq(30));
         p.stage_entry("a", 1, seq(10));
@@ -368,7 +403,7 @@ mod iter_stages_tests {
 
     #[test]
     fn iter_stages_orders_visits_within_a_node() {
-        let mut p = RunProjection::default();
+        let mut p = projection();
         // Visit 2 inserted first; visit 1's earlier first_event_seq must still
         // win the chronological ordering.
         p.stage_entry("verify", 2, seq(50));
@@ -383,7 +418,7 @@ mod iter_stages_tests {
 
     #[test]
     fn iter_stages_mut_yields_chronological_order() {
-        let mut p = RunProjection::default();
+        let mut p = projection();
         p.stage_entry("c", 1, seq(30));
         p.stage_entry("a", 1, seq(10));
         p.stage_entry("b", 1, seq(20));
@@ -398,7 +433,7 @@ mod iter_stages_tests {
     #[test]
     fn iter_stages_tie_breaks_same_first_event_seq_by_stage_id() {
         for _ in 0..128 {
-            let mut p = RunProjection::default();
+            let mut p = projection();
             p.stage_entry("verify", 2, seq(10));
             p.stage_entry("build", 1, seq(10));
             p.stage_entry("verify", 1, seq(10));
@@ -414,7 +449,7 @@ mod iter_stages_tests {
     #[test]
     fn iter_stages_mut_tie_breaks_same_first_event_seq_by_stage_id() {
         for _ in 0..128 {
-            let mut p = RunProjection::default();
+            let mut p = projection();
             p.stage_entry("verify", 2, seq(10));
             p.stage_entry("build", 1, seq(10));
             p.stage_entry("verify", 1, seq(10));

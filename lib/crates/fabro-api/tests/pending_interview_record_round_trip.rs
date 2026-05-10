@@ -42,7 +42,7 @@ fn pending_interview_record_allows_empty_options_to_be_omitted() {
             "question_type": "freeform",
             "allow_freeform": true
         },
-        "started_at": null
+        "started_at": "2026-04-29T12:34:56Z"
     });
 
     let record: PendingInterviewRecord = serde_json::from_value(value.clone()).unwrap();

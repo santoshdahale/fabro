@@ -32,22 +32,21 @@ pub(crate) async fn run(args: &InspectArgs, base_ctx: &CommandContext) -> Result
 }
 
 fn inspect_run_state(run: &ServerRunSummaryInfo, state: RunProjection) -> InspectOutput {
+    let checkpoint = state
+        .current_checkpoint()
+        .and_then(|record| serde_json::to_value(record).ok());
     InspectOutput {
-        run_id:       run.run_id().to_string(),
-        status:       state.status.unwrap_or(run.status()),
-        run_spec:     state
-            .spec
-            .and_then(|record| serde_json::to_value(record).ok()),
+        run_id: run.run_id().to_string(),
+        status: state.status,
+        run_spec: serde_json::to_value(state.spec).ok(),
         start_record: state
             .start
             .and_then(|record| serde_json::to_value(record).ok()),
-        conclusion:   state
+        conclusion: state
             .conclusion
             .and_then(|record| serde_json::to_value(record).ok()),
-        checkpoint:   state
-            .checkpoint
-            .and_then(|record| serde_json::to_value(record).ok()),
-        sandbox:      state
+        checkpoint,
+        sandbox: state
             .sandbox
             .and_then(|record| serde_json::to_value(record).ok()),
     }

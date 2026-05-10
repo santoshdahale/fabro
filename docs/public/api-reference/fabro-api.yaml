@@ -6052,6 +6052,7 @@ components:
       required:
         - first_event_seq
         - usage
+        - state
       properties:
         first_event_seq:
           type: integer
@@ -6108,9 +6109,7 @@ components:
             - $ref: "#/components/schemas/BillingModelRef"
             - type: "null"
         state:
-          oneOf:
-            - $ref: "#/components/schemas/StageState"
-            - type: "null"
+          $ref: "#/components/schemas/StageState"
           description: Lifecycle state of the stage projection.
 
     InterviewOption:
@@ -6160,11 +6159,12 @@ components:
       type: object
       required:
         - question
+        - started_at
       properties:
         question:
           $ref: "#/components/schemas/InterviewQuestionRecord"
         started_at:
-          type: ["string", "null"]
+          type: string
           format: date-time
 
     DirtyStatus:
@@ -6201,6 +6201,8 @@ components:
         graph:
           type: object
           additionalProperties: true
+        graph_source:
+          type: ["string", "null"]
         workflow_slug:
           type: ["string", "null"]
         source_directory:
@@ -6226,69 +6228,145 @@ components:
             - $ref: "#/components/schemas/ForkSourceRef"
             - type: "null"
 
+    StartRecord:
+      description: Metadata captured when execution starts.
+      type: object
+      required:
+        - start_time
+      properties:
+        start_time:
+          type: string
+          format: date-time
+        run_branch:
+          type: ["string", "null"]
+        base_sha:
+          type: ["string", "null"]
+
+    StageSummary:
+      description: Terminal summary for one stage in a run conclusion.
+      type: object
+      required:
+        - stage_id
+        - stage_label
+        - duration_ms
+        - retries
+      properties:
+        stage_id:
+          type: string
+        stage_label:
+          type: string
+        duration_ms:
+          type: integer
+          format: uint64
+          minimum: 0
+        billing_usd_micros:
+          type: ["integer", "null"]
+          format: int64
+        retries:
+          type: integer
+          format: uint32
+          minimum: 0
+
+    Conclusion:
+      description: Terminal run conclusion derived from final workflow execution.
+      type: object
+      required:
+        - timestamp
+        - status
+        - duration_ms
+        - stages
+        - total_retries
+        - diff
+      properties:
+        timestamp:
+          type: string
+          format: date-time
+        status:
+          $ref: "#/components/schemas/StageOutcome"
+        duration_ms:
+          type: integer
+          format: uint64
+          minimum: 0
+        failure_reason:
+          type: ["string", "null"]
+        final_git_commit_sha:
+          type: ["string", "null"]
+        stages:
+          type: array
+          items:
+            $ref: "#/components/schemas/StageSummary"
+        billing:
+          oneOf:
+            - $ref: "#/components/schemas/BilledTokenCounts"
+            - type: "null"
+        total_retries:
+          type: integer
+          format: uint32
+          minimum: 0
+        diff:
+          $ref: "#/components/schemas/RunDiff"
+
+    CheckpointRecord:
+      description: Sequence-tagged checkpoint history entry with the diff observed at that checkpoint.
+      type: object
+      required:
+        - seq
+        - checkpoint
+        - diff
+      properties:
+        seq:
+          type: integer
+          format: uint32
+        checkpoint:
+          $ref: "#/components/schemas/RunCheckpoint"
+        diff:
+          $ref: "#/components/schemas/RunDiff"
+
     RunProjection:
       description: Raw internal run projection derived from the event log.
       type: object
       required:
+        - spec
+        - status
+        - status_updated_at
+        - last_event_at
+        - checkpoints
+        - pending_interviews
         - stages
       properties:
         title:
           type: string
           description: Resolved run title from the event log.
         spec:
-          oneOf:
-            - $ref: "#/components/schemas/RunSpec"
-            - type: "null"
-        graph_source:
-          type: ["string", "null"]
+          $ref: "#/components/schemas/RunSpec"
         start:
-          type: ["object", "null"]
-          additionalProperties: true
+          oneOf:
+            - $ref: "#/components/schemas/StartRecord"
+            - type: "null"
         status:
-          oneOf:
-            - $ref: "#/components/schemas/RunStatus"
-            - type: "null"
+          $ref: "#/components/schemas/RunStatus"
         status_updated_at:
-          oneOf:
-            - type: string
-              format: date-time
-            - type: "null"
+          type: string
+          format: date-time
         last_event_at:
-          oneOf:
-            - type: string
-              format: date-time
-            - type: "null"
+          type: string
+          format: date-time
         pending_control:
           oneOf:
             - $ref: "#/components/schemas/RunControlAction"
             - type: "null"
-        checkpoint:
-          oneOf:
-            - $ref: "#/components/schemas/RunCheckpoint"
-            - type: "null"
         checkpoints:
           type: array
-          description: Sequence-tagged checkpoint history entries as `[seq, checkpoint]`.
+          description: Sequence-tagged checkpoint history entries.
           items:
-            type: array
-            minItems: 2
-            maxItems: 2
-            items:
-              oneOf:
-                - type: integer
-                - $ref: "#/components/schemas/RunCheckpoint"
+            $ref: "#/components/schemas/CheckpointRecord"
         conclusion:
-          type: ["object", "null"]
-          additionalProperties: true
+          oneOf:
+            - $ref: "#/components/schemas/Conclusion"
+            - type: "null"
         sandbox:
           type: ["object", "null"]
           additionalProperties: true
-        final_patch:
-          type: ["string", "null"]
-        diff_summary:
-          oneOf:
-            - $ref: "#/components/schemas/DiffSummary"
-            - type: "null"
         pull_request:
           type: ["object", "null"]
           additionalProperties: true
@@ -7309,6 +7387,17 @@ components:
           type: integer
           description: Total lines deleted across text files.
           example: 234
+
+    RunDiff:
+      description: Patch text and aggregate counts captured for a run-level diff.
+      type: object
+      properties:
+        patch:
+          type: ["string", "null"]
+        summary:
+          oneOf:
+            - $ref: "#/components/schemas/DiffSummary"
+            - type: "null"
 
     RunFilesMeta:
       description: |

@@ -220,13 +220,13 @@ digraph BarBaz {
 
     let run_dir = context.find_run_dir(&run_id);
     let state = run_state(&run_dir);
-    let run = state.spec.as_ref().expect("run spec should exist");
+    let run = &state.spec;
     fabro_json_snapshot!(
         context,
         serde_json::json!({
             "workflow_slug": run.workflow_slug,
             "graph_name": run.graph.name,
-            "cached_graph_lines": state.graph_source.as_ref().expect("graph should exist").lines().collect::<Vec<_>>(),
+            "cached_graph_lines": state.spec.graph_source.as_ref().expect("graph should exist").lines().collect::<Vec<_>>(),
         }),
         @r#"
         {
@@ -277,13 +277,13 @@ digraph FooWorkflow {
 
     let run_dir = context.find_run_dir(&run_id);
     let state = run_state(&run_dir);
-    let run = state.spec.as_ref().expect("run spec should exist");
+    let run = &state.spec;
     fabro_json_snapshot!(
         context,
         serde_json::json!({
             "workflow_slug": run.workflow_slug,
             "graph_name": run.graph.name,
-            "cached_graph_lines": state.graph_source.as_ref().expect("graph should exist").lines().collect::<Vec<_>>(),
+            "cached_graph_lines": state.spec.graph_source.as_ref().expect("graph should exist").lines().collect::<Vec<_>>(),
         }),
         @r#"
         {
@@ -344,7 +344,7 @@ fn create_persists_requested_overrides_into_store() {
         .to_string();
     let run = resolve_run(&context, &run_id);
     let state = run_state(&run.run_dir);
-    let run_spec = state.spec.as_ref().expect("run spec should exist");
+    let run_spec = &state.spec;
     let labels = json!({
         "env": run_spec.labels.get("env"),
         "team": run_spec.labels.get("team"),
@@ -422,15 +422,9 @@ fn create_json_does_not_imply_auto_approve() {
     let run = resolve_run(&context, run_id);
 
     assert!(
-        resolved_run(
-            &run_state(&run.run_dir)
-                .spec
-                .as_ref()
-                .expect("run spec should exist")
-                .settings,
-        )
-        .execution
-        .approval
+        resolved_run(&run_state(&run.run_dir).spec.settings,)
+            .execution
+            .approval
             != fabro_types::settings::run::ApprovalMode::Auto
     );
 }

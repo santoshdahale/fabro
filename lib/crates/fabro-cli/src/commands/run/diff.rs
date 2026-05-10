@@ -72,7 +72,11 @@ fn resolve_diff(state: &RunProjection, args: &DiffArgs) -> Result<String> {
         .as_deref()
         .ok_or_else(|| anyhow::anyhow!("This run was not git-checkpointed; no diff available"))?;
 
-    if let Some(patch) = state.final_patch.clone() {
+    if let Some(patch) = state
+        .conclusion
+        .as_ref()
+        .and_then(|conclusion| conclusion.diff.patch.clone())
+    {
         debug!("Reading stored diff from run state");
         return Ok(patch);
     }

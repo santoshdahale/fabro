@@ -239,7 +239,7 @@ async fn load_run_dot_source(state: &AppState, id: &RunId) -> Result<String, Res
     } else {
         match state.store.open_run_reader(id).await {
             Ok(run_store) => match run_store.state().await {
-                Ok(run_state) => run_state.graph_source,
+                Ok(run_state) => run_state.spec.graph_source,
                 Err(err) => {
                     return Err(
                         ApiError::new(StatusCode::BAD_GATEWAY, err.to_string()).into_response()

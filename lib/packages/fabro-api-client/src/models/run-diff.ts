@@ -15,13 +15,13 @@
 
 // May contain unused imports in some cases
 // @ts-ignore
-import type { InterviewQuestionRecord } from './interview-question-record';
+import type { DiffSummary } from './diff-summary';
 
 /**
- * Pending interview question plus the time it entered the unresolved set.
+ * Patch text and aggregate counts captured for a run-level diff.
  */
-export interface PendingInterviewRecord {
-    'question': InterviewQuestionRecord;
-    'started_at': string;
+export interface RunDiff {
+    'patch'?: string | null;
+    'summary'?: DiffSummary | null;
 }
 

@@ -142,6 +142,7 @@ mod tests {
             run_id:           fixtures::RUN_1,
             settings:         WorkflowSettings::default(),
             graph:            Graph::new("test"),
+            graph_source:     None,
             workflow_slug:    Some("test".to_string()),
             source_directory: Some("/tmp/test".to_string()),
             git:              None,
@@ -153,11 +154,9 @@ mod tests {
         }
     }
 
-    #[tokio::test]
-    async fn local_handle_loads_state_and_events() {
-        let run_store = test_run_store().await;
+    async fn append_created_event(run_store: &fabro_store::RunDatabase) {
         let record = test_run_spec();
-        append_event(&run_store, &fixtures::RUN_1, &Event::RunCreated {
+        append_event(run_store, &fixtures::RUN_1, &Event::RunCreated {
             run_id:           fixtures::RUN_1,
             title:            None,
             settings:         serde_json::to_value(&record.settings).unwrap(),
@@ -177,18 +176,25 @@ mod tests {
         })
         .await
         .unwrap();
+    }
+
+    #[tokio::test]
+    async fn local_handle_loads_state_and_events() {
+        let run_store = test_run_store().await;
+        append_created_event(&run_store).await;
 
         let handle = RunStoreHandle::local(run_store);
         let state = handle.state().await.unwrap();
         let events = handle.list_events().await.unwrap();
 
-        assert_eq!(state.spec.unwrap().workflow_slug.as_deref(), Some("test"));
+        assert_eq!(state.spec.workflow_slug.as_deref(), Some("test"));
         assert_eq!(events.len(), 1);
     }
 
     #[tokio::test]
     async fn local_handle_appends_events_and_roundtrips_blobs() {
         let run_store = test_run_store().await;
+        append_created_event(&run_store).await;
         let handle = RunStoreHandle::local(run_store);
 
         let event = RunEvent {
@@ -214,7 +220,7 @@ mod tests {
         let blob = handle.read_blob(&blob_id).await.unwrap().unwrap();
         let events = handle.list_events().await.unwrap();
 
-        assert_eq!(events.len(), 1);
+        assert_eq!(events.len(), 2);
         assert_eq!(blob.as_ref(), br#"{"ok":true}"#);
     }
 

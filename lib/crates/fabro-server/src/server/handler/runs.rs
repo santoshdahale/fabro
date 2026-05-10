@@ -191,13 +191,32 @@ fn board_run_metadata_from_projection(
 
 #[cfg(test)]
 mod tests {
-    use fabro_types::PullRequestRecord;
+    use fabro_types::{
+        Graph, PullRequestRecord, RunProjection, RunSpec, WorkflowSettings, fixtures,
+    };
 
     use super::board_run_metadata_from_projection;
 
     #[test]
     fn board_run_metadata_includes_pull_request_url() {
-        let mut projection = fabro_store::RunProjection::default();
+        let mut projection = RunProjection::new(
+            "Test run".to_string(),
+            RunSpec {
+                run_id:           fixtures::RUN_1,
+                settings:         WorkflowSettings::default(),
+                graph:            Graph::new("test"),
+                graph_source:     None,
+                workflow_slug:    None,
+                source_directory: None,
+                labels:           std::collections::HashMap::default(),
+                provenance:       None,
+                manifest_blob:    None,
+                definition_blob:  None,
+                git:              None,
+                fork_source_ref:  None,
+            },
+            chrono::Utc::now(),
+        );
         projection.pull_request = Some(PullRequestRecord {
             html_url:    "https://github.com/fabro-sh/fabro/pull/123".to_string(),
             number:      123,
@@ -684,10 +703,11 @@ async fn get_run_settings(
                 .into_response();
         }
     };
-    let Some(run_spec) = cached.projection.spec.as_ref() else {
-        return ApiError::not_found("Run not found.").into_response();
-    };
-    (StatusCode::OK, Json(run_spec.settings.clone())).into_response()
+    (
+        StatusCode::OK,
+        Json(cached.projection.spec.settings.clone()),
+    )
+        .into_response()
 }
 
 async fn get_questions(

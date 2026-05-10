@@ -7,7 +7,7 @@ use super::support::{
     compact_git_inspect, compact_inspect, run_success, setup_seeded_completed_dry_run,
     setup_seeded_created_dry_run, setup_seeded_git_backed_changed_run,
 };
-use crate::support::unique_run_id;
+use crate::support::{run_projection_json, unique_run_id};
 
 fn remote_run_summary(run_id: &str, status: &serde_json::Value) -> serde_json::Value {
     json!({
@@ -83,7 +83,16 @@ fn inspect_resolves_selector_via_server_endpoint() {
             .path(format!("/api/v1/runs/{}/state", run_id.as_str()));
         then.status(200)
             .header("content-type", "application/json")
-            .body(r#"{"stages": {}}"#);
+            .body(
+                run_projection_json(
+                    run_id.as_str(),
+                    &json!({
+                        "kind": "succeeded",
+                        "reason": "completed"
+                    }),
+                )
+                .to_string(),
+            );
     });
 
     let mut cmd = context.command();
@@ -105,7 +114,89 @@ fn inspect_resolves_selector_via_server_endpoint() {
           "kind": "succeeded",
           "reason": "completed"
         },
-        "run_spec": null,
+        "run_spec": {
+          "run_id": "[ULID]",
+          "settings": {
+            "project": {
+              "name": null,
+              "description": null,
+              "metadata": {}
+            },
+            "workflow": {
+              "name": null,
+              "description": null,
+              "graph": "",
+              "metadata": {}
+            },
+            "run": {
+              "goal": null,
+              "working_dir": null,
+              "metadata": {},
+              "inputs": {},
+              "model": {
+                "provider": null,
+                "name": null,
+                "fallbacks": []
+              },
+              "git": {
+                "author": null
+              },
+              "prepare": {
+                "commands": [],
+                "timeout_ms": 300000
+              },
+              "execution": {
+                "mode": "normal",
+                "approval": "prompt"
+              },
+              "checkpoint": {
+                "exclude_globs": []
+              },
+              "sandbox": {
+                "provider": "local",
+                "preserve": false,
+                "stop_on_terminal": true,
+                "devcontainer": false,
+                "env": {},
+                "docker": null,
+                "daytona": null
+              },
+              "notifications": {},
+              "interviews": {
+                "provider": null,
+                "slack": null
+              },
+              "agent": {
+                "permissions": null,
+                "mcps": {}
+              },
+              "hooks": [],
+              "scm": {
+                "provider": null,
+                "owner": null,
+                "repository": null,
+                "github": null
+              },
+              "pull_request": null,
+              "artifacts": {
+                "include": []
+              },
+              "integrations": {
+                "github": {
+                  "permissions": {}
+                }
+              }
+            }
+          },
+          "graph": {
+            "name": "Remote Workflow",
+            "nodes": {},
+            "edges": [],
+            "attrs": {}
+          },
+          "workflow_slug": "remote-workflow",
+          "source_directory": "/srv/repo"
+        },
         "start_record": null,
         "conclusion": null,
         "checkpoint": null,

@@ -69,7 +69,7 @@ async fn get_checkpoint(
         Err(response) => return response,
     };
     match state.store.get_cached_run(&id).await {
-        Ok(Some(cached)) => match cached.projection.checkpoint.as_ref() {
+        Ok(Some(cached)) => match cached.projection.current_checkpoint() {
             Some(cp) => (StatusCode::OK, Json(cp.clone())).into_response(),
             None => (StatusCode::OK, Json(serde_json::json!(null))).into_response(),
         },
@@ -127,13 +127,7 @@ async fn load_run_spec(state: &AppState, run_id: &RunId) -> Result<fabro_types::
     let run_state = run_store.state().await.map_err(|err| {
         ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response()
     })?;
-    run_state.spec.ok_or_else(|| {
-        ApiError::new(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            "run spec missing from store",
-        )
-        .into_response()
-    })
+    Ok(run_state.spec)
 }
 
 async fn list_run_artifacts(

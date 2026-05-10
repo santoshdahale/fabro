@@ -366,6 +366,7 @@ fn persist_validated(
         run_id,
         settings,
         graph: validated.graph().clone(),
+        graph_source: Some(validated.source().to_string()),
         workflow_slug,
         source_directory,
         labels,
@@ -887,7 +888,7 @@ mod tests {
         );
         let run_store = store.open_run(&fixtures::RUN_1).await.unwrap();
         assert_eq!(
-            run_store.state().await.unwrap().status.unwrap(),
+            run_store.state().await.unwrap().status,
             crate::run_status::RunStatus::Submitted
         );
         assert_eq!(
@@ -1111,7 +1112,7 @@ mod tests {
 
         let run_store = store.open_run_reader(&created.run_id).await.unwrap();
         let state = run_store.state().await.unwrap();
-        let run = state.spec.expect("run should be projected");
+        let run = state.spec;
         let provenance = run.provenance.expect("provenance should be projected");
 
         assert_eq!(provenance.server.unwrap().version, "0.9.0");

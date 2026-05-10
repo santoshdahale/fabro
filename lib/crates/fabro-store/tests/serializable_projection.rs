@@ -5,8 +5,9 @@ use fabro_store::{RunProjection, SerializableProjection, StageId};
 use fabro_types::graph::Graph;
 use fabro_types::run::RunSpec;
 use fabro_types::{
-    BilledModelUsage, BilledTokenCounts, Checkpoint, RunStatus, SandboxRecord, StageCompletion,
-    StageOutcome, StartRecord, TerminalStatus, WorkflowSettings, first_event_seq, fixtures,
+    BilledModelUsage, BilledTokenCounts, Checkpoint, CheckpointRecord, InterviewQuestionRecord,
+    QuestionType, RunDiff, RunStatus, SandboxRecord, StageCompletion, StageOutcome, StartRecord,
+    TerminalStatus, WorkflowSettings, first_event_seq, fixtures,
 };
 use serde_json::json;
 
@@ -15,6 +16,7 @@ fn sample_run_spec() -> RunSpec {
         run_id:           fixtures::RUN_1,
         settings:         WorkflowSettings::default(),
         graph:            Graph::new("ship"),
+        graph_source:     None,
         workflow_slug:    Some("demo".to_string()),
         source_directory: Some("/tmp/project".to_string()),
         labels:           HashMap::from([("team".to_string(), "platform".to_string())]),
@@ -76,10 +78,14 @@ fn sample_usage() -> BilledModelUsage {
 #[test]
 fn serializable_projection_round_trips_and_trims_bulky_node_fields() {
     let stage_id = StageId::new("build", 2);
-    let mut projection = RunProjection::default();
-    projection.spec = Some(sample_run_spec());
+    let mut projection = RunProjection::new(
+        "Demo".to_string(),
+        sample_run_spec(),
+        Utc.with_ymd_and_hms(2026, 4, 20, 12, 0, 0)
+            .single()
+            .unwrap(),
+    );
     projection.start = Some(StartRecord {
-        run_id:     fixtures::RUN_1,
         start_time: Utc
             .with_ymd_and_hms(2026, 4, 20, 12, 0, 0)
             .single()
@@ -87,8 +93,12 @@ fn serializable_projection_round_trips_and_trims_bulky_node_fields() {
         run_branch: Some("fabro/run/demo".to_string()),
         base_sha:   Some("deadbeef".to_string()),
     });
-    projection.status = Some(RunStatus::Running);
-    projection.checkpoint = Some(sample_checkpoint());
+    projection.status = RunStatus::Running;
+    projection.checkpoints.push(CheckpointRecord {
+        seq:        7,
+        checkpoint: sample_checkpoint(),
+        diff:       RunDiff::default(),
+    });
     projection.sandbox = Some(SandboxRecord {
         provider:          "local".to_string(),
         working_directory: "/tmp/project".to_string(),
@@ -136,7 +146,7 @@ fn serializable_projection_round_trips_and_trims_bulky_node_fields() {
         serde_json::from_value(serialized).expect("serialized projection should deserialize");
     let node = round_tripped.stage(&stage_id).expect("node should remain");
 
-    assert_eq!(round_tripped.spec().map(RunSpec::id), Some(fixtures::RUN_1));
+    assert_eq!(round_tripped.spec().id(), fixtures::RUN_1);
     assert_eq!(
         round_tripped
             .current_checkpoint()
@@ -144,7 +154,7 @@ fn serializable_projection_round_trips_and_trims_bulky_node_fields() {
             .current_node,
         "build"
     );
-    assert_eq!(round_tripped.status(), Some(RunStatus::Running));
+    assert_eq!(round_tripped.status(), RunStatus::Running);
     assert!(!round_tripped.is_terminal());
     assert_eq!(node.prompt, None);
     assert_eq!(node.response, None);
@@ -177,27 +187,34 @@ fn serializable_projection_round_trips_and_trims_bulky_node_fields() {
 
 #[test]
 fn projection_query_methods_expose_common_state() {
-    let mut projection = RunProjection::default();
-    projection.spec = Some(sample_run_spec());
-    projection.status = Some(RunStatus::Archived {
+    let mut projection = RunProjection::new("Demo".to_string(), sample_run_spec(), Utc::now());
+    projection.status = RunStatus::Archived {
+        prior: TerminalStatus::Dead,
+    };
+    projection.checkpoints.push(CheckpointRecord {
+        seq:        7,
+        checkpoint: sample_checkpoint(),
+        diff:       RunDiff::default(),
+    });
+    projection.pending_interviews =
+        BTreeMap::from([("q-1".to_string(), fabro_store::PendingInterviewRecord {
+            question:   InterviewQuestionRecord {
+                id:              "q-1".to_string(),
+                text:            "Approve?".to_string(),
+                stage:           "build".to_string(),
+                question_type:   QuestionType::Freeform,
+                options:         Vec::new(),
+                allow_freeform:  true,
+                timeout_seconds: None,
+                context_display: None,
+            },
+            started_at: Utc::now(),
+        })]);
+
+    assert_eq!(projection.spec().workflow_slug(), Some("demo"));
+    assert_eq!(projection.status(), RunStatus::Archived {
         prior: TerminalStatus::Dead,
     });
-    projection.checkpoint = Some(sample_checkpoint());
-    projection.pending_interviews = BTreeMap::from([(
-        "q-1".to_string(),
-        fabro_store::PendingInterviewRecord::default(),
-    )]);
-
-    assert_eq!(
-        projection.spec().map(RunSpec::workflow_slug),
-        Some(Some("demo"))
-    );
-    assert_eq!(
-        projection.status(),
-        Some(RunStatus::Archived {
-            prior: TerminalStatus::Dead,
-        })
-    );
     assert!(projection.is_terminal());
     assert_eq!(
         projection

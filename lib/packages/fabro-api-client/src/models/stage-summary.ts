@@ -13,15 +13,15 @@
  */
 
 
-// May contain unused imports in some cases
-// @ts-ignore
-import type { InterviewQuestionRecord } from './interview-question-record';
 
 /**
- * Pending interview question plus the time it entered the unresolved set.
+ * Terminal summary for one stage in a run conclusion.
  */
-export interface PendingInterviewRecord {
-    'question': InterviewQuestionRecord;
-    'started_at': string;
+export interface StageSummary {
+    'stage_id': string;
+    'stage_label': string;
+    'duration_ms': number;
+    'billing_usd_micros'?: number | null;
+    'retries': number;
 }
 

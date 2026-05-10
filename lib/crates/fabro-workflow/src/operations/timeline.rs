@@ -110,7 +110,8 @@ impl RunTimeline {
 
 pub fn build_timeline(state: &RunProjection) -> Result<RunTimeline> {
     let mut entries = Vec::new();
-    for (seq, checkpoint) in &state.checkpoints {
+    for record in &state.checkpoints {
+        let checkpoint = &record.checkpoint;
         let ordinal = entries.len() + 1;
         let visit = checkpoint
             .node_visits
@@ -121,7 +122,7 @@ pub fn build_timeline(state: &RunProjection) -> Result<RunTimeline> {
             ordinal,
             node_name: checkpoint.current_node.clone(),
             visit,
-            checkpoint_seq: *seq,
+            checkpoint_seq: record.seq,
             run_commit_sha: checkpoint.git_commit_sha.clone(),
         });
     }
@@ -181,11 +182,13 @@ fn detect_parallel_interior(graph: &Graph) -> HashMap<String, String> {
 }
 
 fn load_parallel_map(state: &RunProjection) -> HashMap<String, String> {
-    if let Some(spec) = state.spec.as_ref() {
-        return detect_parallel_interior(&spec.graph);
+    let spec = &state.spec;
+    let map = detect_parallel_interior(&spec.graph);
+    if !map.is_empty() {
+        return map;
     }
 
-    let Some(dot_source) = state.graph_source.as_ref() else {
+    let Some(dot_source) = spec.graph_source.as_ref() else {
         return HashMap::new();
     };
     let Ok(graph) = parser::parse(dot_source) else {
@@ -199,7 +202,9 @@ mod tests {
     use std::collections::HashMap;
 
     use chrono::Utc;
-    use fabro_types::Checkpoint;
+    use fabro_types::{
+        Checkpoint, CheckpointRecord, Graph, RunDiff, RunSpec, WorkflowSettings, fixtures,
+    };
 
     use super::*;
 
@@ -208,7 +213,7 @@ mod tests {
         current_node: &str,
         visit: usize,
         git_commit_sha: Option<&str>,
-    ) -> (u32, Checkpoint) {
+    ) -> CheckpointRecord {
         let mut node_visits = HashMap::new();
         node_visits.insert(current_node.to_string(), visit);
         let checkpoint = Checkpoint {
@@ -224,7 +229,32 @@ mod tests {
             restart_failure_signatures: HashMap::new(),
             node_visits,
         };
-        (seq, checkpoint)
+        CheckpointRecord {
+            seq,
+            checkpoint,
+            diff: RunDiff::default(),
+        }
+    }
+
+    fn test_projection() -> RunProjection {
+        RunProjection::new(
+            "Test run".to_string(),
+            RunSpec {
+                run_id:           fixtures::RUN_1,
+                settings:         WorkflowSettings::default(),
+                graph:            Graph::new("test"),
+                graph_source:     None,
+                workflow_slug:    None,
+                source_directory: None,
+                labels:           HashMap::new(),
+                provenance:       None,
+                manifest_blob:    None,
+                definition_blob:  None,
+                git:              None,
+                fork_source_ref:  None,
+            },
+            Utc::now(),
+        )
     }
 
     #[test]
@@ -242,7 +272,7 @@ mod tests {
 
     #[test]
     fn build_timeline_simple() {
-        let mut state = RunProjection::default();
+        let mut state = test_projection();
         state.checkpoints = vec![
             checkpoint(7, "start", 1, Some("aaa")),
             checkpoint(9, "build", 1, Some("bbb")),

@@ -1,8 +1,8 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
-use crate::BilledTokenCounts;
 use crate::outcome::StageOutcome;
+use crate::{BilledTokenCounts, RunDiff};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StageSummary {
@@ -29,4 +29,6 @@ pub struct Conclusion {
     pub billing:              Option<BilledTokenCounts>,
     #[serde(default)]
     pub total_retries:        u32,
+    #[serde(default)]
+    pub diff:                 RunDiff,
 }

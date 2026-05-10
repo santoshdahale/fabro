@@ -135,7 +135,9 @@ fn print_human_output(
 
 #[cfg(test)]
 mod tests {
-    use fabro_types::{BilledTokenCounts, RunStatus, StageOutcome, SuccessReason, fixtures};
+    use fabro_types::{
+        BilledTokenCounts, RunDiff, RunStatus, StageOutcome, SuccessReason, fixtures,
+    };
     use fabro_workflow::records::Conclusion;
 
     use super::*;
@@ -164,6 +166,7 @@ mod tests {
                 total_usd_micros:   Some(420_000),
             }),
             total_retries:        0,
+            diff:                 RunDiff::default(),
         };
         let json = build_json_output(
             RunStatus::Succeeded {
@@ -214,6 +217,7 @@ mod tests {
             stages:               vec![],
             billing:              None,
             total_retries:        0,
+            diff:                 RunDiff::default(),
         };
         let json = build_json_output(
             RunStatus::Failed {
@@ -247,6 +251,7 @@ mod tests {
                 total_usd_micros:   Some(150_000),
             }),
             total_retries:        0,
+            diff:                 RunDiff::default(),
         };
         // Just verify no panic; actual stderr output is hard to capture
         print_human_output(

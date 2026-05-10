@@ -57,7 +57,7 @@ pub async fn fork_run(
         ))
     })?;
 
-    validate_source_spec(state.spec.as_ref(), &checkpoint_sha)?;
+    validate_source_spec(&state.spec, &checkpoint_sha)?;
 
     let events = run_store
         .list_events()
@@ -69,10 +69,7 @@ pub async fn fork_run(
         .collect::<Vec<_>>();
     let mut projection = RunProjection::apply_events(&historical_events)
         .map_err(|err| Error::engine(err.to_string()))?;
-    let mut run_spec = projection
-        .spec
-        .clone()
-        .ok_or_else(|| Error::engine("source run projection has no spec"))?;
+    let mut run_spec = projection.spec.clone();
 
     let new_run_id = RunId::new();
     run_spec.run_id = new_run_id;
@@ -80,15 +77,14 @@ pub async fn fork_run(
         source_run_id,
         checkpoint_sha: checkpoint_sha.clone(),
     });
-    projection.spec = Some(run_spec);
+    projection.spec = run_spec;
     projection.start = None;
     projection.sandbox = None;
     projection.conclusion = None;
-    projection.final_patch = None;
     projection.pull_request = None;
     projection.superseded_by = None;
-    if let Some(checkpoint) = projection.checkpoint.as_mut() {
-        checkpoint.git_commit_sha = Some(checkpoint_sha);
+    if let Some(record) = projection.checkpoints.last_mut() {
+        record.checkpoint.git_commit_sha = Some(checkpoint_sha);
     }
 
     persist_forked_run(store, &projection, &historical_events).await?;
@@ -104,11 +100,7 @@ pub async fn fork_run(
     })
 }
 
-fn validate_source_spec(
-    spec: Option<&RunSpec>,
-    checkpoint_sha: &str,
-) -> std::result::Result<(), Error> {
-    let spec = spec.ok_or_else(|| Error::engine("source run projection has no spec"))?;
+fn validate_source_spec(spec: &RunSpec, checkpoint_sha: &str) -> std::result::Result<(), Error> {
     if checkpoint_sha.trim().is_empty() {
         return Err(Error::Validation(
             "target checkpoint has an empty git_commit_sha; cannot fork".to_string(),
@@ -146,13 +138,9 @@ async fn persist_forked_run(
     projection: &RunProjection,
     historical_events: &[EventEnvelope],
 ) -> std::result::Result<(), Error> {
-    let spec = projection
-        .spec
-        .as_ref()
-        .ok_or_else(|| Error::engine("forked run projection has no spec"))?;
+    let spec = &projection.spec;
     let checkpoint = projection
-        .checkpoint
-        .as_ref()
+        .current_checkpoint()
         .ok_or_else(|| Error::engine("forked run projection has no checkpoint"))?;
 
     let run_store = store
@@ -167,7 +155,7 @@ async fn persist_forked_run(
             .map_err(|err| Error::engine(err.to_string()))?,
         graph:            serde_json::to_value(&spec.graph)
             .map_err(|err| Error::engine(err.to_string()))?,
-        workflow_source:  projection.graph_source.clone(),
+        workflow_source:  projection.spec.graph_source.clone(),
         workflow_config:  None,
         labels:           spec.labels.clone().into_iter().collect(),
         run_dir:          String::new(),
@@ -426,12 +414,7 @@ mod tests {
         assert_eq!(node.response.as_deref(), Some("historical response"));
         assert_eq!(forked_state.checkpoints.len(), 1);
         assert_eq!(
-            forked_state
-                .spec
-                .unwrap()
-                .fork_source_ref
-                .unwrap()
-                .source_run_id,
+            forked_state.spec.fork_source_ref.unwrap().source_run_id,
             source_run_id
         );
     }

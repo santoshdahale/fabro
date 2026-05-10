@@ -13,15 +13,13 @@
  */
 
 
-// May contain unused imports in some cases
-// @ts-ignore
-import type { InterviewQuestionRecord } from './interview-question-record';
 
 /**
- * Pending interview question plus the time it entered the unresolved set.
+ * Metadata captured when execution starts.
  */
-export interface PendingInterviewRecord {
-    'question': InterviewQuestionRecord;
-    'started_at': string;
+export interface StartRecord {
+    'start_time': string;
+    'run_branch'?: string | null;
+    'base_sha'?: string | null;
 }
 

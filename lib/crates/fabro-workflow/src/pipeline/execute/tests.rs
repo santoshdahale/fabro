@@ -23,7 +23,7 @@ use object_store::memory::InMemory;
 use super::*;
 use crate::context::{self, Context};
 use crate::error::Error;
-use crate::event::{Emitter, StoreProgressLogger};
+use crate::event::{Emitter, Event, StoreProgressLogger, append_event};
 use crate::handler::start::StartHandler;
 use crate::handler::{Handler as HandlerTrait, HandlerRegistry};
 use crate::outcome::{Outcome, OutcomeExt, StageOutcome};
@@ -138,6 +138,7 @@ fn persisted_workflow(graph: Graph, source: String, run_dir: &Path, run_id: RunI
             run_id,
             settings: WorkflowSettings::default(),
             graph,
+            graph_source: None,
             workflow_slug: Some("test".to_string()),
             source_directory: Some(
                 std::env::current_dir()
@@ -179,6 +180,36 @@ async fn test_run_store(run_id: &RunId) -> fabro_store::RunDatabase {
     store.create_run(run_id).await.unwrap()
 }
 
+async fn seed_created_and_starting(
+    run_store: &fabro_store::RunDatabase,
+    run_options: &RunOptions,
+    graph: &Graph,
+) {
+    append_event(run_store, &run_options.run_id, &Event::RunCreated {
+        run_id:           run_options.run_id,
+        title:            None,
+        settings:         serde_json::to_value(&run_options.settings).unwrap(),
+        graph:            serde_json::to_value(graph).unwrap(),
+        workflow_source:  None,
+        workflow_config:  None,
+        labels:           run_options.labels.clone().into_iter().collect(),
+        run_dir:          run_options.run_dir.display().to_string(),
+        source_directory: Some(std::env::current_dir().unwrap().display().to_string()),
+        workflow_slug:    run_options.workflow_slug.clone(),
+        db_prefix:        None,
+        provenance:       None,
+        manifest_blob:    None,
+        git:              run_options.pre_run_git.clone(),
+        fork_source_ref:  run_options.fork_source_ref.clone(),
+        web_url:          None,
+    })
+    .await
+    .unwrap();
+    append_event(run_store, &run_options.run_id, &Event::RunStarting)
+        .await
+        .unwrap();
+}
+
 async fn execute_test_run(run_dir: &Path, graph: Graph, run_id: &str) -> Executed {
     execute_test_run_with_options(test_run_options(run_dir, run_id), graph, None).await
 }
@@ -191,6 +222,7 @@ async fn execute_test_run_with_options(
     let run_id_value = run_options.run_id;
     let git_options = run_options.git.clone();
     let run_store = test_run_store(&run_id_value).await;
+    seed_created_and_starting(&run_store, &run_options, &graph).await;
     let emitter = test_emitter_arc("test-run");
     let store_logger = StoreProgressLogger::new(run_store.clone());
     store_logger.register(&emitter);
@@ -252,50 +284,53 @@ async fn execute_runs_start_to_exit_and_returns_final_context() {
     let run_dir = temp.path().join("run");
     std::fs::create_dir_all(&run_dir).unwrap();
     let (graph, source) = simple_validated_graph();
+    let run_options = test_run_options(&run_dir, "run-test");
+    let run_store = test_run_store(&test_run_id("run-test")).await;
+    seed_created_and_starting(&run_store, &run_options, &graph).await;
     let initialized = initialize(
         persisted_workflow(graph, source, &run_dir, test_run_id("run-test")),
         InitOptions {
-            run_id:            test_run_id("run-test"),
-            run_store:         test_run_store(&test_run_id("run-test")).await.into(),
-            dry_run:           false,
-            emitter:           test_emitter_arc("run-test"),
-            sandbox:           SandboxSpec::Local {
+            run_id: test_run_id("run-test"),
+            run_store: run_store.into(),
+            dry_run: false,
+            emitter: test_emitter_arc("run-test"),
+            sandbox: SandboxSpec::Local {
                 working_directory: std::env::current_dir().unwrap(),
             },
-            llm:               LlmSpec {
+            llm: LlmSpec {
                 model:          "test-model".to_string(),
                 provider:       fabro_llm::Provider::Anthropic,
                 fallback_chain: Vec::new(),
                 mcp_servers:    Vec::new(),
                 dry_run:        true,
             },
-            interviewer:       Arc::new(AutoApproveInterviewer::engine()),
-            steering_hub:      Arc::new(crate::steering_hub::SteeringHub::new(test_emitter_arc(
+            interviewer: Arc::new(AutoApproveInterviewer::engine()),
+            steering_hub: Arc::new(crate::steering_hub::SteeringHub::new(test_emitter_arc(
                 "run-test",
             ))),
-            lifecycle:         LifecycleOptions {
+            lifecycle: LifecycleOptions {
                 setup_commands:           vec![],
                 setup_command_timeout_ms: 1_000,
                 devcontainer_phases:      vec![],
             },
-            run_options:       test_run_options(&run_dir, "run-test"),
-            workflow_path:     None,
-            workflow_bundle:   None,
-            hooks:             HookSettings { hooks: vec![] },
-            sandbox_env:       SandboxEnvSpec {
+            run_options,
+            workflow_path: None,
+            workflow_bundle: None,
+            hooks: HookSettings { hooks: vec![] },
+            sandbox_env: SandboxEnvSpec {
                 devcontainer_env:   HashMap::new(),
                 toml_env:           HashMap::new(),
                 github_permissions: None,
                 origin_url:         None,
             },
-            vault:             None,
-            devcontainer:      None,
-            git:               None,
-            run_control:       None,
+            vault: None,
+            devcontainer: None,
+            git: None,
+            run_control: None,
             registry_override: None,
-            artifact_sink:     None,
-            checkpoint:        None,
-            seed_context:      None,
+            artifact_sink: None,
+            checkpoint: None,
+            seed_context: None,
         },
     )
     .await
@@ -326,11 +361,13 @@ async fn run_with_lifecycle(
     std::fs::create_dir_all(&run_options.run_dir).unwrap();
     let run_dir = run_options.run_dir.clone();
     let run_id = run_options.run_id;
+    let run_store = test_run_store(&run_id).await;
+    seed_created_and_starting(&run_store, &run_options, graph).await;
     let initialized = initialize(
         persisted_workflow(graph.clone(), String::new(), &run_dir, run_id),
         InitOptions {
             run_id,
-            run_store: test_run_store(&run_id).await.into(),
+            run_store: run_store.into(),
             dry_run: false,
             emitter: emitter.clone(),
             sandbox: SandboxSpec::Local {
@@ -572,7 +609,7 @@ async fn execute_saves_checkpoint() {
             .state()
             .await
             .unwrap()
-            .checkpoint
+            .current_checkpoint()
             .is_some()
     );
 }
@@ -625,7 +662,8 @@ async fn execute_mirrors_graph_goal_to_context() {
         .state()
         .await
         .unwrap()
-        .checkpoint
+        .current_checkpoint()
+        .cloned()
         .unwrap();
     assert_eq!(
         cp.context_values.get(context::keys::GRAPH_GOAL),
@@ -673,7 +711,8 @@ async fn execute_conditional_routing_uses_unconditional_success_path() {
         .state()
         .await
         .unwrap()
-        .checkpoint
+        .current_checkpoint()
+        .cloned()
         .unwrap();
     assert!(cp.completed_nodes.contains(&"path_b".to_string()));
     assert!(!cp.completed_nodes.contains(&"path_a".to_string()));
@@ -739,7 +778,8 @@ async fn execute_conditional_routing_resolves_command_output_blob_refs() {
         .state()
         .await
         .unwrap()
-        .checkpoint
+        .current_checkpoint()
+        .cloned()
         .unwrap();
     assert!(cp.completed_nodes.contains(&"matched".to_string()));
     assert!(!cp.completed_nodes.contains(&"fallback".to_string()));
@@ -764,7 +804,6 @@ async fn execute_persists_start_record_and_node_status() {
     let executed = execute_test_run_with_options(run_options, simple_graph(), None).await;
     let state = executed.engine.run.run_store.state().await.unwrap();
     let start = state.start.as_ref().unwrap();
-    assert_eq!(start.run_id, test_run_id("test-run"));
     assert_eq!(
         start.run_branch.as_deref(),
         Some(format!("fabro/run/{}", test_run_id("test-run")).as_str())
