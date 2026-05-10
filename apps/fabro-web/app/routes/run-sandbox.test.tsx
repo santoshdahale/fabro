@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, mock, test } from "bun:test";
+import type { ReactNode } from "react";
 import TestRenderer, { act } from "react-test-renderer";
 import { MemoryRouter, Route, Routes } from "react-router";
 
@@ -39,7 +40,9 @@ mock.module("../lib/queries", () => ({
 }));
 
 mock.module("../components/terminal-view", () => ({
-  default: () => null,
+  // Render the leading slot so the mode toggle (now hosted inside each panel
+  // header) is reachable from outer tab-presence assertions.
+  default: ({ leading }: { leading?: ReactNode }) => <div>{leading}</div>,
   TERMINAL_DOCK_CLEARANCE_CLASS: "",
 }));
 

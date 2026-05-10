@@ -254,7 +254,7 @@ function textContent(node: TestRenderer.ReactTestInstance): string {
 }
 
 describe("FilesystemPanel render", () => {
-  test("requests the default workspace directory on mount", () => {
+  test("requests the root directory on mount", () => {
     filesState = {
       ...makeEmptyFilesState(),
       data: {
@@ -265,7 +265,7 @@ describe("FilesystemPanel render", () => {
       },
     };
     renderPanel();
-    expect(lastFilesArgs).toEqual({ id: "run_1", path: "/workspace" });
+    expect(lastFilesArgs).toEqual({ id: "run_1", path: "/" });
   });
 
   test("renders breadcrumbs and tree when entries arrive", () => {
@@ -286,7 +286,6 @@ describe("FilesystemPanel render", () => {
       (node) => node.props["aria-label"] === "Sandbox path",
     );
     expect(textContent(breadcrumbsNav)).toContain("/");
-    expect(textContent(breadcrumbsNav)).toContain("workspace");
   });
 
   test("shows an error state when listing fails", () => {
@@ -346,14 +345,14 @@ describe("FilesystemPanel render", () => {
       },
     };
     renderPanel();
-    expect(lastFilesArgs?.path).toBe("/workspace");
+    expect(lastFilesArgs?.path).toBe("/");
     const placeholder = filesystemPanelModule.buildTreeInputs(
       filesState.data!.data,
     ).paths.find((path) => path.startsWith("src/"))!;
     act(() => {
       lastTreeOptions?.onSelectionChange?.([placeholder]);
     });
-    expect(lastFilesArgs?.path).toBe("/workspace/src");
+    expect(lastFilesArgs?.path).toBe("/src");
   });
 
   test("selecting a file fetches its contents and renders the preview", () => {
@@ -371,7 +370,7 @@ describe("FilesystemPanel render", () => {
     });
     expect(lastFileArgs).toEqual({
       id:   "run_1",
-      path: "/workspace/README.md",
+      path: "/README.md",
     });
     const previews = renderer.root.findAll(
       (node) =>

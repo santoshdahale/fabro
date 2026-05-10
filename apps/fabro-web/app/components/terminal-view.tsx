@@ -185,7 +185,13 @@ function StatusPill({
   );
 }
 
-export default function TerminalView({ runId }: { runId: string }) {
+export default function TerminalView({
+  runId,
+  leading,
+}: {
+  runId: string;
+  leading?: React.ReactNode;
+}) {
   const { push } = useToast();
   const stateQuery = useRunState(runId);
   const sandbox = getObject(getObject(stateQuery.data, "run"), "sandbox")
@@ -345,9 +351,10 @@ export default function TerminalView({ runId }: { runId: string }) {
       aria-labelledby={headingId}
     >
       <h2 id={headingId} className="sr-only">Terminal</h2>
-      <div className="mb-2 flex shrink-0 flex-wrap items-center justify-between gap-3">
+      <div className="mb-2 flex shrink-0 flex-wrap items-center gap-3">
+        {leading}
         <StatusPill status={status} detail={sandboxDetail} />
-        <div className="flex items-center gap-2">
+        <div className="ml-auto flex items-center gap-2">
           <Tooltip label="Reconnect">
             <button
               type="button"

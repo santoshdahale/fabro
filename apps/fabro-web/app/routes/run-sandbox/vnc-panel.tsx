@@ -16,6 +16,7 @@ import { SECONDARY_BUTTON_CLASS, Tooltip } from "../../components/ui";
 interface VncPanelProps {
   runId:    string;
   provider: string | null;
+  leading?: React.ReactNode;
 }
 
 // Pre-flight gate so unsupported providers never POST. The server returns 501
@@ -78,7 +79,7 @@ export function describeVncError(error: unknown): VncErrorState {
   };
 }
 
-export default function VncPanel({ runId, provider }: VncPanelProps) {
+export default function VncPanel({ runId, provider, leading }: VncPanelProps) {
   const supported = vncSupported(provider);
   const vncQuery = useSandboxVncPreview(runId, supported);
   const errorState = useMemo<VncErrorState | null>(
@@ -94,13 +95,14 @@ export default function VncPanel({ runId, provider }: VncPanelProps) {
       <h2 id={`run-vnc-${runId}`} className="sr-only">
         VNC desktop
       </h2>
-      <div className="mb-2 flex shrink-0 items-center justify-between gap-3">
+      <div className="mb-2 flex shrink-0 flex-wrap items-center gap-3">
+        {leading}
         <StatusPill
           provider={provider}
           loading={supported && vncQuery.isLoading}
           error={errorState}
         />
-        <div className="flex items-center gap-2">
+        <div className="ml-auto flex items-center gap-2">
           {vncQuery.data && (
             <Tooltip label="Open in new tab">
               <a

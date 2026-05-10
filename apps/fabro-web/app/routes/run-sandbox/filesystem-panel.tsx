@@ -27,7 +27,7 @@ import { ApiError } from "../../lib/api-client";
 import { EmptyState, ErrorState, LoadingState } from "../../components/state";
 import { SECONDARY_BUTTON_CLASS, Tooltip } from "../../components/ui";
 
-export const DEFAULT_DIR = "/workspace";
+export const DEFAULT_DIR = "/";
 
 // Match the run-files/diff caps so previews stay responsive and don't blow up
 // the browser on accidentally large logs. Files above the limit fall back to a
@@ -38,10 +38,11 @@ const BINARY_SAMPLE_BYTES = 8 * 1024;
 type TreeThemeStyle = CSSProperties & Record<`--${string}`, string | number>;
 
 interface FilesystemPanelProps {
-  runId: string;
+  runId:    string;
+  leading?: React.ReactNode;
 }
 
-// `path` here is always an absolute sandbox path (e.g. `/workspace/src/main.ts`).
+// `path` here is always an absolute sandbox path (e.g. `/src/main.ts`).
 // Tree paths fed to @pierre/trees are *relative* to `currentDir` so each
 // directory navigation gets a fresh, shallow tree rather than accumulating
 // state across navigations.
@@ -174,7 +175,7 @@ interface PreviewState {
   byteLength?: number;
 }
 
-export default function FilesystemPanel({ runId }: FilesystemPanelProps) {
+export default function FilesystemPanel({ runId, leading }: FilesystemPanelProps) {
   const [currentDir, setCurrentDir] = useState<string>(DEFAULT_DIR);
   const [selectedFilePath, setSelectedFilePath] = useState<string | null>(null);
   const [selectedFileSize, setSelectedFileSize] = useState<number | undefined>(undefined);
@@ -197,9 +198,10 @@ export default function FilesystemPanel({ runId }: FilesystemPanelProps) {
       <h2 id={`run-filesystem-${runId}`} className="sr-only">
         Filesystem
       </h2>
-      <div className="mb-2 flex shrink-0 items-center justify-between gap-3">
+      <div className="mb-2 flex shrink-0 flex-wrap items-center gap-3">
+        {leading}
         <Breadcrumbs path={currentDir} onNavigate={navigate} />
-        <div className="flex items-center gap-2">
+        <div className="ml-auto flex items-center gap-2">
           <Tooltip label="Up one level">
             <button
               type="button"

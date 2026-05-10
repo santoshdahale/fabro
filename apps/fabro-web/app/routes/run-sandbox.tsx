@@ -265,18 +265,24 @@ export default function RunSandbox({ params }: { params: { id: string } }) {
         <div
           className={`flex min-h-0 flex-1 flex-col pt-6 pl-6 ${TERMINAL_DOCK_CLEARANCE_CLASS}`}
         >
-          <ModeToggle
-            mode={mode}
-            onChange={setMode}
-            vncAvailable={vncTabAvailable(provider)}
-          />
-          {mode === "terminal" ? (
-            <TerminalView runId={params.id} />
-          ) : mode === "filesystem" ? (
-            <FilesystemPanel runId={params.id} />
-          ) : (
-            <VncPanel runId={params.id} provider={provider} />
-          )}
+          {(() => {
+            const modeToggle = (
+              <ModeToggle
+                mode={mode}
+                onChange={setMode}
+                vncAvailable={vncTabAvailable(provider)}
+              />
+            );
+            if (mode === "terminal") {
+              return <TerminalView runId={params.id} leading={modeToggle} />;
+            }
+            if (mode === "filesystem") {
+              return <FilesystemPanel runId={params.id} leading={modeToggle} />;
+            }
+            return (
+              <VncPanel runId={params.id} provider={provider} leading={modeToggle} />
+            );
+          })()}
         </div>
       </div>
     </div>
@@ -294,7 +300,7 @@ function ModeToggle({ mode, onChange, vncAvailable }: ModeToggleProps) {
     <div
       role="tablist"
       aria-label="Sandbox view"
-      className="mb-3 flex shrink-0 items-center gap-1 rounded-md border border-line bg-panel/60 p-1 self-start"
+      className="flex shrink-0 items-center gap-1 rounded-md border border-line bg-panel/60 p-1 self-start"
     >
       <ModeToggleButton
         label="Terminal"
