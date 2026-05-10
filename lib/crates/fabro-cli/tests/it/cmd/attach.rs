@@ -1062,6 +1062,7 @@ fn attach_json_errors_without_prompting_for_human_input() {
         "event": "sandbox.initialized",
         "id": "[EVENT_ID]",
         "properties": {
+          "id": "local:[ULID]",
           "provider": "local",
           "working_directory": "[TEMP_DIR]"
         },
