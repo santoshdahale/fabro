@@ -67,7 +67,7 @@ function stripGraphTitle(svg: SVGSVGElement) {
 const ZOOM_STEPS = [25, 50, 75, 100, 150, 200];
 const DEFAULT_ZOOM_INDEX = 2; // 75%
 
-export default function WorkflowDiagram() {
+export default function AutomationDiagram() {
   const containerRef = useRef<HTMLDivElement>(null);
   const innerRef = useRef<HTMLDivElement>(null);
   const svgRef = useRef<SVGSVGElement | null>(null);

@@ -18,7 +18,7 @@ import { useWorkflows } from "../lib/queries";
 import { timeAgo, timeUntil } from "../lib/time";
 
 export function meta({}: any) {
-  return [{ title: "Workflows — Fabro" }];
+  return [{ title: "Automations — Fabro" }];
 }
 
 export const handle = {
@@ -29,7 +29,7 @@ export const handle = {
         className="inline-flex items-center gap-1.5 rounded-l-md border border-r-0 border-mint/20 px-3 py-1.5 text-sm font-medium text-mint transition-colors hover:border-mint/50 hover:bg-mint/10 hover:text-fg"
       >
         <PlusIcon className="size-3.5" aria-hidden="true" />
-        Create Workflow
+        Create Automation
       </button>
       <Menu as="div" className="relative -ml-px flex">
         <MenuButton className="inline-flex items-center rounded-r-md border border-mint/20 px-1.5 text-mint transition-colors hover:border-mint/50 hover:bg-mint/10 hover:text-fg">
@@ -145,7 +145,7 @@ function WorkflowCard({ workflow }: { workflow: Workflow }) {
   const Icon = workflow.icon;
   return (
     <div className="group flex items-center gap-4 rounded-md border border-line bg-panel/80 p-4 transition-all duration-200 hover:border-line-strong hover:bg-panel hover:shadow-lg hover:shadow-black/20">
-      <Link to={`/workflows/${workflow.slug}`} className="flex min-w-0 flex-1 items-center gap-4">
+      <Link to={`/automations/${workflow.slug}`} className="flex min-w-0 flex-1 items-center gap-4">
         <div
           className="flex size-9 shrink-0 items-center justify-center rounded-md border bg-panel-alt/60"
           style={{ borderColor: `color-mix(in srgb, ${workflow.color} 20%, transparent)`, color: workflow.color }}
@@ -181,7 +181,7 @@ function WorkflowCard({ workflow }: { workflow: Workflow }) {
       ) : (
         <button
           type="button"
-          title="Run workflow"
+          title="Run automation"
           className="flex size-8 shrink-0 items-center justify-center rounded-full border border-mint/20 text-mint transition-colors hover:border-mint/50 hover:bg-mint/10 hover:text-fg"
         >
           <PlayIcon className="size-3.5" />
@@ -201,7 +201,7 @@ function WorkflowCard({ workflow }: { workflow: Workflow }) {
 
 type TriggerFilter = "all" | "scheduled" | "manual";
 
-export default function Workflows() {
+export default function Automations() {
   const workflowsQuery = useWorkflows();
   const workflows = enrichWorkflows(mapWorkflows(workflowsQuery.data));
   const [query, setQuery] = useState("");
@@ -222,7 +222,7 @@ export default function Workflows() {
           <MagnifyingGlassIcon className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-fg-muted" />
           <input
             type="text"
-            placeholder="Search workflows..."
+            placeholder="Search automations..."
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             className="w-full rounded-md border border-line bg-panel/80 py-2 pl-9 pr-3 text-sm text-fg-2 placeholder-fg-muted outline-none transition-colors focus:border-focus focus:ring-0"
@@ -246,7 +246,7 @@ export default function Workflows() {
           <WorkflowCard key={workflow.filename} workflow={workflow} />
         ))}
         {filtered.length === 0 && (
-          <p className="py-8 text-center text-sm text-fg-muted">No workflows match "{query}"</p>
+          <p className="py-8 text-center text-sm text-fg-muted">No automations match "{query}"</p>
         )}
       </div>
     </div>

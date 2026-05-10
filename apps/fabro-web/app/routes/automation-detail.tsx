@@ -310,21 +310,21 @@ function resolveWorkflow(name: string | undefined, apiWorkflow: ApiWorkflowDetai
 }
 
 export function meta({ data }: any) {
-  const title = data?.workflow?.name ?? "Workflow";
+  const title = data?.workflow?.name ?? "Automation";
   return [{ title: `${title} — Fabro` }];
 }
 
-export default function WorkflowDetail() {
+export default function AutomationDetail() {
   const { name } = useParams();
   const workflowQuery = useWorkflow(name);
   const { pathname } = useLocation();
   const workflow = resolveWorkflow(name, workflowQuery.data);
-  const basePath = `/workflows/${name}`;
+  const basePath = `/automations/${name}`;
 
   return (
     <div>
       <nav className="mb-4 flex items-center gap-1 text-sm text-fg-muted">
-        <Link to="/workflows" className="text-fg-3 hover:text-fg">Workflows</Link>
+        <Link to="/automations" className="text-fg-3 hover:text-fg">Automations</Link>
         <ChevronRightIcon className="size-3" />
         <span>{workflow.name}</span>
       </nav>
@@ -339,7 +339,7 @@ export default function WorkflowDetail() {
         </div>
         <button
           type="button"
-          title="Run workflow"
+          title="Run automation"
           className="flex shrink-0 items-center gap-1.5 rounded-md border border-mint/20 px-3 py-1.5 text-sm font-medium text-mint transition-colors hover:border-mint/50 hover:bg-mint/10 hover:text-fg"
         >
           <svg viewBox="0 0 24 24" fill="currentColor" className="size-3.5" aria-hidden="true">

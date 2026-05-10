@@ -2,10 +2,10 @@ import { useEffect, useState } from "react";
 import { useOutletContext, useParams } from "react-router";
 import type { BundledLanguage } from "@pierre/diffs";
 import { registerDotLanguage } from "../data/register-dot-language";
-import { workflowData, type WorkflowEntry } from "./workflow-detail";
+import { workflowData, type WorkflowEntry } from "./automation-detail";
 import { CollapsibleFile } from "../components/collapsible-file";
 
-export default function WorkflowDefinition() {
+export default function AutomationDefinition() {
   const { name } = useParams();
   const context = useOutletContext<{ workflow?: WorkflowEntry } | null>();
   const workflow = context?.workflow ?? workflowData[name ?? ""];

@@ -66,7 +66,7 @@ function RunRow({ run }: { run: RunWithStatus }) {
   );
 }
 
-export default function WorkflowRuns() {
+export default function AutomationRuns() {
   const { name } = useParams();
   const runsQuery = useWorkflowRuns(name);
   const runs = mapWorkflowRuns(runsQuery.data);

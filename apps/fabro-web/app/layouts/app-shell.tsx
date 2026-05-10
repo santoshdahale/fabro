@@ -24,7 +24,7 @@ import { useToggleDemoMode } from "../lib/mutations";
 import { useAuthMe } from "../lib/queries";
 
 const allNavigation = [
-  { name: "Workflows", href: "/workflows", icon: SparklesIcon, demoOnly: true },
+  { name: "Automations", href: "/automations", icon: SparklesIcon, demoOnly: true },
   { name: "Runs", href: "/runs", icon: PlayIcon, demoOnly: false },
   { name: "Insights", href: "/insights", icon: ChartBarIcon, demoOnly: true },
   { name: "Settings", href: "/settings", icon: Cog6ToothIcon, demoOnly: false },

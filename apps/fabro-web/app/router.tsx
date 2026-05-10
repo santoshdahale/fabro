@@ -6,11 +6,11 @@ import * as RedirectHome from "./routes/redirect-home";
 import * as Setup from "./routes/setup";
 import * as AuthLogin from "./routes/auth-login";
 import * as Start from "./routes/start";
-import * as Workflows from "./routes/workflows";
-import * as WorkflowDetail from "./routes/workflow-detail";
-import * as WorkflowDefinition from "./routes/workflow-definition";
-import * as WorkflowDiagram from "./routes/workflow-diagram";
-import * as WorkflowRuns from "./routes/workflow-runs";
+import * as Automations from "./routes/automations";
+import * as AutomationDetail from "./routes/automation-detail";
+import * as AutomationDefinition from "./routes/automation-definition";
+import * as AutomationDiagram from "./routes/automation-diagram";
+import * as AutomationRuns from "./routes/automation-runs";
 import * as Runs from "./routes/runs";
 import * as RunDetail from "./routes/run-detail";
 import * as RunOverview from "./routes/run-overview";
@@ -83,12 +83,12 @@ export const routes: RouteObject[] = [
         }),
         children: [
           route("start", Start),
-          route("workflows", Workflows),
-          route("workflows/:name", WorkflowDetail, {
+          route("automations", Automations),
+          route("automations/:name", AutomationDetail, {
             children: [
-              indexRoute(WorkflowDefinition),
-              route("diagram", WorkflowDiagram),
-              route("runs", WorkflowRuns),
+              indexRoute(AutomationDefinition),
+              route("diagram", AutomationDiagram),
+              route("runs", AutomationRuns),
             ],
           }),
           route("runs", Runs),
