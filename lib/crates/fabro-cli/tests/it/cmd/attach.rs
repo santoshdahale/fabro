@@ -950,6 +950,10 @@ fn attach_json_errors_without_prompting_for_human_input() {
               },
               "metadata": {},
               "model": {
+                "controls": {
+                  "reasoning_effort": null,
+                  "speed": null
+                },
                 "fallbacks": [],
                 "name": "gpt-5.4",
                 "provider": "openai"

@@ -5,8 +5,8 @@ use fabro_types::settings::run::{
     McpTransport, MergeStrategy, NotificationProviderSettings, NotificationRouteSettings,
     PullRequestSettings, RunAgentSettings, RunCheckpointSettings, RunExecutionSettings,
     RunGitSettings, RunGoal, RunIntegrationsGithubSettings, RunIntegrationsSettings,
-    RunInterviewsSettings, RunModelSettings, RunNamespace, RunPrepareSettings, RunSandboxSettings,
-    RunScmSettings, ScmGitHubSettings, TlsMode,
+    RunInterviewsSettings, RunModelControls, RunModelSettings, RunNamespace, RunPrepareSettings,
+    RunSandboxSettings, RunScmSettings, ScmGitHubSettings, TlsMode,
 };
 
 use super::ResolveError;
@@ -87,6 +87,14 @@ fn resolve_model(model: Option<&RunModelLayer>) -> RunModelSettings {
                 ModelRefOrSplice::Splice => None,
             })
             .collect(),
+        controls:  model
+            .controls
+            .as_ref()
+            .map(|c| RunModelControls {
+                reasoning_effort: c.reasoning_effort.clone(),
+                speed:            c.speed.clone(),
+            })
+            .unwrap_or_default(),
     }
 }
 

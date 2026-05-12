@@ -67,6 +67,7 @@ pub fn build_run_overrides(input: RunOverrideInput<'_>) -> RunLayer {
         provider:  input.provider.map(InterpString::parse),
         name:      input.model.map(InterpString::parse),
         fallbacks: Vec::new(),
+        controls:  None,
     });
     let sandbox = (input.sandbox.is_some()
         || input.docker_image.is_some()

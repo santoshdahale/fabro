@@ -95,7 +95,7 @@ fn inspect_resolves_selector_via_server_endpoint() {
         "nightly-build",
     ]);
 
-    fabro_snapshot!(context.filters(), cmd, @r###"
+    fabro_snapshot!(context.filters(), cmd, @r#"
     success: true
     exit_code: 0
     ----- stdout -----
@@ -128,7 +128,11 @@ fn inspect_resolves_selector_via_server_endpoint() {
               "model": {
                 "provider": null,
                 "name": null,
-                "fallbacks": []
+                "fallbacks": [],
+                "controls": {
+                  "reasoning_effort": null,
+                  "speed": null
+                }
               },
               "git": {
                 "author": null
@@ -196,7 +200,7 @@ fn inspect_resolves_selector_via_server_endpoint() {
       }
     ]
     ----- stderr -----
-    "###);
+    "#);
 
     resolve_run.assert();
     run_state.assert();

@@ -41,8 +41,8 @@ pub use run::{
     McpTransport, NotificationProviderSettings, NotificationRouteSettings, PullRequestSettings,
     RunAgentSettings, RunCheckpointSettings, RunExecutionSettings, RunGitSettings, RunGoal,
     RunIntegrationsGithubSettings, RunIntegrationsSettings, RunInterviewsSettings,
-    RunModelSettings, RunNamespace, RunPrepareSettings, RunSandboxSettings, RunScmSettings,
-    ScmGitHubSettings, TlsMode,
+    RunModelControls, RunModelSettings, RunNamespace, RunPrepareSettings, RunSandboxSettings,
+    RunScmSettings, ScmGitHubSettings, TlsMode,
 };
 pub use server::{
     GithubIntegrationSettings, IntegrationWebhooksSettings, IpAllowEntry, LogDestination,
