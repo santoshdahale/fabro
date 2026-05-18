@@ -66,6 +66,16 @@ Before execution, `{{ goal }}` becomes `Add a /health endpoint to the API server
 
 Undefined prompt variables render as empty text and produce a `template_undefined_variable` diagnostic. `fabro validate` reports that diagnostic as a warning; run-style commands promote it to an error before proceeding. Environment variables are not available in prompt templates.
 
+Prompt and goal templates can use static MiniJinja includes to share partials:
+
+```md title="prompts/plan.md"
+{% include "partials/context.md" %}
+
+Write a plan for {{ goal }}.
+```
+
+Include names must be literal strings, resolve relative to the file being rendered, and stay under that template root. Dynamic include expressions such as `{% include inputs.partial %}` are rejected during manifest bundling because Fabro must know every template file before a sandbox run starts.
+
 ### Fallback to label
 
 If a node has neither a `prompt` attribute nor an empty one, Fabro uses the `label` as the prompt:

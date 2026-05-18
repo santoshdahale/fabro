@@ -89,6 +89,12 @@ Fabro renders the graph `goal` first and stores the rendered value back onto the
 
 Fabro renders undefined workflow variables as empty text and records a `template_undefined_variable` diagnostic. `fabro validate` reports that diagnostic as a warning so you can validate workflow structure before all inputs are known. Run-style commands such as `fabro run`, `fabro create`, and preflight promote the same diagnostic to an error before proceeding.
 
+## Template includes
+
+Prompt and goal templates support static MiniJinja loader dependencies such as `{% include "partial.md" %}`. Includes are resolved relative to the template file being rendered and can be nested.
+
+Fabro discovers those static dependencies while building the run manifest so sandbox providers receive every required prompt file. Dynamic loader expressions such as `{% include inputs.partial %}` are rejected; use a literal include path and choose content with normal template conditionals instead.
+
 ## Escaping
 
 To emit literal template syntax, use MiniJinja escaping:

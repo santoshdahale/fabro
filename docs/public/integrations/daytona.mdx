@@ -56,6 +56,8 @@ cpu = 4
 memory = "8GB"
 disk = "20GB"
 dockerfile = "FROM rust:1.85-slim-bookworm\nRUN apt-get update && apt-get install -y git ripgrep"
+# Or keep the Dockerfile next to this TOML file:
+# dockerfile = { path = "./Dockerfile" }
 ```
 
 See [Server Configuration](/administration/server-configuration) for the full reference on all sandbox fields and server defaults.
@@ -93,7 +95,7 @@ disk = 20
 dockerfile = "FROM node:20-slim\nRUN apt-get update && apt-get install -y git"
 ```
 
-When a run starts with a snapshot configured, Fabro looks up the snapshot by name. If it doesn't exist and a `dockerfile` is provided, Fabro creates it automatically and polls until it reaches `Active` state (up to 10 minutes). If the snapshot already exists, it's reused immediately.
+When a run starts with a snapshot configured, Fabro looks up the snapshot by name. If it doesn't exist and a `dockerfile` is provided, Fabro creates it automatically and polls until it reaches `Active` state (up to 10 minutes). `dockerfile` can be inline content or `{ path = "..." }`; paths are resolved relative to the TOML file that declares them and are bundled into run manifests. If the snapshot already exists, it's reused immediately.
 
 <Note>
 If a snapshot is configured by name but doesn't exist and no `dockerfile` is provided, the run fails immediately. If no snapshot is configured at all, sandboxes are created from the `daytona-medium` snapshot which includes standard dev tools (git, etc.).

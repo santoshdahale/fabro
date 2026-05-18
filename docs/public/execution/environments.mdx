@@ -148,6 +148,8 @@ cpu = 4
 memory = "8GB"
 disk = "20GB"
 dockerfile = "FROM rust:1.85-slim-bookworm\nRUN apt-get update && apt-get install -y git ripgrep"
+# Or reference a Dockerfile beside this TOML file:
+# dockerfile = { path = "./Dockerfile" }
 ```
 
 | Field | Description |
@@ -156,7 +158,7 @@ dockerfile = "FROM rust:1.85-slim-bookworm\nRUN apt-get update && apt-get instal
 | `cpu` | CPU cores for the snapshot VM. |
 | `memory` | Memory in GB. |
 | `disk` | Disk in GB. |
-| `dockerfile` | Dockerfile content for building the snapshot. Required when creating a new snapshot. |
+| `dockerfile` | Dockerfile content or `{ path = "..." }` reference for building the snapshot. Required when creating a new snapshot. Paths resolve relative to the TOML file that declares them. |
 
 If the snapshot already exists and is in `Active` state, Fabro uses it directly. If it's in `Building` or `Pending` state, Fabro polls with exponential backoff until it's ready.
 

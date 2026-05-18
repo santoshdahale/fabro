@@ -541,7 +541,7 @@ Fabro validates the run config when it loads:
 
 - **`_version` check** — Only `_version = 1` (or missing, which defaults to `1`) is accepted. The legacy top-level `version` key is rejected with a rename hint.
 - **Unknown keys** — Any top-level key not in `[project]`, `[workflow]`, `[run]`, `[cli]`, `[server]`, `[features]`, or `_version` is rejected with a targeted rename hint pointing at the v2 replacement path.
-- **Variable check** — Any undefined workflow template variable in the Graphviz file produces an error.
+- **Variable check** — Undefined workflow or prompt template variables produce diagnostics. `fabro validate` reports them as warnings; run-style commands treat them as errors before creating or starting a run.
 
 Use `fabro preflight` to validate a run config without executing it:
 

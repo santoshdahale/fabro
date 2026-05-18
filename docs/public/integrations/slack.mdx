@@ -26,6 +26,12 @@ Fabro posts a message to your configured Slack channel:
 
 > **Approve Plan**
 >
+> stage `approve`
+>
+> Open in Fabro
+>
+> _(context from the upstream stage, when available)_
+>
 > `[Approve]` `[Revise]`
 
 A team member clicks a button, the message updates to show the selection, and the workflow resumes on the chosen path.
@@ -106,7 +112,7 @@ Or use the `chat:write.public` scope to post to public channels without an invit
 
 Fabro uses the same [web interviewer](/execution/interviews#web) that powers the web UI. When a human gate fires:
 
-1. Fabro builds a [Block Kit](https://api.slack.com/block-kit) message from the question (buttons for choices, a thread prompt for freeform)
+1. Fabro builds a [Block Kit](https://api.slack.com/block-kit) message from the question, stage hint, upstream context, optional run link, and answer controls
 2. Posts the message to the configured Slack channel
 3. The workflow blocks, waiting for an answer
 
