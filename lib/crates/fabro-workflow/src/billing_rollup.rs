@@ -2,7 +2,9 @@ use std::borrow::Cow;
 use std::collections::HashMap;
 
 use fabro_model::Catalog;
-use fabro_types::{BilledTokenCounts, ModelRef, RunProjection, StageProjection};
+use fabro_types::{
+    BilledTokenCounts, ModelRef, RunProjection, RunTiming, StageProjection, StageTiming,
+};
 
 fn stage_usage_with_cost<'a>(
     catalog: Option<&Catalog>,
@@ -28,10 +30,13 @@ fn stage_usage_with_cost<'a>(
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct ProjectionBillingStage {
-    pub node_id:     String,
-    pub billing:     BilledTokenCounts,
-    pub duration_ms: u64,
-    pub model:       Option<ModelRef>,
+    pub node_id: String,
+    pub billing: BilledTokenCounts,
+    /// Per-node timing summed across every visit of that node within this
+    /// projection. `wall_time_ms`, `inference_time_ms`, `tool_time_ms`, and
+    /// `active_time_ms` are all summed in lockstep.
+    pub timing:  StageTiming,
+    pub model:   Option<ModelRef>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -46,7 +51,9 @@ pub struct ProjectionBillingRollup {
     pub stages:             Vec<ProjectionBillingStage>,
     pub totals:             BilledTokenCounts,
     pub by_model:           Vec<ProjectionBillingByModel>,
-    pub runtime_ms:         u64,
+    /// Run-level timing summed across every stage visit. `wall_time_ms` is
+    /// the sum of stage visit wall times (not the run clock duration).
+    pub timing:             RunTiming,
     pub billed_visit_count: usize,
 }
 
@@ -66,7 +73,7 @@ pub fn billing_rollup_from_projection(
     let mut stages = Vec::<ProjectionBillingStage>::new();
     let mut by_model = HashMap::<ModelRef, ProjectionBillingByModel>::new();
     let mut totals = BilledTokenCounts::default();
-    let mut runtime_ms = 0_u64;
+    let mut run_timing = RunTiming::default();
     let mut billed_visit_count = 0_usize;
 
     for (stage_id, stage) in projection.iter_stages() {
@@ -75,7 +82,7 @@ pub fn billing_rollup_from_projection(
         }
         let usage = stage_usage_with_cost(catalog, stage);
         let usage = usage.as_ref();
-        if stage.completion.is_none() && stage.duration_ms.is_none() && usage.is_zero() {
+        if stage.completion.is_none() && stage.timing.is_none() && usage.is_zero() {
             continue;
         }
 
@@ -83,18 +90,18 @@ pub fn billing_rollup_from_projection(
         let index = *stage_indices.entry(node_id.to_string()).or_insert_with(|| {
             let index = stages.len();
             stages.push(ProjectionBillingStage {
-                node_id:     node_id.to_string(),
-                billing:     BilledTokenCounts::default(),
-                duration_ms: 0,
-                model:       None,
+                node_id: node_id.to_string(),
+                billing: BilledTokenCounts::default(),
+                timing:  StageTiming::default(),
+                model:   None,
             });
             index
         });
         let row = &mut stages[index];
 
-        if let Some(duration_ms) = stage.duration_ms {
-            row.duration_ms = row.duration_ms.saturating_add(duration_ms);
-            runtime_ms = runtime_ms.saturating_add(duration_ms);
+        if let Some(timing) = stage.timing {
+            row.timing = row.timing.saturating_add(&timing);
+            run_timing = run_timing.saturating_add(&RunTiming::from(timing));
         }
 
         if !usage.is_zero() {
@@ -137,7 +144,7 @@ pub fn billing_rollup_from_projection(
         stages,
         totals,
         by_model,
-        runtime_ms,
+        timing: run_timing,
         billed_visit_count,
     }
 }
@@ -198,7 +205,7 @@ mod tests {
         let failed_usage = test_usage("gpt-old", 100, 10);
         let success_usage = test_usage("gpt-new", 200, 20);
         let first = projection.stage_entry("verify", 1, first_event_seq(1));
-        first.duration_ms = Some(1200);
+        first.timing = Some(fabro_types::StageTiming::wall_only(1200));
         first.usage = BilledTokenCounts::from_billed_usage(std::slice::from_ref(&failed_usage));
         first.model = Some(failed_usage.model().clone());
         first.completion = Some(StageCompletion {
@@ -210,7 +217,7 @@ mod tests {
             timestamp:      chrono::Utc::now(),
         });
         let second = projection.stage_entry("verify", 2, first_event_seq(2));
-        second.duration_ms = Some(800);
+        second.timing = Some(fabro_types::StageTiming::wall_only(800));
         second.usage = BilledTokenCounts::from_billed_usage(std::slice::from_ref(&success_usage));
         second.model = Some(success_usage.model().clone());
         second.completion = Some(StageCompletion {
@@ -231,12 +238,12 @@ mod tests {
                 .map(|model| model.model_id.as_str()),
             Some("gpt-new")
         );
-        assert_eq!(rollup.stages[0].duration_ms, 2000);
+        assert_eq!(rollup.stages[0].timing.wall_time_ms, 2000);
         assert_eq!(rollup.stages[0].billing.input_tokens, 300);
         assert_eq!(rollup.stages[0].billing.output_tokens, 30);
         assert_eq!(rollup.stages[0].billing.total_usd_micros, Some(330));
 
-        assert_eq!(rollup.runtime_ms, 2000);
+        assert_eq!(rollup.timing.wall_time_ms, 2000);
         assert_eq!(rollup.totals.input_tokens, 300);
         assert_eq!(rollup.totals.output_tokens, 30);
         assert_eq!(rollup.totals.total_usd_micros, Some(330));
@@ -255,7 +262,7 @@ mod tests {
     fn rollup_includes_completed_non_llm_stage_rows_with_zero_billing() {
         let mut projection = test_projection();
         let stage = projection.stage_entry("build", 1, first_event_seq(1));
-        stage.duration_ms = Some(25);
+        stage.timing = Some(fabro_types::StageTiming::wall_only(25));
         stage.completion = Some(StageCompletion {
             outcome:        StageOutcome::Succeeded,
             notes:          None,
@@ -267,10 +274,10 @@ mod tests {
 
         assert_eq!(rollup.stages.len(), 1);
         assert_eq!(rollup.stages[0].node_id, "build");
-        assert_eq!(rollup.stages[0].duration_ms, 25);
+        assert_eq!(rollup.stages[0].timing.wall_time_ms, 25);
         assert!(rollup.stages[0].model.is_none());
         assert_eq!(rollup.stages[0].billing.input_tokens, 0);
-        assert_eq!(rollup.runtime_ms, 25);
+        assert_eq!(rollup.timing.wall_time_ms, 25);
         assert!(rollup.by_model.is_empty());
         assert!(rollup.billing_if_present().is_none());
     }
@@ -280,7 +287,7 @@ mod tests {
         let mut projection = test_projection();
         projection.spec = run_spec_with_boundary_nodes();
         let start = projection.stage_entry("start", 1, first_event_seq(1));
-        start.duration_ms = Some(25);
+        start.timing = Some(fabro_types::StageTiming::wall_only(25));
         start.completion = Some(StageCompletion {
             outcome:        StageOutcome::Succeeded,
             notes:          None,
@@ -288,7 +295,7 @@ mod tests {
             timestamp:      chrono::Utc::now(),
         });
         let exit = projection.stage_entry("exit", 1, first_event_seq(2));
-        exit.duration_ms = Some(7);
+        exit.timing = Some(fabro_types::StageTiming::wall_only(7));
         exit.completion = Some(StageCompletion {
             outcome:        StageOutcome::Succeeded,
             notes:          None,
@@ -299,7 +306,7 @@ mod tests {
         let rollup = billing_rollup_from_projection(&projection, None);
 
         assert_eq!(rollup.stages.len(), 0);
-        assert_eq!(rollup.runtime_ms, 0);
+        assert_eq!(rollup.timing.wall_time_ms, 0);
     }
 
     #[test]

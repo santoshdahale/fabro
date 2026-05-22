@@ -275,7 +275,7 @@ async fn persist_terminal_engine_failure(
     };
     let failure_event = Event::workflow_run_failed_from_error(
         error,
-        crate::millis_u64(duration),
+        fabro_types::RunTiming::wall_only(crate::millis_u64(duration)),
         reason,
         None,
         None,
@@ -1003,7 +1003,7 @@ impl Drop for DetachedRunBootstrapGuard {
                 handle.spawn(async move {
                     let failure_event = Event::workflow_run_failed_from_error(
                         &Error::engine(reason.to_string()),
-                        0,
+                        fabro_types::RunTiming::default(),
                         reason,
                         None,
                         None,
@@ -1070,7 +1070,7 @@ impl Drop for DetachedRunCompletionGuard {
             handle.spawn(async move {
                 let failure_event = Event::workflow_run_failed_from_error(
                     &Error::engine(message.to_string()),
-                    0,
+                    fabro_types::RunTiming::default(),
                     reason,
                     None,
                     None,
@@ -1100,8 +1100,15 @@ async fn persist_detached_failure(
 ) -> Result<(), Error> {
     let message = error.to_string();
 
-    let failure_event =
-        Event::workflow_run_failed_from_error(error, 0, reason, None, None, None, None);
+    let failure_event = Event::workflow_run_failed_from_error(
+        error,
+        fabro_types::RunTiming::default(),
+        reason,
+        None,
+        None,
+        None,
+        None,
+    );
     if let Err(err) = append_event_to_sink(event_sink, &run_id, &failure_event).await {
         tracing::warn!(error = %err, "Failed to append detached failure event");
     }
@@ -1719,7 +1726,7 @@ reasoning = false
         let conclusion = crate::records::Conclusion {
             timestamp:            Utc::now(),
             status:               StageOutcome::Succeeded,
-            duration_ms:          1,
+            timing:               fabro_types::RunTiming::wall_only(1),
             failure:              None,
             final_git_commit_sha: None,
             stages:               vec![],
@@ -1761,7 +1768,7 @@ reasoning = false
             .await
             .unwrap();
         crate::event::append_event(&run_store, &fixtures::RUN_1, &Event::WorkflowRunCompleted {
-            duration_ms:          conclusion.duration_ms,
+            timing:               conclusion.timing,
             artifact_count:       0,
             status:               "succeeded".to_string(),
             reason:               crate::run_status::SuccessReason::Completed,
