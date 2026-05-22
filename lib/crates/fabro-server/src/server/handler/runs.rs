@@ -28,10 +28,10 @@ use tokio::fs;
 use tracing::info;
 
 use super::super::{
-    AppState, ListResponse, MAX_PAGE_OFFSET, PaginationParams, RunExecutionMode,
-    answer_from_request, api_question_from_pending_interview, default_page_limit,
-    delete_run_internal, load_pending_interview, managed_run, parse_run_id_path,
-    reject_if_archived, resolve_interp_string, submit_pending_interview_answer, workflow_event,
+    AppState, ListResponse, PaginationParams, RunExecutionMode, answer_from_request,
+    api_question_from_pending_interview, default_page_limit, delete_run_internal,
+    load_pending_interview, managed_run, paginate_items, parse_run_id_path, reject_if_archived,
+    resolve_interp_string, submit_pending_interview_answer, workflow_event,
 };
 use crate::error::ApiError;
 use crate::principal_middleware::{
@@ -147,15 +147,6 @@ pub(crate) fn board_columns(include_archived: bool) -> Vec<BoardColumnDefinition
     columns
 }
 
-fn paginate_items<T>(items: Vec<T>, pagination: &PaginationParams) -> (Vec<T>, bool) {
-    let limit = pagination.limit.clamp(1, 100) as usize;
-    let offset = pagination.offset.min(MAX_PAGE_OFFSET) as usize;
-    let mut data: Vec<_> = items.into_iter().skip(offset).take(limit + 1).collect();
-    let has_more = data.len() > limit;
-    data.truncate(limit);
-    (data, has_more)
-}
-
 async fn list_board_runs(
     _auth: RequiredUser,
     State(state): State<Arc<AppState>>,
@@ -190,15 +181,20 @@ async fn list_board_runs(
         })
         .collect();
     let (page_summaries, has_more) = paginate_items(board_summaries, &params.pagination());
+    let data = state
+        .decorate_run_summaries(
+            page_summaries
+                .into_iter()
+                .map(|entry| entry.summary)
+                .collect(),
+        )
+        .await;
 
     (
         StatusCode::OK,
         Json(serde_json::json!({
             "columns": board_columns(include_archived),
-            "data": page_summaries
-                .into_iter()
-                .map(|entry| entry.summary)
-                .collect::<Vec<_>>(),
+            "data": data,
             "meta": { "has_more": has_more }
         })),
     )
@@ -232,7 +228,11 @@ async fn link_run_parent(
         return err.into_response();
     }
     if child.parent_id == Some(parent_id) {
-        return (StatusCode::OK, Json(child)).into_response();
+        return (
+            StatusCode::OK,
+            Json(state.decorate_run_summary(child).await),
+        )
+            .into_response();
     }
 
     let Ok(run_store) = state.store.open_run(&child_id).await else {
@@ -268,7 +268,11 @@ async fn unlink_run_parent(
         }
     };
     let Some(previous_parent_id) = child.parent_id else {
-        return (StatusCode::OK, Json(child)).into_response();
+        return (
+            StatusCode::OK,
+            Json(state.decorate_run_summary(child).await),
+        )
+            .into_response();
     };
 
     let Ok(run_store) = state.store.open_run(&child_id).await else {
@@ -321,7 +325,11 @@ async fn validate_parent_link(
 
 async fn updated_run_response(state: &AppState, run_id: &RunId) -> Response {
     match state.store.get_cached_summary(run_id).await {
-        Ok(Some(summary)) => (StatusCode::OK, Json(summary)).into_response(),
+        Ok(Some(summary)) => (
+            StatusCode::OK,
+            Json(state.decorate_run_summary(summary).await),
+        )
+            .into_response(),
         Ok(None) => ApiError::not_found("Run not found.").into_response(),
         Err(err) => {
             ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response()
@@ -350,6 +358,7 @@ async fn list_runs(
                 .filter(|summary| include_archived || !summary.lifecycle.archived)
                 .collect::<Vec<_>>();
             let (data, has_more) = paginate_items(items, &params.pagination());
+            let data = state.decorate_run_summaries(data).await;
             (
                 StatusCode::OK,
                 Json(serde_json::json!({
@@ -430,7 +439,10 @@ async fn resolve_run(
                 .and_then(|repository| repository.origin_url.clone())
         },
     ) {
-        Ok(run) => (StatusCode::OK, Json(run.clone())).into_response(),
+        Ok(run) => {
+            let run = state.decorate_run_summary(run.clone()).await;
+            (StatusCode::OK, Json(run)).into_response()
+        }
         Err(err @ (ResolveRunError::InvalidSelector | ResolveRunError::AmbiguousPrefix { .. })) => {
             ApiError::bad_request(err.to_string()).into_response()
         }
@@ -487,7 +499,11 @@ async fn update_run(
         }
     };
     if current.title == title {
-        return (StatusCode::OK, Json(current)).into_response();
+        return (
+            StatusCode::OK,
+            Json(state.decorate_run_summary(current).await),
+        )
+            .into_response();
     }
 
     let run_store = match state.store.open_run(&id).await {
@@ -508,7 +524,11 @@ async fn update_run(
     }
 
     match state.store.get_cached_summary(&id).await {
-        Ok(Some(summary)) => (StatusCode::OK, Json(summary)).into_response(),
+        Ok(Some(summary)) => (
+            StatusCode::OK,
+            Json(state.decorate_run_summary(summary).await),
+        )
+            .into_response(),
         Ok(None) => ApiError::not_found("Run not found.").into_response(),
         Err(err) => {
             ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response()
@@ -605,7 +625,11 @@ async fn create_run(
         );
     }
 
-    (StatusCode::CREATED, Json(summary)).into_response()
+    (
+        StatusCode::CREATED,
+        Json(state.decorate_run_summary(summary).await),
+    )
+        .into_response()
 }
 
 fn run_provenance(headers: &HeaderMap, subject: &Principal) -> RunProvenance {
@@ -703,7 +727,9 @@ async fn get_run_status(
     State(state): State<Arc<AppState>>,
 ) -> Response {
     match state.store.get_cached_summary(&id).await {
-        Ok(Some(run)) => (StatusCode::OK, Json(run)).into_response(),
+        Ok(Some(run)) => {
+            (StatusCode::OK, Json(state.decorate_run_summary(run).await)).into_response()
+        }
         Ok(None) => ApiError::not_found("Run not found.").into_response(),
         Err(err) => {
             ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response()

@@ -466,6 +466,7 @@ mod tests {
             },
             timing:           None,
             billing:          None,
+            ask_fabro:        fabro_types::AskFabro::default(),
             diff:             None,
             pull_request:     None,
             current_question: None,

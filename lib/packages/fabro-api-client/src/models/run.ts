@@ -15,6 +15,9 @@
 
 // May contain unused imports in some cases
 // @ts-ignore
+import type { AskFabro } from './ask-fabro';
+// May contain unused imports in some cases
+// @ts-ignore
 import type { AutomationRef } from './automation-ref';
 // May contain unused imports in some cases
 // @ts-ignore
@@ -87,6 +90,7 @@ export interface Run {
     'timestamps': RunTimestamps;
     'timing': RunTiming | null;
     'billing': RunBillingSummary | null;
+    'ask_fabro': AskFabro;
     'diff': DiffSummary | null;
     'pull_request': PullRequestLink | null;
     'current_question': RunQuestion | null;

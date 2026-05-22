@@ -82,9 +82,9 @@ use fabro_types::settings::server::{
 };
 use fabro_types::settings::{InterpString, RunNamespace};
 use fabro_types::{
-    AgentBackend, EventBody, InterviewQuestionRecord, PairId, PairMessageId, PairTarget, Principal,
-    PullRequestLink, QuestionType, RunBlobId, RunControlAction, RunEvent, RunId, ServerSettings,
-    SessionCapability,
+    AgentBackend, AskFabro, AskFabroUnavailableReason, EventBody, InterviewQuestionRecord, PairId,
+    PairMessageId, PairTarget, Principal, PullRequestLink, QuestionType, RunBlobId,
+    RunControlAction, RunEvent, RunId, ServerSettings, SessionCapability,
 };
 use fabro_util::error::{
     SharedError, collect_causes, render_compact_with_causes, render_with_causes,
@@ -173,6 +173,15 @@ pub struct PaginationParams {
     pub limit:  u32,
     #[serde(rename = "page[offset]", default)]
     pub offset: u32,
+}
+
+pub(crate) fn paginate_items<T>(items: Vec<T>, pagination: &PaginationParams) -> (Vec<T>, bool) {
+    let limit = pagination.limit.clamp(1, 100) as usize;
+    let offset = pagination.offset.min(MAX_PAGE_OFFSET) as usize;
+    let mut data: Vec<_> = items.into_iter().skip(offset).take(limit + 1).collect();
+    let has_more = data.len() > limit;
+    data.truncate(limit);
+    (data, has_more)
 }
 
 #[derive(serde::Deserialize)]
@@ -631,6 +640,43 @@ pub struct AppState {
 
 type PullRequestCreateLocks = Arc<Mutex<HashMap<RunId, Arc<AsyncMutex<()>>>>>;
 
+struct AskFabroReadiness {
+    feature_enabled: bool,
+    default_model:   Option<String>,
+}
+
+impl AskFabroReadiness {
+    fn decorate(&self, mut run: fabro_types::Run) -> fabro_types::Run {
+        run.ask_fabro = self.ask_fabro_for(&run);
+        run
+    }
+
+    fn ask_fabro_for(&self, run: &fabro_types::Run) -> AskFabro {
+        let unavailable_reason = if !self.feature_enabled {
+            Some(AskFabroUnavailableReason::FeatureDisabled)
+        } else if run.sandbox.is_none() {
+            Some(AskFabroUnavailableReason::NoSandbox)
+        } else if run
+            .sandbox
+            .as_ref()
+            .and_then(|sandbox| sandbox.runtime.as_ref())
+            .is_none()
+        {
+            Some(AskFabroUnavailableReason::SandboxNotReady)
+        } else if self.default_model.is_none() {
+            Some(AskFabroUnavailableReason::LlmUnconfigured)
+        } else {
+            None
+        };
+
+        AskFabro {
+            available: unavailable_reason.is_none(),
+            unavailable_reason,
+            default_model: self.default_model.clone(),
+        }
+    }
+}
+
 struct PullRequestCreateGuard {
     locks:  PullRequestCreateLocks,
     run_id: RunId,
@@ -807,6 +853,46 @@ impl AppState {
                 warn!(error = ?err, "Failed to resolve LLM client while checking ready providers");
                 Vec::new()
             }
+        }
+    }
+
+    pub(crate) async fn decorate_run_summary(&self, run: fabro_types::Run) -> fabro_types::Run {
+        self.ask_fabro_readiness().await.decorate(run)
+    }
+
+    pub(crate) async fn decorate_run_summaries(
+        &self,
+        runs: Vec<fabro_types::Run>,
+    ) -> Vec<fabro_types::Run> {
+        let readiness = self.ask_fabro_readiness().await;
+        runs.into_iter()
+            .map(|run| readiness.decorate(run))
+            .collect()
+    }
+
+    async fn ask_fabro_readiness(&self) -> AskFabroReadiness {
+        let feature_enabled = self.server_settings().features.session_sandboxes;
+        if !feature_enabled {
+            return AskFabroReadiness {
+                feature_enabled,
+                default_model: None,
+            };
+        }
+
+        let provider_ids = self.ready_llm_provider_ids().await;
+        let default_model = if provider_ids.is_empty() {
+            None
+        } else {
+            Some(
+                self.catalog()
+                    .default_for_configured_ids(&provider_ids)
+                    .id
+                    .clone(),
+            )
+        };
+        AskFabroReadiness {
+            feature_enabled,
+            default_model,
         }
     }
 
