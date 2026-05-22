@@ -100,17 +100,34 @@ interface NestedRunEvent {
   properties?: Record<string, unknown>;
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function eventPayload(envelope: SessionStreamEvent): {
+  eventName: string;
+  props: Record<string, unknown>;
+} {
+  const raw = envelope as unknown as Record<string, unknown>;
+  if (typeof raw.event === "string") {
+    return {
+      eventName: raw.event,
+      props: isRecord(raw.properties) ? raw.properties : {},
+    };
+  }
+
+  const nested = isRecord(raw.event) ? (raw.event as NestedRunEvent) : {};
+  return {
+    eventName: nested.event ?? "",
+    props: isRecord(nested.properties) ? nested.properties : {},
+  };
+}
+
 export function applyTurnEvent(
   acc: TurnAccumulator,
   envelope: SessionStreamEvent,
 ): boolean {
-  // The on-wire SSE envelope is `{ seq, event: { event: "...", properties } }`,
-  // but the generated OpenAPI `EventEnvelope` type flattens the inner event
-  // fields. Cast through `unknown` to read the nested runtime shape that the
-  // server actually emits (matches `session-stream.test.ts`).
-  const nested = (envelope as unknown as { event?: NestedRunEvent }).event ?? {};
-  const eventName = nested.event ?? "";
-  const props: Record<string, unknown> = nested.properties ?? {};
+  const { eventName, props } = eventPayload(envelope);
 
   if (eventName === "run.session.assistant_delta") {
     const delta = typeof props.delta === "string" ? props.delta : "";

@@ -13,7 +13,38 @@ function event(name: string, properties: Record<string, unknown>): SessionStream
   } as unknown as SessionStreamEvent;
 }
 
+function flattenedEvent(
+  name: string,
+  properties: Record<string, unknown>,
+): SessionStreamEvent {
+  return {
+    seq: 0,
+    id: "evt_1",
+    ts: "2026-05-22T16:25:34.940200Z",
+    run_id: "run_1",
+    event: name,
+    properties,
+  } as unknown as SessionStreamEvent;
+}
+
 describe("applyTurnEvent", () => {
+  test("appends assistant deltas from flattened SSE event envelopes", () => {
+    const acc = {
+      activeTextIndex: null,
+      parts: [],
+      toolCallIndex: new Map(),
+    } as Parameters<typeof applyTurnEvent>[0];
+
+    expect(
+      applyTurnEvent(
+        acc,
+        flattenedEvent("run.session.assistant_delta", { delta: "Hello" }),
+      ),
+    ).toBe(true);
+
+    expect(acc.parts).toEqual([{ type: "text", text: "Hello" }]);
+  });
+
   test("appends assistant deltas into a single streaming text part", () => {
     const acc = {
       activeTextIndex: null,

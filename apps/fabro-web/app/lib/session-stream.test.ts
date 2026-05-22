@@ -41,7 +41,7 @@ describe("session stream helpers", () => {
         streamResponse(
           [
             "id: 3\nevent: run.session.turn.started\n",
-            'data: {"seq":3,"event":{"event":"run.session.turn.started","properties":{"turn_id":"turn_1"}}}\n\n',
+            'data: {"seq":3,"id":"evt_1","ts":"2026-05-22T16:25:34.940200Z","run_id":"run_1","event":"run.session.turn.started","properties":{"turn_id":"turn_1"}}\n\n',
           ],
           200,
           { "x-fabro-turn-id": "turn_1" },
@@ -65,7 +65,7 @@ describe("session stream helpers", () => {
     });
     expect(events).toHaveLength(1);
     expect(events[0]?.seq).toBe(3);
-    expect(events[0]?.event.event).toBe("run.session.turn.started");
+    expect(events[0]?.event).toBe("run.session.turn.started");
   });
 
   test("attaches to session events from a run sequence", async () => {
@@ -73,7 +73,7 @@ describe("session stream helpers", () => {
     const fetchMock = mock(() =>
       Promise.resolve(
         streamResponse([
-          'data: {"seq":7,"event":{"event":"run.session.assistant_message","properties":{}}}\n\n',
+          'data: {"seq":7,"id":"evt_2","ts":"2026-05-22T16:25:34.940200Z","run_id":"run_1","event":"run.session.assistant_message","properties":{}}\n\n',
         ]),
       ),
     );
@@ -96,7 +96,7 @@ describe("session stream helpers", () => {
     const fetchMock = mock(() =>
       Promise.resolve(
         streamResponse([
-          'data: {"seq":8,"event":{"event":"run.session.assistant_message","properties":{}}}\r\n\r\n',
+          'data: {"seq":8,"id":"evt_3","ts":"2026-05-22T16:25:34.940200Z","run_id":"run_1","event":"run.session.assistant_message","properties":{}}\r\n\r\n',
         ]),
       ),
     );
