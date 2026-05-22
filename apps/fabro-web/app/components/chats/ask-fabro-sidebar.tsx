@@ -10,6 +10,7 @@ import remarkGfm from "remark-gfm";
 import { createAskFabroAdapter } from "../../lib/ask-fabro-runtime";
 import { useAskFabroLayout } from "../../lib/ask-fabro-layout";
 import SidebarComposer from "./sidebar-composer";
+import SidebarWelcome from "./sidebar-welcome";
 import ToolCallSummary from "./tool-call-summary";
 
 // remark-gfm enables GitHub-flavored Markdown so the agent's tables, task
@@ -139,7 +140,7 @@ export default function AskFabroSidebar({
         <div className="min-h-0 flex-1">
           <AssistantRuntimeProvider runtime={runtime}>
             <Thread
-              components={{ Composer: SidebarComposer, ThreadWelcome: () => null }}
+              components={{ Composer: SidebarComposer, ThreadWelcome: SidebarWelcome }}
               assistantMessage={{
                 components: { Text: MarkdownText, ToolFallback: ToolCallSummary },
                 allowCopy: false,
