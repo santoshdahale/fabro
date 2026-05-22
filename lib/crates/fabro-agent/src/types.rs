@@ -308,6 +308,15 @@ pub enum AgentEvent {
         server_name: String,
         error:       String,
     },
+    /// New todo / task was created. Carries the full row so the projection
+    /// can be reconstructed from `todo.created` alone.
+    TodoCreated(fabro_types::TodoCreatedProps),
+    /// Existing todo was mutated. Field-by-field optional patches; `None`
+    /// means "leave alone". `metadata_patch` keys with `null` values delete
+    /// that key in the projection.
+    TodoUpdated(fabro_types::TodoUpdatedProps),
+    /// Todo was removed.
+    TodoDeleted(fabro_types::TodoDeletedProps),
 }
 
 impl AgentEvent {
@@ -511,6 +520,30 @@ impl AgentEvent {
                     "MCP server failed"
                 );
             }
+            Self::TodoCreated(p) => {
+                debug!(
+                    session_id,
+                    list_id = p.list_id.as_str(),
+                    todo_id = p.todo_id.as_str(),
+                    "Todo created"
+                );
+            }
+            Self::TodoUpdated(p) => {
+                debug!(
+                    session_id,
+                    list_id = p.list_id.as_str(),
+                    todo_id = p.todo_id.as_str(),
+                    "Todo updated"
+                );
+            }
+            Self::TodoDeleted(p) => {
+                debug!(
+                    session_id,
+                    list_id = p.list_id.as_str(),
+                    todo_id = p.todo_id.as_str(),
+                    "Todo deleted"
+                );
+            }
         }
     }
 }
@@ -523,6 +556,8 @@ pub struct SessionEvent {
     pub session_id:        String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub parent_session_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tool_call_id:      Option<String>,
 }
 
 #[cfg(test)]
@@ -541,6 +576,7 @@ mod tests {
             timestamp:         SystemTime::now(),
             session_id:        "sess_1".into(),
             parent_session_id: None,
+            tool_call_id:      None,
         };
         assert!(matches!(event.event, AgentEvent::SessionStarted {
             provider: Some(_),
@@ -669,6 +705,7 @@ mod tests {
             timestamp:         SystemTime::now(),
             session_id:        "sess_42".into(),
             parent_session_id: None,
+            tool_call_id:      None,
         };
         let json = serde_json::to_string(&event).unwrap();
         assert!(json.contains("sess_42"));
@@ -696,6 +733,7 @@ mod tests {
             timestamp:         SystemTime::now(),
             session_id:        "sess_child".into(),
             parent_session_id: Some("sess_parent".into()),
+            tool_call_id:      None,
         };
         let json = serde_json::to_string(&event).unwrap();
         assert!(json.contains("sess_child"));

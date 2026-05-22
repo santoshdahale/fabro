@@ -43,6 +43,7 @@ pub mod start;
 pub mod status;
 pub mod steering;
 pub mod timing;
+pub mod todo;
 
 pub use artifact::ArtifactUpload;
 pub use auth::{IdpIdentity, IdpIdentityError};
@@ -94,7 +95,7 @@ pub use run_blob_id::RunBlobId;
 pub use run_event::{
     EventBody, ExecOutputTail, InterviewOption, MetadataSnapshotFailureKind, MetadataSnapshotPhase,
     RunEvent, RunNoticeCode, RunNoticeLevel, RunPairEndedReason, RunPairFailedReason,
-    SessionCapability,
+    SessionCapability, TodoCreatedProps, TodoDeletedProps, TodoUpdatedProps,
 };
 pub use run_failure::RunFailure;
 pub use run_id::{RunId, fixtures};
@@ -132,3 +133,4 @@ pub use status::{
 };
 pub use steering::SteeringMessage;
 pub use timing::{RunTiming, StageTiming};
+pub use todo::{TodoListKind, TodoListProjection, TodoPatch, TodoProjection, TodoStatus};

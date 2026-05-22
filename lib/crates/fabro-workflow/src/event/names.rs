@@ -89,6 +89,9 @@ pub fn event_name(event: &Event) -> &'static str {
             AgentEvent::SubAgentClosed { .. } => "agent.sub.closed",
             AgentEvent::McpServerReady { .. } => "agent.mcp.ready",
             AgentEvent::McpServerFailed { .. } => "agent.mcp.failed",
+            AgentEvent::TodoCreated(_) => "todo.created",
+            AgentEvent::TodoUpdated(_) => "todo.updated",
+            AgentEvent::TodoDeleted(_) => "todo.deleted",
         },
         Event::SubgraphStarted { .. } => "subgraph.started",
         Event::SubgraphCompleted { .. } => "subgraph.completed",
@@ -188,6 +191,7 @@ mod tests {
                 },
                 session_id:        None,
                 parent_session_id: None,
+                tool_call_id:      None,
             }),
             "agent.sub.spawned"
         );
