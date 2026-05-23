@@ -15,15 +15,13 @@
 
 
 /**
- * Counts of known runs in the active server process.
+ * State of a run\'s pre-execution approval request.
  */
-export interface SystemRunCounts {
-    /**
-     * Total runs tracked by the server process.
-     */
-    'total'?: number;
-    /**
-     * Runs currently pending, runnable, or executing.
-     */
-    'active'?: number;
-}
+
+export const RunApprovalState = {
+    PENDING: 'pending',
+    APPROVED: 'approved',
+    DENIED: 'denied'
+} as const;
+
+export type RunApprovalState = typeof RunApprovalState[keyof typeof RunApprovalState];

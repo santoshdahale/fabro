@@ -137,7 +137,8 @@ pub(crate) fn board_column(status: RunStatus, archived: bool) -> BoardColumn {
         return BoardColumn::Archived;
     }
     match status {
-        RunStatus::Submitted | RunStatus::Queued => BoardColumn::Queued,
+        RunStatus::Submitted | RunStatus::Pending { .. } => BoardColumn::Pending,
+        RunStatus::Runnable => BoardColumn::Runnable,
         RunStatus::Starting => BoardColumn::Initializing,
         RunStatus::Running | RunStatus::Paused { .. } => BoardColumn::Running,
         RunStatus::Blocked { .. } => BoardColumn::Blocked,

@@ -2882,21 +2882,52 @@ async fn create_durable_run_with_events(
     let has_starting = events
         .iter()
         .any(|event| matches!(event, workflow_event::Event::RunStarting));
+    let has_runnable = events
+        .iter()
+        .any(|event| matches!(event, workflow_event::Event::RunRunnable { .. }));
     let has_running = events
         .iter()
         .any(|event| matches!(event, workflow_event::Event::RunRunning));
+    let mut inserted_runnable = has_runnable;
+    let mut inserted_starting = has_starting;
     for event in events {
-        if needs_running
-            && !has_starting
+        if !inserted_runnable
             && matches!(
                 event,
-                workflow_event::Event::WorkflowRunCompleted { .. }
+                workflow_event::Event::RunStarting
+                    | workflow_event::Event::RunRunning
+                    | workflow_event::Event::RunBlocked { .. }
+                    | workflow_event::Event::RunPaused
+                    | workflow_event::Event::WorkflowRunCompleted { .. }
+                    | workflow_event::Event::WorkflowRunFailed { .. }
+            )
+        {
+            workflow_event::append_event(
+                &run_store,
+                &run_id,
+                &workflow_event::Event::RunRunnable {
+                    source: fabro_types::RunRunnableSource::StartRequested,
+                    actor:  None,
+                },
+            )
+            .await
+            .unwrap();
+            inserted_runnable = true;
+        }
+        if !inserted_starting
+            && matches!(
+                event,
+                workflow_event::Event::RunRunning
+                    | workflow_event::Event::RunBlocked { .. }
+                    | workflow_event::Event::RunPaused
+                    | workflow_event::Event::WorkflowRunCompleted { .. }
                     | workflow_event::Event::WorkflowRunFailed { .. }
             )
         {
             workflow_event::append_event(&run_store, &run_id, &workflow_event::Event::RunStarting)
                 .await
                 .unwrap();
+            inserted_starting = true;
         }
         if needs_running
             && !has_running
@@ -3140,6 +3171,12 @@ channel = "#deploys"
         Some("Deploy workflow"),
     );
     let run_store = create_slack_notification_run(&state, run_id, settings, "deploy", None).await;
+    workflow_event::append_event(&run_store, &run_id, &workflow_event::Event::RunRunnable {
+        source: fabro_types::RunRunnableSource::StartRequested,
+        actor:  None,
+    })
+    .await
+    .unwrap();
     workflow_event::append_event(&run_store, &run_id, &workflow_event::Event::RunStarting)
         .await
         .unwrap();
@@ -3198,6 +3235,12 @@ channel = "#deploys"
         Some("Deploy workflow"),
     );
     let run_store = create_slack_notification_run(&state, run_id, settings, "deploy", None).await;
+    workflow_event::append_event(&run_store, &run_id, &workflow_event::Event::RunRunnable {
+        source: fabro_types::RunRunnableSource::StartRequested,
+        actor:  None,
+    })
+    .await
+    .unwrap();
     workflow_event::append_event(&run_store, &run_id, &workflow_event::Event::RunStarting)
         .await
         .unwrap();
@@ -3354,6 +3397,12 @@ channel = "#deploys"
         Some("Deploy workflow"),
     );
     let run_store = create_slack_notification_run(&state, run_id, settings, "deploy", None).await;
+    workflow_event::append_event(&run_store, &run_id, &workflow_event::Event::RunRunnable {
+        source: fabro_types::RunRunnableSource::StartRequested,
+        actor:  None,
+    })
+    .await
+    .unwrap();
     workflow_event::append_event(&run_store, &run_id, &workflow_event::Event::RunStarting)
         .await
         .unwrap();
@@ -4654,6 +4703,12 @@ async fn append_raw_run_event(
 async fn create_unreadable_durable_run(state: &Arc<AppState>, run_id: RunId) {
     let run_store = state.store.create_run(&run_id).await.unwrap();
     append_default_run_created(&run_store, run_id).await;
+    workflow_event::append_event(&run_store, &run_id, &workflow_event::Event::RunRunnable {
+        source: fabro_types::RunRunnableSource::StartRequested,
+        actor:  None,
+    })
+    .await
+    .unwrap();
     workflow_event::append_event(&run_store, &run_id, &workflow_event::Event::RunStarting)
         .await
         .unwrap();
@@ -7069,6 +7124,12 @@ async fn cache_backed_run_endpoints_reflect_events_appended_after_warmup() {
     state.store.warm_projection_cache().await.unwrap();
 
     let run_store = state.store.open_run(&run_id).await.unwrap();
+    workflow_event::append_event(&run_store, &run_id, &workflow_event::Event::RunRunnable {
+        source: fabro_types::RunRunnableSource::StartRequested,
+        actor:  None,
+    })
+    .await
+    .unwrap();
     workflow_event::append_event(&run_store, &run_id, &workflow_event::Event::RunStarting)
         .await
         .unwrap();
@@ -8509,7 +8570,7 @@ async fn create_run_rejects_invalid_titles() {
 }
 
 #[tokio::test]
-async fn start_run_transitions_to_queued() {
+async fn start_run_transitions_to_runnable() {
     let state = test_app_state();
     let app = crate::test_support::build_test_router(Arc::clone(&state));
 
@@ -8532,7 +8593,7 @@ async fn start_run_transitions_to_queued() {
         .unwrap();
     let response = app.oneshot(req).await.unwrap();
     let body = response_json!(response, StatusCode::OK).await;
-    assert_eq!(run_json_status(&body)["kind"], "queued");
+    assert_eq!(run_json_status(&body)["kind"], "runnable");
     assert_eq!(body["title"], "Test");
 
     let status = state
@@ -8544,7 +8605,153 @@ async fn start_run_transitions_to_queued() {
         .await
         .unwrap()
         .status;
-    assert_eq!(status, RunStatus::Queued);
+    assert_eq!(status, RunStatus::Runnable);
+}
+
+#[tokio::test]
+async fn worker_started_child_run_requires_approval_before_becoming_runnable() {
+    let (state, app) = jwt_auth_app();
+    let user_jwt = issue_test_user_jwt();
+    let parent_run_id = create_run_with_bearer(&app, &user_jwt).await;
+    let worker_token = issue_test_run_tools_worker_token(&parent_run_id);
+    let mut child_manifest = minimal_manifest_json(MINIMAL_DOT);
+    child_manifest["parent_id"] = json!(parent_run_id.to_string());
+
+    let response = app
+        .clone()
+        .oneshot(json_bearer_request(
+            Method::POST,
+            "/runs",
+            &worker_token,
+            &child_manifest,
+        ))
+        .await
+        .unwrap();
+    let child_body = response_json!(response, StatusCode::CREATED).await;
+    let child_run_id = child_body["id"].as_str().unwrap().parse::<RunId>().unwrap();
+
+    let response = app
+        .clone()
+        .oneshot(json_bearer_request(
+            Method::POST,
+            &format!("/runs/{child_run_id}/start"),
+            &worker_token,
+            &json!({ "resume": false }),
+        ))
+        .await
+        .unwrap();
+    let pending_body = response_json!(response, StatusCode::OK).await;
+    assert_eq!(
+        run_json_status(&pending_body),
+        &json!({
+            "kind": "pending",
+            "reason": "approval_required"
+        })
+    );
+    assert_eq!(
+        pending_body["lifecycle"]["approval"]["state"].as_str(),
+        Some("pending")
+    );
+
+    {
+        let runs = state.runs.lock().expect("runs lock poisoned");
+        assert_eq!(
+            runs.get(&child_run_id).map(|run| run.status),
+            Some(RunStatus::Pending {
+                reason: fabro_types::PendingReason::ApprovalRequired,
+            })
+        );
+    }
+
+    let response = app
+        .clone()
+        .oneshot(bearer_request(
+            Method::POST,
+            &format!("/runs/{child_run_id}/approve"),
+            &user_jwt,
+            Body::empty(),
+        ))
+        .await
+        .unwrap();
+    let approved_body = response_json!(response, StatusCode::OK).await;
+    assert_eq!(
+        run_json_status(&approved_body),
+        &json!({ "kind": "runnable" })
+    );
+    assert_eq!(
+        approved_body["lifecycle"]["approval"]["state"].as_str(),
+        Some("approved")
+    );
+    assert!(
+        approved_body["lifecycle"]["approval"]["decided_at"]
+            .as_str()
+            .is_some()
+    );
+
+    let runs = state.runs.lock().expect("runs lock poisoned");
+    assert_eq!(
+        runs.get(&child_run_id).map(|run| run.status),
+        Some(RunStatus::Runnable)
+    );
+}
+
+#[tokio::test]
+async fn denying_pending_child_run_fails_with_approval_denied() {
+    let (_state, app) = jwt_auth_app();
+    let user_jwt = issue_test_user_jwt();
+    let parent_run_id = create_run_with_bearer(&app, &user_jwt).await;
+    let worker_token = issue_test_run_tools_worker_token(&parent_run_id);
+    let mut child_manifest = minimal_manifest_json(MINIMAL_DOT);
+    child_manifest["parent_id"] = json!(parent_run_id.to_string());
+
+    let response = app
+        .clone()
+        .oneshot(json_bearer_request(
+            Method::POST,
+            "/runs",
+            &worker_token,
+            &child_manifest,
+        ))
+        .await
+        .unwrap();
+    let child_body = response_json!(response, StatusCode::CREATED).await;
+    let child_run_id = child_body["id"].as_str().unwrap().parse::<RunId>().unwrap();
+
+    let response = app
+        .clone()
+        .oneshot(json_bearer_request(
+            Method::POST,
+            &format!("/runs/{child_run_id}/start"),
+            &worker_token,
+            &json!({ "resume": false }),
+        ))
+        .await
+        .unwrap();
+    assert_status!(response, StatusCode::OK).await;
+
+    let response = app
+        .clone()
+        .oneshot(json_bearer_request(
+            Method::POST,
+            &format!("/runs/{child_run_id}/deny"),
+            &user_jwt,
+            &json!({ "reason": "  " }),
+        ))
+        .await
+        .unwrap();
+    let denied_body = response_json!(response, StatusCode::OK).await;
+    assert_eq!(
+        run_json_status(&denied_body),
+        &json!({
+            "kind": "failed",
+            "reason": "approval_denied"
+        })
+    );
+    assert_eq!(
+        denied_body["lifecycle"]["approval"]["state"].as_str(),
+        Some("denied")
+    );
+    assert!(denied_body["lifecycle"]["approval"]["denial_reason"].is_null());
 }
 
 #[tokio::test]
@@ -8605,7 +8812,10 @@ async fn patch_run_title_updates_active_and_archived_runs() {
 
     let run_store = state.store.open_run(&run_id).await.unwrap();
     for event in [
-        workflow_event::Event::RunQueued,
+        workflow_event::Event::RunRunnable {
+            source: fabro_types::RunRunnableSource::StartRequested,
+            actor:  None,
+        },
         workflow_event::Event::RunStarting,
         workflow_event::Event::RunRunning,
     ] {
@@ -8699,7 +8909,7 @@ async fn start_run_conflict_when_not_submitted() {
     let body = body_json(response.into_body()).await;
     let run_id = body["id"].as_str().unwrap();
 
-    // Start it (transitions to queued)
+    // Start it (transitions to runnable)
     let req = Request::builder()
         .method("POST")
         .uri(api(&format!("/runs/{run_id}/start")))
@@ -8764,7 +8974,7 @@ async fn retry_failed_run_creates_and_queues_new_run() {
     assert_eq!(body["retried_from"], source_run_id.to_string());
     assert_eq!(body["created_by"]["kind"], "user");
     assert_eq!(body["created_by"]["login"], "dev");
-    assert_eq!(run_json_status(&body)["kind"], "queued");
+    assert_eq!(run_json_status(&body)["kind"], "runnable");
 
     let source_store = state.store.open_run(&source_run_id).await.unwrap();
     assert_eq!(
@@ -8787,7 +8997,7 @@ async fn retry_failed_run_creates_and_queues_new_run() {
         .await
         .unwrap();
     assert_eq!(new_state.retried_from, Some(source_run_id));
-    assert_eq!(new_state.status, RunStatus::Queued);
+    assert_eq!(new_state.status, RunStatus::Runnable);
     assert!(new_state.checkpoints.is_empty());
 }
 
@@ -10593,7 +10803,7 @@ level = "debug"
 }
 
 #[tokio::test]
-async fn cancel_queued_run_succeeds() {
+async fn cancel_runnable_run_succeeds() {
     let state = test_app_state();
     let app = crate::test_support::build_test_router(Arc::clone(&state));
 
@@ -10741,7 +10951,7 @@ async fn pause_run_sets_pending_control_on_board_response() {
         .unwrap();
     let response = app.clone().oneshot(req).await.unwrap();
     let body = response_json!(response, StatusCode::OK).await;
-    assert_eq!(run_json_status(&body)["kind"], "queued");
+    assert_eq!(run_json_status(&body)["kind"], "runnable");
     assert_eq!(run_json_pending_control(&body).as_str(), Some("pause"));
 
     // Verify pending_control via /runs/{id} (board no longer includes this field)
@@ -10754,7 +10964,7 @@ async fn pause_run_sets_pending_control_on_board_response() {
     let body = body_json(response.into_body()).await;
     assert_eq!(run_json_pending_control(&body).as_str(), Some("pause"));
 
-    // Verify the run appears in the runs list (store has Submitted status)
+    // Verify the run appears in the runs list with runnable status.
     let req = Request::builder()
         .method("GET")
         .uri(api("/runs"))
@@ -10861,7 +11071,7 @@ async fn unpause_run_sets_pending_control() {
         .unwrap();
     let response = app.clone().oneshot(req).await.unwrap();
     let body = response_json!(response, StatusCode::OK).await;
-    assert_eq!(run_json_status(&body)["kind"], "queued");
+    assert_eq!(run_json_status(&body)["kind"], "runnable");
     assert_eq!(run_json_pending_control(&body).as_str(), Some("unpause"));
 
     let summary = state.store.runs().find(&run_id).await.unwrap().unwrap();
@@ -11130,7 +11340,7 @@ id = "local"
         if matches!(
             live_status_before_cancel,
             Some(
-                RunStatus::Queued
+                RunStatus::Runnable
                     | RunStatus::Starting
                     | RunStatus::Running
                     | RunStatus::Blocked { .. }
@@ -11145,7 +11355,7 @@ id = "local"
         matches!(
             live_status_before_cancel,
             Some(
-                RunStatus::Queued
+                RunStatus::Runnable
                     | RunStatus::Starting
                     | RunStatus::Running
                     | RunStatus::Blocked { .. }
@@ -11242,15 +11452,15 @@ async fn cancel_before_run_transitions_to_running_returns_empty_attach_stream() 
 }
 
 #[tokio::test]
-async fn queue_position_reported_for_queued_runs() {
+async fn queue_position_reported_for_runnable_runs() {
     let state = test_app_state();
     let app = crate::test_support::build_test_router(Arc::clone(&state));
 
-    // Create and start two runs (no scheduler, both stay queued)
+    // Create and start two runs (no scheduler, both stay runnable)
     let first_run_id = create_and_start_run(&app, MINIMAL_DOT).await;
     let second_run_id = create_and_start_run(&app, MINIMAL_DOT).await;
 
-    // Queue position is tracked in memory even when queued runs are also
+    // Queue position is tracked in memory even when runnable runs are also
     // visible on the board.
     let runs = state.runs.lock().expect("runs lock poisoned");
     let positions = compute_queue_positions(&runs);
@@ -11292,7 +11502,7 @@ async fn concurrency_limit_respected() {
 }
 
 #[tokio::test]
-async fn submit_answer_to_queued_run_returns_conflict() {
+async fn submit_answer_to_unstarted_run_returns_conflict() {
     let state = test_app_state();
     let app = crate::test_support::build_test_router(state);
 
@@ -11307,7 +11517,7 @@ async fn submit_answer_to_queued_run_returns_conflict() {
     let body = body_json(response.into_body()).await;
     let run_id = body["id"].as_str().unwrap().to_string();
 
-    // Try to submit an answer to a queued run
+    // Try to submit an answer to a run with no active worker.
     let req = Request::builder()
         .method("POST")
         .uri(api(&format!("/runs/{run_id}/questions/q1/answer")))
@@ -12151,9 +12361,9 @@ async fn list_runs_status_filter_accepts_repeated_values() {
     ])
     .await;
 
-    // Queued run (BoardColumn::Queued via Submitted)
-    let queued_id = fixtures::RUN_3;
-    create_durable_run_with_events(&state, queued_id, &[workflow_event::Event::RunSubmitted {
+    // Pending run (BoardColumn::Pending via Submitted)
+    let pending_id = fixtures::RUN_3;
+    create_durable_run_with_events(&state, pending_id, &[workflow_event::Event::RunSubmitted {
         definition_blob: None,
     }])
     .await;
@@ -12174,7 +12384,7 @@ async fn list_runs_status_filter_accepts_repeated_values() {
         .collect();
     assert!(ids.contains(&running_id.to_string().as_str()));
     assert!(!ids.contains(&succeeded_id.to_string().as_str()));
-    assert!(!ids.contains(&queued_id.to_string().as_str()));
+    assert!(!ids.contains(&pending_id.to_string().as_str()));
 
     // Repeated values: running + succeeded.
     let req = Request::builder()
@@ -12192,7 +12402,7 @@ async fn list_runs_status_filter_accepts_repeated_values() {
         .collect();
     assert!(ids.contains(&running_id.to_string().as_str()));
     assert!(ids.contains(&succeeded_id.to_string().as_str()));
-    assert!(!ids.contains(&queued_id.to_string().as_str()));
+    assert!(!ids.contains(&pending_id.to_string().as_str()));
 }
 
 #[tokio::test]
@@ -12258,10 +12468,11 @@ async fn list_runs_sort_by_status_groups_by_bucket() {
     let state = test_app_state();
     let app = crate::test_support::build_test_router(Arc::clone(&state));
 
-    // BoardColumn enum order: queued < initializing < running < blocked <
-    // succeeded < failed < archived < removing. Use three distinct buckets.
-    let queued_id = fixtures::RUN_1;
-    create_durable_run_with_events(&state, queued_id, &[workflow_event::Event::RunSubmitted {
+    // BoardColumn enum order: pending < runnable < initializing < running <
+    // blocked < succeeded < failed < archived < removing. Use three distinct
+    // buckets.
+    let pending_id = fixtures::RUN_1;
+    create_durable_run_with_events(&state, pending_id, &[workflow_event::Event::RunSubmitted {
         definition_blob: None,
     }])
     .await;
@@ -12297,7 +12508,7 @@ async fn list_runs_sort_by_status_groups_by_bucket() {
     ])
     .await;
 
-    // sort=status asc: queued < running < succeeded.
+    // sort=status asc: pending < running < succeeded.
     let req = Request::builder()
         .method("GET")
         .uri(api("/runs?sort=status&direction=asc"))
@@ -12313,7 +12524,7 @@ async fn list_runs_sort_by_status_groups_by_bucket() {
         .map(str::to_string)
         .collect();
     assert_eq!(observed, vec![
-        queued_id.to_string(),
+        pending_id.to_string(),
         running_id.to_string(),
         succeeded_id.to_string(),
     ]);
@@ -12331,14 +12542,18 @@ async fn filtered_global_events_streams_only_matching_run_ids() {
         .send(test_event_envelope(
             1,
             run_two,
-            EventBody::RunQueued(fabro_types::run_event::RunStatusEffectProps::default()),
+            EventBody::RunRunnable(fabro_types::run_event::RunRunnableProps {
+                source: fabro_types::RunRunnableSource::StartRequested,
+            }),
         ))
         .unwrap();
     event_tx
         .send(test_event_envelope(
             2,
             run_one,
-            EventBody::RunQueued(fabro_types::run_event::RunStatusEffectProps::default()),
+            EventBody::RunRunnable(fabro_types::run_event::RunRunnableProps {
+                source: fabro_types::RunRunnableSource::StartRequested,
+            }),
         ))
         .unwrap();
     drop(event_tx);

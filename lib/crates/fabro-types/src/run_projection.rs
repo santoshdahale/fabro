@@ -9,9 +9,9 @@ use crate::run_event::{AgentSessionActivatedProps, StagePromptProps};
 use crate::{
     AgentBackend, AgentMcpToolSummary, AgentSkillActivationSource, AgentSkillSummary,
     BilledTokenCounts, Checkpoint, Conclusion, InterviewQuestionRecord, InvalidTransition,
-    ModelRef, PullRequestLink, RunControlAction, RunDiff, RunId, RunSandbox, RunSpec, RunStatus,
-    RunTiming, StageCompletion, StageHandler, StageId, StageState, StageTiming, StartRecord,
-    TodoListProjection,
+    ModelRef, PullRequestLink, RunApproval, RunControlAction, RunDiff, RunId, RunSandbox, RunSpec,
+    RunStatus, RunTiming, StageCompletion, StageHandler, StageId, StageState, StageTiming,
+    StartRecord, TodoListProjection,
 };
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -25,6 +25,8 @@ pub struct RunProjection {
     pub web_url:            Option<String>,
     pub start:              Option<StartRecord>,
     pub status:             RunStatus,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub approval:           Option<RunApproval>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub archived_at:        Option<DateTime<Utc>>,
     pub status_updated_at:  DateTime<Utc>,
@@ -297,6 +299,7 @@ impl RunProjection {
             web_url: None,
             start: None,
             status: RunStatus::Submitted,
+            approval: None,
             archived_at: None,
             status_updated_at: created_at,
             last_event_at: created_at,

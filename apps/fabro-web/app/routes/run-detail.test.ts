@@ -58,7 +58,9 @@ const mutationState = () => ({
 
 mock.module("../lib/mutations", () => ({
   useArchiveRun:           mutationState,
+  useApproveRun:           mutationState,
   useCancelRun:            mutationState,
+  useDenyRun:              mutationState,
   useInterruptRun:         mutationState,
   usePreviewRun:           mutationState,
   useRetryRun:             mutationState,
@@ -91,18 +93,18 @@ function makeRunSummary(
     status === "succeeded"
       ? { kind: "succeeded", reason: "completed" }
       : status === "failed"
-        ? { kind: "failed", reason: "error" }
+        ? { kind: "failed", reason: "workflow_error" }
         : status === "dead"
           ? { kind: "dead" }
           : status === "blocked"
-            ? { kind: "blocked", reason: "interview", pending_question_id: null }
+            ? { kind: "blocked", blocked_reason: "human_input_required" }
             : { kind: status };
   const archived = status === "archived";
   return {
     id:               "run_1",
     goal:             "Run 1",
     title,
-    workflow:         { slug: "default", name: "Default" },
+    workflow:         { slug: "default", name: "Default", graph_name: null, node_count: 0, edge_count: 0 },
     automation:       null,
     repository:       { name: "fabro", origin_url: null, provider: "unknown" },
     created_by:       null,
@@ -110,6 +112,7 @@ function makeRunSummary(
     labels:           {},
     lifecycle:        {
       status:          archived ? { kind: "succeeded", reason: "completed" } : apiStatus,
+      approval:        null,
       pending_control: null,
       queue_position:  null,
       error:           null,
@@ -223,7 +226,8 @@ function tabCountBadges(renderer: TestRenderer.ReactTestRenderer) {
 describe("lifecycleActionVisibility", () => {
   test("shows cancel for active cancellable states and hides it elsewhere", () => {
     expect(lifecycleActionVisibility("submitted").showPrimaryCancel).toBe(true);
-    expect(lifecycleActionVisibility("queued").showPrimaryCancel).toBe(true);
+    expect(lifecycleActionVisibility("pending").showPrimaryCancel).toBe(true);
+    expect(lifecycleActionVisibility("runnable").showPrimaryCancel).toBe(true);
     expect(lifecycleActionVisibility("starting").showPrimaryCancel).toBe(true);
     expect(lifecycleActionVisibility("running").showPrimaryCancel).toBe(true);
     expect(lifecycleActionVisibility("paused").showPrimaryCancel).toBe(true);
@@ -293,7 +297,14 @@ describe("handleLifecycleToastResult", () => {
 
   const initialState: LifecycleToastState = {
     activeArchiveToastId: null,
-    lastProcessed: { cancel: null, archive: null, unarchive: null },
+    lastProcessed: {
+      cancel:    null,
+      approve:   null,
+      deny:      null,
+      archive:   null,
+      unarchive: null,
+      retry:     null,
+    },
   };
 
   test("replaying the same cancel success result does not enqueue a duplicate toast", () => {
@@ -359,7 +370,14 @@ describe("handleLifecycleToastResult", () => {
     };
     const stateWithActiveToast: LifecycleToastState = {
       activeArchiveToastId: "toast-9",
-      lastProcessed: { cancel: null, archive: null, unarchive: null },
+      lastProcessed: {
+        cancel:    null,
+        approve:   null,
+        deny:      null,
+        archive:   null,
+        unarchive: null,
+        retry:     null,
+      },
     };
 
     const nextState = handleLifecycleToastResult("unarchive", result, stateWithActiveToast, api);
@@ -430,14 +448,21 @@ describe("RunDetail full-height child routes", () => {
       intent: "retry",
       ok:     true,
       run:    {
-        ...makeRunSummary("queued"),
+        ...makeRunSummary("runnable"),
         id:           "run_retry",
         retried_from: "run_1",
       },
     };
     const initialState: LifecycleToastState = {
       activeArchiveToastId: null,
-      lastProcessed:        { cancel: null, archive: null, unarchive: null, retry: null },
+      lastProcessed:        {
+        cancel:    null,
+        approve:   null,
+        deny:      null,
+        archive:   null,
+        unarchive: null,
+        retry:     null,
+      },
     };
 
     const next = handleLifecycleToastResult(

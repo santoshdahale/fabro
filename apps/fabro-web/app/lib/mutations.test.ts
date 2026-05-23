@@ -5,7 +5,11 @@ let lastMutationOptions: { onSuccess?: (result: unknown) => void } | null = null
 
 const useSWRMutationMock = mock((_key: unknown, _fetcher: unknown, options: unknown) => {
   lastMutationOptions = options as { onSuccess?: (result: unknown) => void };
-  return {};
+  return {
+    trigger: mock(),
+    isMutating: false,
+    reset: mock(),
+  };
 });
 
 mock.module("swr", () => ({
@@ -24,8 +28,10 @@ mock.module("./api-client", () => ({
 }));
 
 mock.module("./run-actions", () => ({
+  approveRun: mock(),
   archiveRun: mock(),
   cancelRun: mock(),
+  denyRun: mock(),
   isLifecycleActionError: () => false,
   retryRun: mock(),
   unarchiveRun: mock(),

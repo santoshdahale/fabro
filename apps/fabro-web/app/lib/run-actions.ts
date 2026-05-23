@@ -9,7 +9,13 @@ import {
 } from "./api-client";
 import type { RunStatus } from "../data/runs";
 
-export type LifecycleAction = "cancel" | "archive" | "unarchive" | "retry";
+export type LifecycleAction =
+  | "cancel"
+  | "approve"
+  | "deny"
+  | "archive"
+  | "unarchive"
+  | "retry";
 
 export interface LifecycleActionError {
   status: number;
@@ -18,7 +24,8 @@ export interface LifecycleActionError {
 
 const CANCELABLE_STATUSES = new Set<RunStatus>([
   "submitted",
-  "queued",
+  "pending",
+  "runnable",
   "starting",
   "running",
   "paused",
@@ -33,6 +40,14 @@ const ARCHIVABLE_STATUSES = new Set<RunStatus>([
 
 export async function cancelRun(id: string, request?: Request): Promise<Run> {
   return runLifecycleAction(id, "cancel", request);
+}
+
+export async function approveRun(id: string, request?: Request): Promise<Run> {
+  return runLifecycleAction(id, "approve", request);
+}
+
+export async function denyRun(id: string, request?: Request): Promise<Run> {
+  return runLifecycleAction(id, "deny", request);
 }
 
 export async function archiveRun(id: string, request?: Request): Promise<Run> {
@@ -58,6 +73,10 @@ export async function deleteRun(id: string, request?: Request): Promise<void> {
 
 export function canCancel(status: string | null | undefined): boolean {
   return !!status && CANCELABLE_STATUSES.has(status as RunStatus);
+}
+
+export function canApprove(run: Run | null | undefined): boolean {
+  return run?.lifecycle.status.kind === "pending" && run.lifecycle.approval?.state === "pending";
 }
 
 export function canArchive(status: string | null | undefined): boolean {
@@ -104,6 +123,9 @@ export function mapError(error: unknown, action: LifecycleAction): string {
       switch (action) {
         case "cancel":
           return "This run can no longer be cancelled.";
+        case "approve":
+        case "deny":
+          return "This run is no longer pending approval.";
         case "archive":
           return "Only terminal runs can be archived.";
         case "unarchive":
@@ -122,6 +144,10 @@ export function mapError(error: unknown, action: LifecycleAction): string {
   switch (action) {
     case "cancel":
       return "Couldn't cancel the run right now. Try again.";
+    case "approve":
+      return "Couldn't approve the run right now. Try again.";
+    case "deny":
+      return "Couldn't deny the run right now. Try again.";
     case "archive":
       return "Couldn't archive the run right now. Try again.";
     case "unarchive":
@@ -140,6 +166,10 @@ async function runLifecycleAction(
     switch (action) {
       case "cancel":
         return await apiData(() => runsApi.cancelRun(id, requestSignalOptions(request)));
+      case "approve":
+        return await apiData(() => runsApi.approveRun(id, requestSignalOptions(request)));
+      case "deny":
+        return await apiData(() => runsApi.denyRun(id, undefined, requestSignalOptions(request)));
       case "archive":
         return await apiData(() => runsApi.archiveRun(id, requestSignalOptions(request)));
       case "unarchive":

@@ -51,7 +51,8 @@ interface ColumnStyle {
 }
 
 const columnStyles: Record<BoardColumn, ColumnStyle> = {
-  queued:       { actions: [] },
+  pending:      { actions: [] },
+  runnable:     { actions: [] },
   initializing: { actions: [] },
   running:      { actions: [] },
   blocked:      { actions: ["Answer Question"] },
@@ -1492,7 +1493,7 @@ export default function Runs() {
     0,
   );
   const visibleColumns = placeArchivedColumnLast(filteredColumns, includeArchived).filter(
-    (col) => col.id !== "queued" || col.items.length > 0,
+    (col) => col.id !== "pending" || col.items.length > 0,
   );
 
   return (

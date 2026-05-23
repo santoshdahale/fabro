@@ -10,12 +10,13 @@ use fabro_types::settings::run::{EnvironmentProvider, RunEnvironmentSettings};
 use fabro_types::{
     ActivatedSkill, AskFabro, BilledModelUsage, Checkpoint, CheckpointRecord, CommandTermination,
     Conclusion, EventBody, FailureSignature, InterviewQuestionRecord, McpServerProjection,
-    McpServerStatus, Outcome, PendingInterviewRecord, PullRequestLink, RepositoryRef, Run,
-    RunBillingSummary, RunControlAction, RunDiff, RunEvent, RunId, RunLifecycle, RunLinks,
-    RunModel, RunOrigin, RunProjection, RunSandbox, RunSandboxRuntime, RunSize, RunSpec, RunStatus,
-    RunTimestamps, SandboxProvider, StageCompletion, StageHandler, StageId, StageModelUsage,
-    StageOutcome, StageProjection, StageState, StartRecord, SubAgentProjection, SubAgentStatus,
-    TodoListProjection, TodoProjection, WorkflowRef, first_event_seq,
+    McpServerStatus, Outcome, PendingInterviewRecord, PendingReason, PullRequestLink,
+    RepositoryRef, Run, RunApproval, RunApprovalState, RunBillingSummary, RunControlAction,
+    RunDiff, RunEvent, RunId, RunLifecycle, RunLinks, RunModel, RunOrigin, RunProjection,
+    RunSandbox, RunSandboxRuntime, RunSize, RunSpec, RunStatus, RunTimestamps, SandboxProvider,
+    StageCompletion, StageHandler, StageId, StageModelUsage, StageOutcome, StageProjection,
+    StageState, StartRecord, SubAgentProjection, SubAgentStatus, TodoListProjection,
+    TodoProjection, WorkflowRef, first_event_seq,
 };
 use fabro_util::error::render_compact_with_causes;
 
@@ -71,8 +72,38 @@ impl RunProjectionReducer for RunProjection {
             EventBody::RunSubmitted(props) => {
                 self.spec.definition_blob = props.definition_blob;
             }
-            EventBody::RunQueued(_) => {
-                self.try_apply_status(RunStatus::Queued, ts)?;
+            EventBody::RunPending(props) => {
+                self.try_apply_status(
+                    RunStatus::Pending {
+                        reason: props.reason,
+                    },
+                    ts,
+                )?;
+                if props.reason == PendingReason::ApprovalRequired {
+                    self.approval = Some(RunApproval {
+                        state:         RunApprovalState::Pending,
+                        requested_at:  ts,
+                        decided_at:    None,
+                        denial_reason: None,
+                    });
+                }
+            }
+            EventBody::RunApproved(_) => {
+                if let Some(approval) = &mut self.approval {
+                    approval.state = RunApprovalState::Approved;
+                    approval.decided_at = Some(ts);
+                    approval.denial_reason = None;
+                }
+            }
+            EventBody::RunDenied(props) => {
+                if let Some(approval) = &mut self.approval {
+                    approval.state = RunApprovalState::Denied;
+                    approval.decided_at = Some(ts);
+                    approval.denial_reason.clone_from(&props.reason);
+                }
+            }
+            EventBody::RunRunnable(_) => {
+                self.try_apply_status(RunStatus::Runnable, ts)?;
             }
             EventBody::RunStarting(_) => {
                 self.try_apply_status(RunStatus::Starting, ts)?;
@@ -821,6 +852,7 @@ pub(crate) fn build_summary(state: &RunProjection, run_id: &RunId) -> Run {
         labels: state.spec.labels.clone(),
         lifecycle: RunLifecycle {
             status:          state.status,
+            approval:        state.approval.clone(),
             pending_control: state.pending_control,
             queue_position:  None,
             error:           None,
@@ -1073,10 +1105,10 @@ mod tests {
     use fabro_types::{
         AgentBackend, BilledModelUsage, BilledTokenCounts, BlockedReason, Checkpoint,
         CheckpointRecord, CommandTermination, EventBody, FailureCategory, FailureDetail,
-        FailureReason, Graph, McpServerStatus, Outcome, PullRequestLink, QuestionType,
-        ReasoningEffort, RunBlobId, RunControlAction, RunDiff, RunEvent, RunSize, RunSpec,
-        RunStatus, Speed, StageModelUsage, StageOutcome, StageState, SubAgentStatus, SuccessReason,
-        WorkflowSettings, first_event_seq, fixtures,
+        FailureReason, Graph, McpServerStatus, Outcome, PendingReason, PullRequestLink,
+        QuestionType, ReasoningEffort, RunApprovalState, RunBlobId, RunControlAction, RunDiff,
+        RunEvent, RunSize, RunSpec, RunStatus, Speed, StageModelUsage, StageOutcome, StageState,
+        SubAgentStatus, SuccessReason, WorkflowSettings, first_event_seq, fixtures,
     };
     use serde_json::json;
 
@@ -1165,10 +1197,18 @@ mod tests {
     fn running_projection() -> RunProjection {
         let mut state = initialized_projection();
         state
-            .apply_event(&test_raw_event(1, "run.starting", &json!({}), None))
+            .apply_event(&test_raw_event(
+                1,
+                "run.runnable",
+                &json!({ "source": "start_requested" }),
+                None,
+            ))
             .unwrap();
         state
-            .apply_event(&test_raw_event(2, "run.running", &json!({}), None))
+            .apply_event(&test_raw_event(2, "run.starting", &json!({}), None))
+            .unwrap();
+        state
+            .apply_event(&test_raw_event(3, "run.running", &json!({}), None))
             .unwrap();
         state
     }
@@ -1285,6 +1325,15 @@ mod tests {
             .apply_event(&test_raw_event_at(
                 2,
                 "2026-04-07T12:00:00Z",
+                "run.runnable",
+                &json!({ "source": "start_requested" }),
+                None,
+            ))
+            .unwrap();
+        state
+            .apply_event(&test_raw_event_at(
+                3,
+                "2026-04-07T12:00:00Z",
                 "run.starting",
                 &json!({}),
                 None,
@@ -1292,16 +1341,16 @@ mod tests {
             .unwrap();
         state
             .apply_event(&test_raw_event_at(
-                3,
+                4,
                 "2026-04-07T12:00:01Z",
                 "run.running",
                 &json!({}),
                 None,
             ))
             .unwrap();
-        state.stage_entry("plan", 1, first_event_seq(4)).timing =
+        state.stage_entry("plan", 1, first_event_seq(5)).timing =
             Some(fabro_types::StageTiming::new(2_000, 700, 300));
-        state.stage_entry("code", 1, first_event_seq(5)).timing =
+        state.stage_entry("code", 1, first_event_seq(6)).timing =
             Some(fabro_types::StageTiming::new(3_000, 50, 200));
 
         let conclusion_timing = fabro_types::RunTiming::new(
@@ -1315,7 +1364,7 @@ mod tests {
             500,
         );
         let mut completed = test_event(
-            6,
+            7,
             EventBody::RunCompleted(RunCompletedProps {
                 timing:               conclusion_timing,
                 artifact_count:       0,
@@ -1345,7 +1394,13 @@ mod tests {
     #[test]
     fn last_event_at_tracks_most_recent_event_timestamp() {
         let mut state = initialized_projection();
-        let later = test_raw_event_at(2, "2026-04-20T12:05:30Z", "run.starting", &json!({}), None);
+        let later = test_raw_event_at(
+            2,
+            "2026-04-20T12:05:30Z",
+            "run.start_requested",
+            &json!({ "resume": false }),
+            None,
+        );
 
         state.apply_event(&later).unwrap();
 
@@ -2055,30 +2110,58 @@ mod tests {
     }
 
     #[test]
-    fn queued_and_blocked_events_drive_projection_and_summary_fields() {
+    fn pending_runnable_and_blocked_events_drive_projection_and_summary_fields() {
         let mut state = initialized_projection();
 
         state
-            .apply_event(&test_raw_event(1, "run.queued", &json!({}), None))
+            .apply_event(&test_raw_event(
+                1,
+                "run.pending",
+                &json!({ "reason": "approval_required" }),
+                None,
+            ))
             .unwrap();
-        assert_eq!(state.status(), RunStatus::Queued);
+        assert_eq!(state.status(), RunStatus::Pending {
+            reason: PendingReason::ApprovalRequired,
+        });
+        assert_eq!(
+            state.approval.as_ref().map(|approval| approval.state),
+            Some(RunApprovalState::Pending)
+        );
 
         state
-            .apply_event(&test_raw_event(2, "run.starting", &json!({}), None))
+            .apply_event(&test_raw_event(2, "run.approved", &json!({}), None))
             .unwrap();
         state
-            .apply_event(&test_raw_event(3, "run.running", &json!({}), None))
+            .apply_event(&test_raw_event(
+                3,
+                "run.runnable",
+                &json!({ "source": "approved" }),
+                None,
+            ))
+            .unwrap();
+        assert_eq!(state.status(), RunStatus::Runnable);
+        assert_eq!(
+            state.approval.as_ref().map(|approval| approval.state),
+            Some(RunApprovalState::Approved)
+        );
+
+        state
+            .apply_event(&test_raw_event(4, "run.starting", &json!({}), None))
+            .unwrap();
+        state
+            .apply_event(&test_raw_event(5, "run.running", &json!({}), None))
             .unwrap();
         state
             .apply_event(&test_event(
-                4,
+                6,
                 EventBody::RunPaused(RunControlEffectProps::default()),
                 None,
             ))
             .unwrap();
         state
             .apply_event(&test_raw_event(
-                5,
+                7,
                 "run.blocked",
                 &json!({ "blocked_reason": "human_input_required" }),
                 None,
@@ -2106,6 +2189,133 @@ mod tests {
                 "prior_block": "human_input_required"
             })
         );
+        assert_eq!(
+            summary_json["lifecycle"]["approval"]["state"],
+            json!("approved")
+        );
+    }
+
+    #[test]
+    fn approval_denial_projection_records_decision_then_failure() {
+        let mut state = initialized_projection();
+
+        state
+            .apply_event(&test_raw_event_at(
+                1,
+                "2026-05-23T12:00:00Z",
+                "run.start_requested",
+                &json!({ "resume": false }),
+                None,
+            ))
+            .unwrap();
+        assert_eq!(state.status(), RunStatus::Submitted);
+        assert!(state.approval.is_none());
+
+        state
+            .apply_event(&test_raw_event_at(
+                2,
+                "2026-05-23T12:00:01Z",
+                "run.pending",
+                &json!({ "reason": "approval_required" }),
+                None,
+            ))
+            .unwrap();
+        let approval = state.approval.as_ref().expect("approval should be pending");
+        assert_eq!(state.status(), RunStatus::Pending {
+            reason: PendingReason::ApprovalRequired,
+        });
+        assert_eq!(approval.state, RunApprovalState::Pending);
+        assert_eq!(
+            approval.requested_at.to_rfc3339(),
+            "2026-05-23T12:00:01+00:00"
+        );
+        assert_eq!(approval.decided_at, None);
+
+        state
+            .apply_event(&test_raw_event_at(
+                3,
+                "2026-05-23T12:00:02Z",
+                "run.denied",
+                &json!({ "reason": "Not approved for execution" }),
+                None,
+            ))
+            .unwrap();
+        let approval = state.approval.as_ref().expect("approval should be denied");
+        assert_eq!(state.status(), RunStatus::Pending {
+            reason: PendingReason::ApprovalRequired,
+        });
+        assert_eq!(approval.state, RunApprovalState::Denied);
+        assert_eq!(
+            approval.denial_reason.as_deref(),
+            Some("Not approved for execution")
+        );
+        assert_eq!(
+            approval.decided_at.map(|ts| ts.to_rfc3339()).as_deref(),
+            Some("2026-05-23T12:00:02+00:00")
+        );
+
+        state
+            .apply_event(&test_raw_event(
+                4,
+                "run.failed",
+                &json!({
+                    "failure": {
+                        "reason": "approval_denied",
+                        "detail": {
+                            "message": "Not approved for execution",
+                            "category": "deterministic"
+                        }
+                    },
+                    "timing": {
+                        "wall_time_ms": 0,
+                        "inference_time_ms": 0,
+                        "tool_time_ms": 0,
+                        "active_time_ms": 0
+                    }
+                }),
+                None,
+            ))
+            .unwrap();
+
+        assert_eq!(state.status(), RunStatus::Failed {
+            reason: FailureReason::ApprovalDenied,
+        });
+        let summary_json = serde_json::to_value(build_summary(&state, &fixtures::RUN_1)).unwrap();
+        assert_eq!(
+            summary_json["lifecycle"]["approval"],
+            json!({
+                "state": "denied",
+                "requested_at": "2026-05-23T12:00:01Z",
+                "decided_at": "2026-05-23T12:00:02Z",
+                "denial_reason": "Not approved for execution"
+            })
+        );
+        assert_eq!(
+            summary_json["lifecycle"]["status"],
+            json!({ "kind": "failed", "reason": "approval_denied" })
+        );
+    }
+
+    #[test]
+    fn runnable_projection_without_approval_has_null_summary_approval() {
+        let mut state = initialized_projection();
+        state
+            .apply_event(&test_raw_event(
+                1,
+                "run.runnable",
+                &json!({ "source": "start_requested" }),
+                None,
+            ))
+            .unwrap();
+
+        assert_eq!(state.status(), RunStatus::Runnable);
+        assert!(state.approval.is_none());
+        let summary_json = serde_json::to_value(build_summary(&state, &fixtures::RUN_1)).unwrap();
+        assert_eq!(
+            summary_json["lifecycle"]["status"],
+            json!({ "kind": "runnable" })
+        );
+        assert!(summary_json["lifecycle"]["approval"].is_null());
     }
 
     #[test]
@@ -2453,14 +2663,7 @@ mod tests {
 
     #[test]
     fn patch_bearing_events_roll_up_diff_summary_without_blanking_prior_value() {
-        let mut state = initialized_projection();
-
-        state
-            .apply_event(&test_raw_event(1, "run.starting", &json!({}), None))
-            .unwrap();
-        state
-            .apply_event(&test_raw_event(2, "run.running", &json!({}), None))
-            .unwrap();
+        let mut state = running_projection();
         state
             .apply_event(&test_raw_event(
                 3,
@@ -2531,13 +2734,7 @@ mod tests {
             })
         );
 
-        let mut failed_state = initialized_projection();
-        failed_state
-            .apply_event(&test_raw_event(1, "run.starting", &json!({}), None))
-            .unwrap();
-        failed_state
-            .apply_event(&test_raw_event(2, "run.running", &json!({}), None))
-            .unwrap();
+        let mut failed_state = running_projection();
         failed_state
             .apply_event(&test_raw_event(
                 3,
@@ -2865,6 +3062,15 @@ mod tests {
             .apply_event(&test_raw_event_at(
                 1,
                 "2026-04-07T12:00:00Z",
+                "run.runnable",
+                &json!({ "source": "start_requested" }),
+                None,
+            ))
+            .unwrap();
+        state
+            .apply_event(&test_raw_event_at(
+                2,
+                "2026-04-07T12:00:30Z",
                 "run.starting",
                 &json!({}),
                 None,
@@ -2872,7 +3078,7 @@ mod tests {
             .unwrap();
         state
             .apply_event(&test_raw_event_at(
-                2,
+                3,
                 "2026-04-07T12:01:00Z",
                 "run.running",
                 &json!({}),
@@ -2883,7 +3089,7 @@ mod tests {
 
         state
             .apply_event(&test_raw_event_at(
-                3,
+                4,
                 "2026-04-07T12:02:00Z",
                 "run.running",
                 &json!({}),
@@ -2897,13 +3103,7 @@ mod tests {
 
     #[test]
     fn paused_over_blocked_round_trips_back_to_blocked() {
-        let mut state = initialized_projection();
-        state
-            .apply_event(&test_raw_event(1, "run.starting", &json!({}), None))
-            .unwrap();
-        state
-            .apply_event(&test_raw_event(2, "run.running", &json!({}), None))
-            .unwrap();
+        let mut state = running_projection();
         state
             .apply_event(&test_raw_event(
                 3,
@@ -2936,13 +3136,7 @@ mod tests {
     fn run_archived_on_non_terminal_projection_is_rejected() {
         use fabro_types::run_event::RunArchivedProps;
 
-        let mut state = initialized_projection();
-        state
-            .apply_event(&test_raw_event(1, "run.starting", &json!({}), None))
-            .unwrap();
-        state
-            .apply_event(&test_raw_event(2, "run.running", &json!({}), None))
-            .unwrap();
+        let mut state = running_projection();
 
         let err = state
             .apply_event(&test_event(

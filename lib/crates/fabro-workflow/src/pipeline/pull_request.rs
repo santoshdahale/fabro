@@ -1596,6 +1596,12 @@ mod tests {
         })
         .await
         .unwrap();
+        append_event(&run_store, &fixtures::RUN_1, &Event::RunRunnable {
+            source: fabro_types::RunRunnableSource::StartRequested,
+            actor:  None,
+        })
+        .await
+        .unwrap();
         append_event(&run_store, &fixtures::RUN_1, &Event::RunStarting)
             .await
             .unwrap();
@@ -1883,6 +1889,12 @@ mod tests {
             retried_from:     None,
             parent_id:        None,
             web_url:          None,
+        })
+        .await
+        .unwrap();
+        append_event(&run_store, &fixtures::RUN_1, &Event::RunRunnable {
+            source: fabro_types::RunRunnableSource::StartRequested,
+            actor:  None,
         })
         .await
         .unwrap();
