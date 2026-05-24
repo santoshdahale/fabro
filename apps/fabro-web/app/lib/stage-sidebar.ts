@@ -35,14 +35,14 @@ export const SUCCEEDED_STAGE_STATES: ReadonlySet<StageState> = new Set([
 ]);
 
 const STAGE_STATUS_TONE: Record<StageState, string> = {
-  pending: "bg-overlay-strong text-fg-muted",
+  pending: "bg-overlay-strong text-fg-3",
   running: "bg-teal-500/15 text-teal-500",
   retrying: "bg-amber/15 text-amber",
   succeeded: "bg-mint/15 text-mint",
   partially_succeeded: "bg-amber/15 text-amber",
   failed: "bg-coral/15 text-coral",
-  skipped: "bg-overlay-strong text-fg-muted",
-  cancelled: "bg-overlay-strong text-fg-muted",
+  skipped: "bg-overlay-strong text-fg-3",
+  cancelled: "bg-overlay-strong text-fg-3",
 };
 
 const STAGE_STATUS_LABEL: Record<StageState, string> = {
