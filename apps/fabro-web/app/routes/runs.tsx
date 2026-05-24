@@ -1,6 +1,6 @@
 import { useState, useCallback, useEffect, useMemo, useRef } from "react";
 import { Link, useSearchParams } from "react-router";
-import { AdjustmentsHorizontalIcon, ArchiveBoxIcon, ArrowUturnLeftIcon, CheckIcon, ChevronDoubleLeftIcon, ChevronDoubleRightIcon, ChevronDownIcon, ChevronLeftIcon, ChevronRightIcon, ChevronUpDownIcon, ChevronUpIcon, CommandLineIcon, MagnifyingGlassIcon, PlusCircleIcon, XMarkIcon } from "@heroicons/react/24/outline";
+import { AdjustmentsHorizontalIcon, ArchiveBoxIcon, ArrowUturnLeftIcon, CheckIcon, ChevronDoubleLeftIcon, ChevronDoubleRightIcon, ChevronDownIcon, ChevronLeftIcon, ChevronRightIcon, ChevronUpDownIcon, ChevronUpIcon, CommandLineIcon, MagnifyingGlassIcon, PlusCircleIcon, TrashIcon, XMarkIcon } from "@heroicons/react/24/outline";
 import { EllipsisVerticalIcon } from "@heroicons/react/20/solid";
 import { Listbox, ListboxButton, ListboxOption, ListboxOptions, Menu, MenuButton, MenuItem, MenuItems } from "@headlessui/react";
 import { useSWRConfig } from "swr";
@@ -29,11 +29,13 @@ import { InlineMarkdown } from "../components/inline-markdown";
 import { PullRequestChip } from "../components/pull-request-chip";
 import { plural } from "../components/settings-panel";
 import { useToast } from "../components/toast";
+import { ConfirmDialog } from "../components/ui";
 import { mutateRunListCaches } from "../lib/board-cache";
 import { shouldRefreshBoardForEvent, useBoardEvents } from "../lib/board-events";
 import { useAllRuns, useAuthConfig, useRunsPage, useSystemInfo } from "../lib/queries";
-import { archiveRuns, canArchive, canUnarchive, unarchiveRuns } from "../lib/run-actions";
+import { archiveRuns, canArchive, canDelete, canUnarchive, deleteRuns, unarchiveRuns } from "../lib/run-actions";
 import type {
+  BatchDeleteRunsResponse,
   BatchRunLifecycleResponse,
   BatchRunLifecycleSummary,
   BoardColumn,
@@ -68,7 +70,7 @@ const columnStyles: Record<BoardColumn, ColumnStyle> = {
 const defaultColumnStyle: ColumnStyle = { actions: [] };
 const defaultColumnColors = { label: "", dot: "bg-fg-muted", text: "text-fg-muted" };
 
-type BatchLifecycleLabel = "Archive" | "Unarchive";
+type BatchLifecycleLabel = "Archive" | "Unarchive" | "Delete";
 
 interface BatchLifecycleToast {
   message: string;
@@ -1414,6 +1416,7 @@ function BulkActionToolbar({
   onClear:      () => void;
 }) {
   const [pending, setPending] = useState(false);
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const { mutate } = useSWRConfig();
   const { push } = useToast();
 
@@ -1426,13 +1429,17 @@ function BulkActionToolbar({
     () => selectedRuns.filter((r) => canUnarchive(r.lifecycleStatus)),
     [selectedRuns],
   );
+  const deletable = useMemo(
+    () => selectedRuns.filter((r) => canDelete(r.lifecycleStatus)),
+    [selectedRuns],
+  );
 
   if (count === 0) return null;
 
   async function runBulk(
-    label: "Archive" | "Unarchive",
+    label: BatchLifecycleLabel,
     eligible: RunWithStatus[],
-    action: (ids: string[]) => Promise<BatchRunLifecycleResponse>,
+    action: (ids: string[]) => Promise<BatchRunLifecycleResponse | BatchDeleteRunsResponse>,
   ) {
     if (pending) return;
     if (eligible.length === 0) {
@@ -1463,41 +1470,83 @@ function BulkActionToolbar({
     }
   }
 
+  function onClickDelete() {
+    if (pending) return;
+    if (deletable.length === 0) {
+      push({
+        message: `No selected ${plural(count, "run", "runs")} can be deleted.`,
+        tone:    "error",
+      });
+      return;
+    }
+    setDeleteDialogOpen(true);
+  }
+
+  async function onConfirmDelete() {
+    await runBulk("Delete", deletable, (ids) => deleteRuns(ids));
+    setDeleteDialogOpen(false);
+  }
+
+  const deletableCount = deletable.length;
+
   return (
-    <div
-      role="region"
-      aria-label="Bulk actions"
-      className="pointer-events-none fixed inset-x-0 bottom-4 z-30 flex justify-center px-4"
-    >
-      <div className="pointer-events-auto flex items-center gap-3 rounded-full border border-line-strong bg-panel py-2 pl-4 pr-2 text-sm text-fg-2 shadow-lg shadow-black/40">
-        <span className="font-medium">
-          {count} {plural(count, "run", "runs")} selected
-        </span>
-        <span className="h-5 w-px bg-line" aria-hidden="true" />
-        <BulkActionButton
-          label="Archive"
-          icon={<ArchiveBoxIcon className="size-4" aria-hidden="true" />}
-          disabled={pending}
-          onClick={() => runBulk("Archive", archivable, archiveRuns)}
-        />
-        <BulkActionButton
-          label="Unarchive"
-          icon={<ArrowUturnLeftIcon className="size-4" aria-hidden="true" />}
-          disabled={pending}
-          onClick={() => runBulk("Unarchive", unarchivable, unarchiveRuns)}
-        />
-        <button
-          type="button"
-          onClick={onClear}
-          disabled={pending}
-          aria-label="Clear selection"
-          title="Clear selection"
-          className="inline-flex size-8 items-center justify-center rounded-full text-fg-3 transition-colors enabled:hover:bg-overlay enabled:hover:text-fg-2 disabled:cursor-default disabled:opacity-40"
-        >
-          <XMarkIcon className="size-4" aria-hidden="true" />
-        </button>
+    <>
+      <div
+        role="region"
+        aria-label="Bulk actions"
+        className="pointer-events-none fixed inset-x-0 bottom-4 z-30 flex justify-center px-4"
+      >
+        <div className="pointer-events-auto flex items-center gap-3 rounded-full border border-line-strong bg-panel py-2 pl-4 pr-2 text-sm text-fg-2 shadow-lg shadow-black/40">
+          <span className="font-medium">
+            {count} {plural(count, "run", "runs")} selected
+          </span>
+          <span className="h-5 w-px bg-line" aria-hidden="true" />
+          <BulkActionButton
+            label="Archive"
+            icon={<ArchiveBoxIcon className="size-4" aria-hidden="true" />}
+            disabled={pending}
+            onClick={() => runBulk("Archive", archivable, archiveRuns)}
+          />
+          <BulkActionButton
+            label="Unarchive"
+            icon={<ArrowUturnLeftIcon className="size-4" aria-hidden="true" />}
+            disabled={pending}
+            onClick={() => runBulk("Unarchive", unarchivable, unarchiveRuns)}
+          />
+          <BulkActionButton
+            label="Delete"
+            icon={<TrashIcon className="size-4" aria-hidden="true" />}
+            disabled={pending}
+            onClick={onClickDelete}
+          />
+          <button
+            type="button"
+            onClick={onClear}
+            disabled={pending}
+            aria-label="Clear selection"
+            title="Clear selection"
+            className="inline-flex size-8 items-center justify-center rounded-full text-fg-3 transition-colors enabled:hover:bg-overlay enabled:hover:text-fg-2 disabled:cursor-default disabled:opacity-40"
+          >
+            <XMarkIcon className="size-4" aria-hidden="true" />
+          </button>
+        </div>
       </div>
-    </div>
+      <ConfirmDialog
+        open={deleteDialogOpen}
+        title={`Delete ${deletableCount} ${plural(deletableCount, "run", "runs")}?`}
+        description={
+          <>
+            This permanently removes {deletableCount} archived {plural(deletableCount, "run", "runs")}{" "}
+            and their durable state. This action cannot be undone.
+          </>
+        }
+        confirmLabel={`Delete ${plural(deletableCount, "run", "runs")}`}
+        pendingLabel="Deleting…"
+        pending={pending}
+        onConfirm={() => void onConfirmDelete()}
+        onCancel={() => setDeleteDialogOpen(false)}
+      />
+    </>
   );
 }
 

@@ -182,6 +182,9 @@ describe("runs route board mapping", () => {
     expect(
       summarizeBatchLifecycleAction("Unarchive", { requested: 1, succeeded: 1, failed: 0 }),
     ).toEqual({ message: "Unarchived 1 run." });
+    expect(
+      summarizeBatchLifecycleAction("Delete", { requested: 3, succeeded: 3, failed: 0 }),
+    ).toEqual({ message: "Deleted 3 runs." });
   });
 
   test("summarizes partial and failed batch lifecycle actions", () => {
@@ -195,6 +198,18 @@ describe("runs route board mapping", () => {
       summarizeBatchLifecycleAction("Unarchive", { requested: 2, succeeded: 0, failed: 2 }),
     ).toEqual({
       message: "Couldn't unarchive 2 runs. Try again.",
+      tone:    "error",
+    });
+    expect(
+      summarizeBatchLifecycleAction("Delete", { requested: 4, succeeded: 3, failed: 1 }),
+    ).toEqual({
+      message: "Deleted 3 of 4 runs. 1 failed.",
+      tone:    "error",
+    });
+    expect(
+      summarizeBatchLifecycleAction("Delete", { requested: 2, succeeded: 0, failed: 2 }),
+    ).toEqual({
+      message: "Couldn't delete 2 runs. Try again.",
       tone:    "error",
     });
   });
