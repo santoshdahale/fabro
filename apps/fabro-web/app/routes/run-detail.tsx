@@ -687,8 +687,6 @@ export default function RunDetail({ params }: { params: { id: string } }) {
           </div>
         </div>
 
-        {demoMode && <ConnectMenu />}
-
         {run.pullRequestUrl && run.number != null && (
           <HoverCard content={<PullRequestPopover runId={params.id} />}>
             <a
@@ -948,33 +946,6 @@ export function handleLifecycleToastResult(
 
   toastApi.push({ message: "Run restored." });
   return { ...nextState, activeArchiveToastId: null };
-}
-
-function ConnectMenu() {
-  return (
-    <Menu as="div" className="shrink-0">
-      <MenuButton className={ACTIONS_TRIGGER_CLASS}>
-        Connect
-        <ChevronDownIcon className="-mr-1 size-4 text-fg-muted" aria-hidden="true" />
-      </MenuButton>
-      <MenuItems
-        transition
-        anchor={{ to: "bottom end", gap: 4 }}
-        className="z-20 w-44 origin-top-right rounded-md bg-panel py-1 outline-1 -outline-offset-1 outline-line-strong transition data-closed:scale-95 data-closed:opacity-0 data-enter:duration-100 data-enter:ease-out data-leave:duration-75 data-leave:ease-in"
-      >
-        <MenuItem>
-          <button type="button" className={MENU_ITEM_CLASS}>
-            Preview
-          </button>
-        </MenuItem>
-        <MenuItem>
-          <button type="button" className={MENU_ITEM_CLASS}>
-            SSH
-          </button>
-        </MenuItem>
-      </MenuItems>
-    </Menu>
-  );
 }
 
 interface ActionsMenuProps {
