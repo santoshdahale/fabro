@@ -1,18 +1,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useSearchParams } from "react-router";
-import { ArchiveBoxIcon, ArrowPathIcon, MagnifyingGlassIcon } from "@heroicons/react/24/outline";
+import { ArrowPathIcon, MagnifyingGlassIcon } from "@heroicons/react/24/outline";
 import type { ListRunsSortEnum } from "@qltysh/fabro-api-client";
 
 import { EmptyState, ErrorState, LoadingState } from "../components/state";
 import { ColumnPickerButton } from "../components/runs-list/column-picker-button";
-import { FilterButton } from "../components/runs-list/filter-button";
 import {
   childRunsListPreferencesFromSearchParams,
   childRunsListPreferencesToSearchParams,
-  createdCutoffMsFor,
-  createdFilterOptions,
   hiddenColumnsFromSearchParams,
-  parseCreatedFilter,
   parseDirection,
   parsePage,
   parsePageSize,
@@ -20,7 +16,7 @@ import {
   persistChildRunsListPreferences,
   resolveChildRunsListSearchParams,
 } from "../components/runs-list/preferences";
-import type { ChildRunsListPreferences, CreatedFilter } from "../components/runs-list/preferences";
+import type { ChildRunsListPreferences } from "../components/runs-list/preferences";
 import { RunsListView } from "../components/runs-list/runs-list-view";
 import { serializeHiddenColumns } from "../components/runs-list/toggleable-column";
 import type { ToggleableColumn } from "../components/runs-list/toggleable-column";
@@ -42,8 +38,6 @@ export default function RunChildren() {
   );
 
   const query = searchParams.get("search") ?? "";
-  const createdFilter = parseCreatedFilter(searchParams.get("created"));
-  const includeArchived = searchParams.get("archived") === "1";
   const sort = parseSort(searchParams.get("sort"));
   const direction = parseDirection(searchParams.get("direction"));
   const page = parsePage(searchParams.get("page"));
@@ -69,10 +63,6 @@ export default function RunChildren() {
 
   const setQuery = (value: string) =>
     updatePreferences((prev) => ({ ...prev, search: value }));
-  const setCreatedFilter = (value: CreatedFilter) =>
-    updatePreferences((prev) => ({ ...prev, created: value }));
-  const setIncludeArchived = (value: boolean) =>
-    updatePreferences((prev) => ({ ...prev, archived: value }));
   const setPage = useCallback(
     (next: number) => updatePreferences((prev) => ({ ...prev, page: next })),
     [updatePreferences],
@@ -107,7 +97,7 @@ export default function RunChildren() {
   const childRunsQuery = useRunsPage(
     {
       parentId:        id,
-      includeArchived,
+      includeArchived: false,
       sort,
       direction,
       limit:           pageSize,
@@ -154,7 +144,6 @@ export default function RunChildren() {
 
   const updatedAt = lastFetchedAtRef.current;
   const lowerQuery = query.toLowerCase();
-  const createdCutoffMs = createdCutoffMsFor(createdFilter);
 
   return (
     <div className="space-y-4">
@@ -171,25 +160,6 @@ export default function RunChildren() {
             className="w-full rounded-md border border-line bg-panel/80 py-2 pl-9 pr-3 text-sm text-fg-2 placeholder-fg-muted outline-none transition-colors focus:border-focus focus:ring-0"
           />
         </div>
-
-        <FilterButton
-          label="Time"
-          value={createdFilter}
-          allValue="all"
-          options={createdFilterOptions}
-          onChange={setCreatedFilter}
-        />
-
-        <button
-          type="button"
-          onClick={() => setIncludeArchived(!includeArchived)}
-          aria-pressed={includeArchived}
-          title={includeArchived ? "Hide archived runs" : "Show archived runs"}
-          className={`inline-flex items-center gap-1.5 rounded-md border border-line bg-panel/80 px-3 py-2 text-xs font-medium transition-colors ${includeArchived ? "text-teal-500" : "text-fg-muted hover:text-fg-3"}`}
-        >
-          <ArchiveBoxIcon className="size-4" aria-hidden="true" />
-          <span>Show archived</span>
-        </button>
 
         <div className="ml-auto flex items-center gap-3">
           {updatedAt != null ? (
@@ -249,7 +219,7 @@ export default function RunChildren() {
         query={lowerQuery}
         repoFilter="all"
         workflowFilter="all"
-        createdCutoffMs={createdCutoffMs}
+        createdCutoffMs={null}
       />
     </div>
   );
