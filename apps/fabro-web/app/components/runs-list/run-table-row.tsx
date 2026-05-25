@@ -5,6 +5,7 @@ import type { RunWithStatus } from "../../data/runs";
 import { formatRelativeTime } from "../../lib/format";
 import { InlineMarkdown } from "../inline-markdown";
 import { PullRequestChip } from "../pull-request-chip";
+import { SizeChip } from "../size-chip";
 import { RowActionsMenu } from "./row-actions-menu";
 import { SelectionCheckbox } from "./selection-checkbox";
 import type { ToggleableColumn } from "./toggleable-column";
@@ -99,6 +100,11 @@ export function RunTableRow({
       {show("elapsed") && (
         <td className="whitespace-nowrap px-3 py-2.5 text-right font-mono text-xs text-fg-muted">
           {run.elapsed}
+        </td>
+      )}
+      {show("size") && (
+        <td className="whitespace-nowrap px-3 py-2.5 text-right">
+          {run.size != null && <SizeChip size={run.size} />}
         </td>
       )}
       {show("changes") && (

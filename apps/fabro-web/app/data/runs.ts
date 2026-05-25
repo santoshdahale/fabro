@@ -2,6 +2,7 @@ import { formatDurationMs } from "../lib/format";
 import {
   BoardColumn,
   type Run,
+  type RunSize,
   type RunStatus as ApiRunStatus,
 } from "@qltysh/fabro-api-client";
 
@@ -39,6 +40,7 @@ export interface RunItem {
   sourceDirectory?: string;
   createdAt?: string;
   lastEventAt?: string;
+  size?: RunSize;
 }
 
 export const columnStatuses = [
@@ -109,6 +111,7 @@ export function mapRunListItem(item: Run): RunItem {
     lastEventAt: item.timestamps.last_event_at ?? undefined,
     additions: item.diff?.additions,
     deletions: item.diff?.deletions,
+    size: item.size,
   };
 }
 

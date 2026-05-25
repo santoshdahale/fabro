@@ -1,9 +1,10 @@
 export const TOGGLEABLE_COLUMNS = [
-  "elapsed",
   "repo",
   "workflow",
   "created",
   "updated",
+  "elapsed",
+  "size",
   "changes",
   "pr",
 ] as const;
@@ -11,11 +12,12 @@ export const TOGGLEABLE_COLUMNS = [
 export type ToggleableColumn = (typeof TOGGLEABLE_COLUMNS)[number];
 
 export const toggleableColumnLabels: Record<ToggleableColumn, string> = {
-  elapsed:  "Elapsed",
   repo:     "Repo",
   workflow: "Workflow",
   created:  "Created",
   updated:  "Updated",
+  elapsed:  "Elapsed",
+  size:     "Size",
   changes:  "Changes",
   pr:       "PR",
 };

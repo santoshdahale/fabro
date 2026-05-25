@@ -36,6 +36,7 @@ import {
 import { EditableRunTitle } from "../components/editable-run-title";
 import { GitPullRequestIcon } from "../components/icons";
 import { InterviewDock } from "../components/interview-dock";
+import { SizeChip } from "../components/size-chip";
 import { SteerBar, type SteerBarHandle } from "../components/steer-bar";
 import { ErrorState } from "../components/state";
 import { useToast } from "../components/toast";
@@ -82,7 +83,6 @@ import {
   formatAbsoluteTs,
   formatDurationMs,
   formatRelativeTime,
-  formatUsdMicros,
 } from "../lib/format";
 import { queryKeys } from "../lib/query-keys";
 import { useRunEvents } from "../lib/run-events";
@@ -561,16 +561,8 @@ export default function RunDetail({ params }: { params: { id: string } }) {
       {run.workflow}
     </span>
   );
-  const totalUsdMicros = summary.billing?.total_usd_micros;
-  const sizeTooltip = totalUsdMicros != null
-    ? `Size ${summary.size} · ${formatUsdMicros(totalUsdMicros)} billed`
-    : `Size ${summary.size}`;
   const sizeChip = (
-    <Tooltip label={sizeTooltip}>
-      <span className="rounded bg-overlay px-1.5 py-0.5 font-mono text-xs font-bold text-fg-muted tabular-nums">
-        {summary.size}
-      </span>
-    </Tooltip>
+    <SizeChip size={summary.size} totalUsdMicros={summary.billing?.total_usd_micros} />
   );
 
   const visibility = lifecycleActionVisibility(run.lifecycleStatus);
