@@ -8,6 +8,7 @@ import {
 } from "react";
 import {
   ArrowPathIcon,
+  CheckIcon,
   ChevronDownIcon,
   ChevronRightIcon,
   ClockIcon,
@@ -44,6 +45,7 @@ import {
   PopoverHeader,
   PopoverRow,
   PopoverRows,
+  PRIMARY_BUTTON_CLASS,
   SECONDARY_BUTTON_CLASS,
   Tooltip,
 } from "../components/ui";
@@ -701,6 +703,22 @@ export default function RunDetail({ params }: { params: { id: string } }) {
           </HoverCard>
         )}
 
+        {approvalActionVisible && (
+          <button
+            type="button"
+            onClick={() => void approveMutation.trigger()}
+            disabled={approvePending}
+            className={PRIMARY_BUTTON_CLASS}
+          >
+            {approvePending ? (
+              <ArrowPathIcon className="size-4 animate-spin" aria-hidden="true" />
+            ) : (
+              <CheckIcon className="size-4" aria-hidden="true" />
+            )}
+            {approvePending ? "Approving…" : "Approve"}
+          </button>
+        )}
+
         <ActionsMenu
           runId={params.id}
           canSendInterrupt={statusKind === "running"}
@@ -719,9 +737,7 @@ export default function RunDetail({ params }: { params: { id: string } }) {
           canArchive={visibility.showArchive}
           archivePending={archivePending}
           onArchive={() => void archiveMutation.trigger()}
-          canApprove={approvalActionVisible}
           approvePending={approvePending}
-          onApprove={() => void approveMutation.trigger()}
           canDeny={approvalActionVisible}
           denyPending={denyPending}
           onDeny={() => void denyMutation.trigger()}
@@ -961,9 +977,7 @@ interface ActionsMenuProps {
   canArchive: boolean;
   archivePending: boolean;
   onArchive: () => void;
-  canApprove: boolean;
   approvePending: boolean;
-  onApprove: () => void;
   canDeny: boolean;
   denyPending: boolean;
   onDeny: () => void;
@@ -988,7 +1002,7 @@ function ActionsMenu(props: ActionsMenuProps) {
     canFocusSteer, onFocusSteer,
     canPreview, previewPending, onPreview,
     canArchive, archivePending, onArchive,
-    canApprove, approvePending, onApprove,
+    approvePending,
     canDeny, denyPending, onDeny,
     canRetry, retryPending, onRetry,
     canUnarchive, unarchivePending, onUnarchive,
@@ -998,7 +1012,7 @@ function ActionsMenu(props: ActionsMenuProps) {
 
   const [runIdCopied, setRunIdCopied] = useState(false);
 
-  const hasLifecycle = canApprove || canRetry || canArchive || canUnarchive;
+  const hasLifecycle = canRetry || canArchive || canUnarchive;
   const hasDestructive = canDeny || canCancel || canDelete;
   const anyPending =
     previewPending ||
@@ -1082,18 +1096,6 @@ function ActionsMenu(props: ActionsMenuProps) {
         </MenuItem>
         {separators.afterOperations && (
           <div className="my-1 h-px bg-line" role="separator" />
-        )}
-        {canApprove && (
-          <MenuItem>
-            <button
-              type="button"
-              onClick={onApprove}
-              disabled={approvePending}
-              className={MENU_ITEM_CLASS}
-            >
-              {approvePending ? "Approving…" : "Approve"}
-            </button>
-          </MenuItem>
         )}
         {canRetry && (
           <MenuItem>

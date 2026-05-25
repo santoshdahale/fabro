@@ -33,7 +33,7 @@ import { ConfirmDialog } from "../components/ui";
 import { mutateRunListCaches } from "../lib/board-cache";
 import { shouldRefreshBoardForEvent, useBoardEvents } from "../lib/board-events";
 import { useAllRuns, useAuthConfig, useRunsPage, useSystemInfo } from "../lib/queries";
-import { archiveRuns, canArchive, canDelete, canUnarchive, deleteRuns, unarchiveRuns } from "../lib/run-actions";
+import { approveRun, archiveRuns, canArchive, canDelete, canUnarchive, deleteRuns, mapError, unarchiveRuns } from "../lib/run-actions";
 import type {
   BatchDeleteRunsResponse,
   BatchRunLifecycleResponse,
@@ -437,7 +437,48 @@ function PrCard({
           )}
         </div>
       )}
+
+      {pr.pendingApproval && (
+        <div className="mt-3 flex items-center gap-1.5">
+          <ApproveBoardButton runId={pr.id} />
+        </div>
+      )}
     </div>
+  );
+}
+
+function ApproveBoardButton({ runId }: { runId: string }) {
+  const { mutate } = useSWRConfig();
+  const { push } = useToast();
+  const [pending, setPending] = useState(false);
+
+  async function handleClick(event: React.MouseEvent) {
+    event.stopPropagation();
+    event.preventDefault();
+    if (pending) return;
+    setPending(true);
+    try {
+      await approveRun(runId);
+      mutateRunListCaches(mutate);
+      push({ message: "Run approved." });
+    } catch (error) {
+      push({ message: mapError(error, "approve"), tone: "error" });
+    } finally {
+      setPending(false);
+    }
+  }
+
+  return (
+    <button
+      type="button"
+      onClick={handleClick}
+      onPointerDown={(event) => event.stopPropagation()}
+      disabled={pending}
+      className="inline-flex items-center gap-1.5 rounded-md bg-teal-500 px-2.5 py-1 text-[11px] font-medium text-on-primary transition-colors hover:bg-teal-300 disabled:cursor-not-allowed disabled:opacity-60 disabled:hover:bg-teal-500"
+    >
+      <CheckIcon className="size-3" aria-hidden="true" />
+      {pending ? "Approving…" : "Approve"}
+    </button>
   );
 }
 
