@@ -1,18 +1,19 @@
+use std::sync::Arc;
 use std::time::Duration;
 
 use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
 use fabro_auth::auth_issue_message;
 use fabro_llm::client::Client as LlmClient;
-use fabro_llm::types::{Message, Request};
+use fabro_llm::model_test::{ModelTestStatus, run_basic_model_probe};
 use fabro_model::{Catalog, ProviderId};
+use fabro_redact::redact_string;
 use fabro_sandbox::daytona;
 use fabro_static::EnvVars;
 use fabro_types::settings::server::GithubIntegrationStrategy;
 use fabro_types::settings::{InterpString, ServerAuthMethod};
 use fabro_util::check_report::{CheckDetail, CheckResult, CheckSection, CheckStatus};
 use fabro_util::dev_token::validate_dev_token_format;
-use fabro_util::error::collect_chain;
 use fabro_util::session_secret;
 use fabro_util::version::FABRO_VERSION;
 use futures_util::future::join_all;
@@ -38,6 +39,38 @@ fn http_client_or_check(
 pub struct DiagnosticsReport {
     pub version:  String,
     pub sections: Vec<CheckSection>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub(crate) struct ProviderProbeReport {
+    pub data:    Vec<ProviderProbeResult>,
+    pub summary: ProviderProbeSummary,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub(crate) struct ProviderProbeResult {
+    pub provider:      ProviderId,
+    pub model_id:      Option<String>,
+    pub status:        ProviderProbeStatus,
+    pub error_message: Option<String>,
+    #[serde(skip)]
+    diagnostic_detail: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub(crate) struct ProviderProbeSummary {
+    pub status: ProviderProbeStatus,
+    pub total:  u32,
+    pub passed: u32,
+    pub failed: u32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, strum::Display)]
+#[serde(rename_all = "snake_case")]
+#[strum(serialize_all = "snake_case")]
+pub(crate) enum ProviderProbeStatus {
+    Ok,
+    Error,
 }
 
 fn decode_pem_value(name: &str, value: &str) -> Result<String, String> {
@@ -79,8 +112,8 @@ pub async fn run_all(state: &AppState) -> DiagnosticsReport {
 }
 
 async fn check_llm_providers(state: &AppState) -> CheckResult {
-    let result = match state.resolve_llm_client().await {
-        Ok(result) => result,
+    let report = match test_llm_providers(state).await {
+        Ok(report) => report,
         Err(err) => {
             return CheckResult {
                 name:        "LLM Providers".to_string(),
@@ -91,10 +124,7 @@ async fn check_llm_providers(state: &AppState) -> CheckResult {
             };
         }
     };
-    if result.client.provider_names().is_empty()
-        && result.auth_issues.is_empty()
-        && result.registration_issues.is_empty()
-    {
+    if report.data.is_empty() {
         return CheckResult {
             name:        "LLM Providers".to_string(),
             status:      CheckStatus::Error,
@@ -106,61 +136,25 @@ async fn check_llm_providers(state: &AppState) -> CheckResult {
 
     let mut details: Vec<CheckDetail> = Vec::new();
     let mut failures: Vec<ProviderFailure> = Vec::new();
-    for (provider, issue) in &result.auth_issues {
-        let message = auth_issue_message(provider, issue);
-        failures.push(ProviderFailure {
-            provider:     provider.to_string(),
-            summary_line: short_error_line(&message),
-        });
-        details.push(CheckDetail::new(message));
-    }
-    for issue in &result.registration_issues {
-        let message = issue.error.to_string();
-        failures.push(ProviderFailure {
-            provider:     issue.provider.to_string(),
-            summary_line: short_error_line(&message),
-        });
-        details.push(CheckDetail::new(format!("{}: {message}", issue.provider)));
-    }
-
-    let providers: Vec<ProviderId> = result
-        .client
-        .provider_names()
-        .iter()
-        .map(|name| ProviderId::new(*name))
-        .collect();
-    let client = &result.client;
-    let catalog = state.catalog();
-    let probe_outcomes = join_all(providers.iter().map(|provider| {
-        let catalog = catalog.clone();
-        let provider = provider.clone();
-        async move {
-            let outcome = timeout(
-                Duration::from_secs(30),
-                probe_llm_provider(client, &provider, catalog.as_ref()),
-            )
-            .await;
-            (provider, outcome)
-        }
-    }))
-    .await;
-    for (provider, probe_result) in probe_outcomes {
-        match probe_result {
-            Ok(Ok(())) => details.push(CheckDetail::new(format!("{provider}: OK"))),
-            Ok(Err(err)) => {
-                let rendered = collect_chain(&err).join(": ");
-                failures.push(ProviderFailure {
-                    provider:     provider.to_string(),
-                    summary_line: short_error_line(&rendered),
-                });
-                details.push(CheckDetail::new(format!("{provider}: {rendered}")));
+    for result in &report.data {
+        match result.status {
+            ProviderProbeStatus::Ok => {
+                details.push(CheckDetail::new(format!("{}: OK", result.provider)));
             }
-            Err(_) => {
+            ProviderProbeStatus::Error => {
+                let message = result
+                    .error_message
+                    .as_deref()
+                    .unwrap_or("provider probe failed");
+                let detail = result
+                    .diagnostic_detail
+                    .clone()
+                    .unwrap_or_else(|| format!("{}: {message}", result.provider));
                 failures.push(ProviderFailure {
-                    provider:     provider.to_string(),
-                    summary_line: "timeout (30s)".to_string(),
+                    provider:     result.provider.to_string(),
+                    summary_line: short_error_line(message),
                 });
-                details.push(CheckDetail::new(format!("{provider}: timeout (30s)")));
+                details.push(CheckDetail::new(detail));
             }
         }
     }
@@ -169,7 +163,7 @@ async fn check_llm_providers(state: &AppState) -> CheckResult {
         return CheckResult {
             name: "LLM Providers".to_string(),
             status: CheckStatus::Pass,
-            summary: format!("{} configured", result.client.provider_names().len()),
+            summary: format!("{} configured", report.summary.total),
             details,
             remediation: None,
         };
@@ -200,6 +194,123 @@ struct ProviderFailure {
     summary_line: String,
 }
 
+pub(crate) async fn test_llm_providers(state: &AppState) -> anyhow::Result<ProviderProbeReport> {
+    // `configured_providers` already iterates the catalog in order and includes
+    // every provider with credential material on disk. Auth and registration
+    // issues only arise for those providers, so this list is the complete
+    // population to probe.
+    let configured_providers = state.configured_llm_provider_ids().await;
+    let result = state.resolve_llm_client().await?;
+    let catalog = state.catalog();
+    let client = Arc::new(result.client);
+
+    let probe_results = join_all(configured_providers.into_iter().map(|provider| {
+        let client = Arc::clone(&client);
+        let catalog = Arc::clone(&catalog);
+        let auth_issue = result
+            .auth_issues
+            .iter()
+            .find(|(issue_provider, _)| issue_provider == &provider)
+            .map(|(_, issue)| redact_string(&auth_issue_message(&provider, issue)));
+        let registration_issue = result
+            .registration_issues
+            .iter()
+            .find(|issue| issue.provider == provider)
+            .map(|issue| redact_string(&issue.error.to_string()));
+        async move {
+            probe_single_provider(client, &catalog, provider, auth_issue, registration_issue).await
+        }
+    }))
+    .await;
+
+    Ok(provider_probe_report(probe_results))
+}
+
+async fn probe_single_provider(
+    client: Arc<LlmClient>,
+    catalog: &Catalog,
+    provider: ProviderId,
+    auth_issue: Option<String>,
+    registration_issue: Option<String>,
+) -> ProviderProbeResult {
+    if let Some(message) = auth_issue {
+        // `auth_issue_message` already embeds the provider's display name, so the
+        // diagnostics detail uses the message as-is rather than re-prefixing.
+        return provider_probe_error(provider, None, message.clone(), Some(message));
+    }
+    if let Some(message) = registration_issue {
+        return provider_probe_error(provider, None, message, None);
+    }
+
+    let Some(model) = catalog.probe_for_provider(&provider) else {
+        return provider_probe_error(
+            provider,
+            None,
+            "no probe model configured for provider".to_string(),
+            None,
+        );
+    };
+    let model_id = model.id.clone();
+
+    let outcome = run_basic_model_probe(&model_id, &provider, client).await;
+    match outcome.status {
+        ModelTestStatus::Ok => ProviderProbeResult {
+            provider,
+            model_id: Some(model_id),
+            status: ProviderProbeStatus::Ok,
+            error_message: None,
+            diagnostic_detail: None,
+        },
+        ModelTestStatus::Error => {
+            let raw = outcome
+                .error_message
+                .unwrap_or_else(|| "provider probe failed".to_string());
+            provider_probe_error(provider, Some(model_id), redact_string(&raw), None)
+        }
+    }
+}
+
+fn provider_probe_error(
+    provider: ProviderId,
+    model_id: Option<String>,
+    error_message: String,
+    diagnostic_detail: Option<String>,
+) -> ProviderProbeResult {
+    ProviderProbeResult {
+        provider,
+        model_id,
+        status: ProviderProbeStatus::Error,
+        error_message: Some(error_message),
+        diagnostic_detail,
+    }
+}
+
+fn provider_probe_report(data: Vec<ProviderProbeResult>) -> ProviderProbeReport {
+    let total = u32::try_from(data.len()).unwrap_or(u32::MAX);
+    let passed = u32::try_from(
+        data.iter()
+            .filter(|result| result.status == ProviderProbeStatus::Ok)
+            .count(),
+    )
+    .unwrap_or(u32::MAX);
+    let failed = total.saturating_sub(passed);
+    let status = if total > 0 && failed == 0 {
+        ProviderProbeStatus::Ok
+    } else {
+        ProviderProbeStatus::Error
+    };
+
+    ProviderProbeReport {
+        data,
+        summary: ProviderProbeSummary {
+            status,
+            total,
+            passed,
+            failed,
+        },
+    }
+}
+
 const MAX_SHORT_LEN: usize = 120;
 
 fn short_error_line(rendered: &str) -> String {
@@ -214,36 +325,6 @@ fn short_error_line(rendered: &str) -> String {
     } else {
         first.to_string()
     }
-}
-
-fn probe_model(provider: &ProviderId, catalog: &Catalog) -> String {
-    catalog
-        .probe_for_provider(provider)
-        .map_or_else(|| format!("unknown-{provider}"), |m| m.id.clone())
-}
-
-async fn probe_llm_provider(
-    client: &LlmClient,
-    provider: &ProviderId,
-    catalog: &Catalog,
-) -> fabro_llm::Result<()> {
-    let request = Request {
-        model:            probe_model(provider, catalog),
-        messages:         vec![Message::user("hi")],
-        provider:         Some(provider.to_string()),
-        tools:            None,
-        tool_choice:      None,
-        response_format:  None,
-        temperature:      None,
-        top_p:            None,
-        max_tokens:       Some(16),
-        stop_sequences:   None,
-        reasoning_effort: None,
-        speed:            None,
-        metadata:         None,
-        provider_options: None,
-    };
-    client.complete(&request).await.map(|_| ())
 }
 
 async fn check_github_app(state: &AppState) -> CheckResult {
@@ -775,6 +856,78 @@ mod tests {
                 .iter()
                 .any(|d| d.text.starts_with("openai: ")),
             "expected a detail line prefixed with 'openai: ', got: {:?}",
+            result.details
+        );
+    }
+
+    #[tokio::test]
+    async fn check_llm_providers_reports_none_configured_after_shared_probe() {
+        let state = TestAppStateBuilder::new().build();
+
+        let result = check_llm_providers(&state).await;
+
+        assert_eq!(result.status, CheckStatus::Error);
+        assert_eq!(result.summary, "none configured");
+        assert!(result.details.is_empty());
+        assert_eq!(
+            result.remediation.as_deref(),
+            Some("Set at least one provider API key")
+        );
+    }
+
+    #[tokio::test]
+    async fn check_llm_providers_preserves_pass_summary_after_shared_probe() {
+        let server = MockServer::start_async().await;
+        let _mock = server
+            .mock_async(|when, then| {
+                when.method(POST).path("/v1/responses");
+                then.status(200)
+                    .header("content-type", "application/json")
+                    .json_body(json!({
+                        "id": "resp_1",
+                        "model": "gpt-5.4-mini",
+                        "output": [
+                            {
+                                "type": "message",
+                                "role": "assistant",
+                                "content": [
+                                    {
+                                        "type": "output_text",
+                                        "text": "OK"
+                                    }
+                                ]
+                            }
+                        ],
+                        "status": "completed"
+                    }));
+            })
+            .await;
+        let state = TestAppStateBuilder::new()
+            .provider_base_url("openai", server.url("/v1"))
+            .build();
+        state
+            .vault
+            .write()
+            .await
+            .set(
+                "OPENAI_API_KEY",
+                "vault-openai-key",
+                SecretType::Token,
+                None,
+            )
+            .unwrap();
+
+        let result = check_llm_providers(&state).await;
+
+        assert_eq!(result.status, CheckStatus::Pass);
+        assert_eq!(result.summary, "1 configured");
+        assert_eq!(result.remediation, None);
+        assert!(
+            result
+                .details
+                .iter()
+                .any(|detail| detail.text == "openai: OK"),
+            "expected openai OK detail, got: {:?}",
             result.details
         );
     }
