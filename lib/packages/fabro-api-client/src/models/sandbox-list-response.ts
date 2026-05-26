@@ -15,9 +15,15 @@
 
 // May contain unused imports in some cases
 // @ts-ignore
-import type { SandboxProviderKind } from './sandbox-provider-kind';
+import type { SandboxInfo } from './sandbox-info';
+// May contain unused imports in some cases
+// @ts-ignore
+import type { SandboxListMeta } from './sandbox-list-meta';
 
-export interface DeleteRunSandbox {
-    'provider': SandboxProviderKind;
-    'id': string;
+/**
+ * Non-paginated provider-backed sandbox inventory response.
+ */
+export interface SandboxListResponse {
+    'data': Array<SandboxInfo>;
+    'meta': SandboxListMeta;
 }

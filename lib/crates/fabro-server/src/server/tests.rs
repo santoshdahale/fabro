@@ -21,7 +21,7 @@ use fabro_types::settings::ServerAuthMethod;
 use fabro_types::{
     AgentBackend, AttrValue, AuthMethod, CommandTermination, FailureCategory, FailureDetail, Graph,
     InterviewQuestionRecord, Node, Outcome, QuestionType, RunBlobId, RunId, RunSpec,
-    SandboxProvider, StageContextWindowBreakdownItem, StageContextWindowCategory,
+    SandboxProviderKind, StageContextWindowBreakdownItem, StageContextWindowCategory,
     StageContextWindowCountMethod, StageContextWindowProjection, StageContextWindowStaleness,
     StageContextWindowWarning, StageModelUsage, StageTiming, SuccessReason, SystemActorKind,
     WorkflowSettings, fixtures,
@@ -961,7 +961,7 @@ id = "missing"
 
     assert_eq!(
         system_sandbox_provider(&manifest_run_settings),
-        SandboxProvider::default().to_string()
+        SandboxProviderKind::default().to_string()
     );
 }
 
@@ -980,7 +980,7 @@ enabled = false
     );
 
     assert_eq!(
-        crate::run_manifest::sandbox_provider_policy_error(&settings, SandboxProvider::Daytona)
+        crate::run_manifest::sandbox_provider_policy_error(&settings, SandboxProviderKind::Daytona)
             .as_deref(),
         Some(
             "sandbox provider \"daytona\" is disabled by server.sandbox.providers.daytona.enabled"
@@ -1659,6 +1659,7 @@ fn slack_app_state_with_secret_sources(
         github_api_base_url: None,
         active_config_path: tempfile::tempdir().unwrap().path().join("settings.toml"),
         http_client: Some(fabro_http::test_http_client().expect("test HTTP client should build")),
+        sandbox_provider_registry: None,
         shutdown: tokio_util::sync::CancellationToken::new(),
     })
     .expect("slack test app state should build")
@@ -1999,6 +2000,7 @@ methods = ["dev-token"]
         github_api_base_url: None,
         active_config_path: tempfile::tempdir().unwrap().path().join("settings.toml"),
         http_client: Some(fabro_http::test_http_client().expect("test HTTP client should build")),
+        sandbox_provider_registry: None,
         shutdown: tokio_util::sync::CancellationToken::new(),
     }) else {
         panic!("build_app_state should require SESSION_SECRET")
@@ -2124,6 +2126,7 @@ fn build_test_app_state_with_vault_path(vault_path: &Path) -> anyhow::Result<Arc
         github_api_base_url: None,
         active_config_path: tempfile::tempdir().unwrap().path().join("settings.toml"),
         http_client: Some(fabro_http::test_http_client().expect("test HTTP client should build")),
+        sandbox_provider_registry: None,
         shutdown: tokio_util::sync::CancellationToken::new(),
     })
 }
@@ -5215,6 +5218,7 @@ fn create_github_token_app_state_with_env_lookup_and_llm_catalog_settings(
         github_api_base_url,
         active_config_path: tempfile::tempdir().unwrap().path().join("settings.toml"),
         http_client: Some(fabro_http::test_http_client().expect("test HTTP client should build")),
+        sandbox_provider_registry: None,
         shutdown: tokio_util::sync::CancellationToken::new(),
     };
     let state = build_app_state(config).expect("test app state should build");
@@ -11575,7 +11579,7 @@ async fn create_preserved_local_sandbox_run(state: &Arc<AppState>, run_id: RunId
             definition_blob: None,
         },
         workflow_event::Event::SandboxInitialized {
-            provider:          SandboxProvider::Local,
+            provider:          SandboxProviderKind::Local,
             id:                "sandbox-preserve-1".to_string(),
             working_directory: "/tmp/fabro-preserved-sandbox".to_string(),
             repo_cloned:       None,
@@ -12326,7 +12330,7 @@ async fn delete_run_retry_after_missing_provider_resource_removes_metadata() {
         workflow_event::Event::RunStarting,
         workflow_event::Event::RunRunning,
         workflow_event::Event::SandboxInitialized {
-            provider:          SandboxProvider::Docker,
+            provider:          SandboxProviderKind::Docker,
             id:                "missing-sandbox".to_string(),
             working_directory: "/tmp/fabro-missing-sandbox".to_string(),
             repo_cloned:       Some(false),
@@ -14220,7 +14224,7 @@ async fn list_runs_includes_live_metadata_from_run_state() {
         workflow_event::Event::RunStarting,
         workflow_event::Event::RunRunning,
         workflow_event::Event::SandboxInitialized {
-            provider:          SandboxProvider::Local,
+            provider:          SandboxProviderKind::Local,
             id:                "sb-test".to_string(),
             working_directory: "/sandbox/workdir".to_string(),
             repo_cloned:       None,
@@ -14299,7 +14303,7 @@ async fn list_runs_page_limit_preserves_metadata_for_paged_items() {
             workflow_event::Event::RunStarting,
             workflow_event::Event::RunRunning,
             workflow_event::Event::SandboxInitialized {
-                provider:          SandboxProvider::Local,
+                provider:          SandboxProviderKind::Local,
                 id:                sandbox_id.to_string(),
                 working_directory: "/sandbox/workdir".to_string(),
                 repo_cloned:       None,

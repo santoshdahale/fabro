@@ -17,7 +17,10 @@
 // @ts-ignore
 import type { SandboxProviderKind } from './sandbox-provider-kind';
 
-export interface DeleteRunSandbox {
+/**
+ * Provider error captured during fail-soft sandbox inventory lookup.
+ */
+export interface SandboxProviderLookupError {
     'provider': SandboxProviderKind;
-    'id': string;
+    'message': string;
 }

@@ -15,9 +15,11 @@
 
 // May contain unused imports in some cases
 // @ts-ignore
-import type { SandboxProviderKind } from './sandbox-provider-kind';
+import type { SandboxProviderLookupError } from './sandbox-provider-lookup-error';
 
-export interface DeleteRunSandbox {
-    'provider': SandboxProviderKind;
-    'id': string;
+/**
+ * Metadata for provider-backed sandbox inventory.
+ */
+export interface SandboxListMeta {
+    'provider_errors': Array<SandboxProviderLookupError>;
 }
