@@ -39,10 +39,15 @@ impl Tool {
     /// # Panics
     ///
     /// Panics if the tool name is invalid (see [`validate_tool_name`]).
+    /// Tool names are always hardcoded string literals in this codebase; this
+    /// guards against programming errors where a constant would fail
+    /// validation.
     #[must_use]
     pub fn passive(name: &str, description: &str, parameters: serde_json::Value) -> Self {
         if let Err(e) = validate_tool_name(name) {
-            panic!("Invalid tool name: {e}");
+            panic!(
+                "tool name `{name}` must be a valid identifier ([a-zA-Z][a-zA-Z0-9_]*, ≤64 chars): {e}"
+            );
         }
         Self {
             definition: ToolDefinition {
@@ -59,6 +64,9 @@ impl Tool {
     /// # Panics
     ///
     /// Panics if the tool name is invalid (see [`validate_tool_name`]).
+    /// Tool names are always hardcoded string literals in this codebase; this
+    /// guards against programming errors where a constant would fail
+    /// validation.
     pub fn active<F, Fut>(
         name: &str,
         description: &str,
@@ -70,7 +78,9 @@ impl Tool {
         Fut: Future<Output = Result<serde_json::Value, String>> + Send + 'static,
     {
         if let Err(e) = validate_tool_name(name) {
-            panic!("Invalid tool name: {e}");
+            panic!(
+                "tool name `{name}` must be a valid identifier ([a-zA-Z][a-zA-Z0-9_]*, ≤64 chars): {e}"
+            );
         }
         Self {
             definition: ToolDefinition {
@@ -319,7 +329,7 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "Invalid tool name")]
+    #[should_panic(expected = "must be a valid identifier")]
     fn passive_tool_panics_on_invalid_name() {
         let _ = Tool::passive(
             "1invalid",
@@ -329,7 +339,7 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "Invalid tool name")]
+    #[should_panic(expected = "must be a valid identifier")]
     fn active_tool_panics_on_invalid_name() {
         Tool::active(
             "my-tool",
