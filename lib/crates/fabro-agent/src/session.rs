@@ -1,6 +1,6 @@
 use std::collections::{HashMap, VecDeque};
 use std::sync::{Arc, Mutex, RwLock};
-use std::time::SystemTime;
+use std::time::{Duration, Instant, SystemTime};
 
 use fabro_auth::CredentialSource;
 use fabro_llm::client::Client;
@@ -68,6 +68,21 @@ pub enum SteeringItem {
     System {
         text: String,
     },
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct SessionInputTiming {
+    pub inference: Duration,
+    pub tool:      Duration,
+}
+
+/// Take the value out of `start`, add its elapsed time to `total`. Used by
+/// `run_single_input` to accumulate inference and tool spans at well-defined
+/// boundaries (stream open, retry, error, cancel, end-of-loop).
+fn record_elapsed(start: &mut Option<Instant>, total: &mut Duration) {
+    if let Some(s) = start.take() {
+        *total = total.saturating_add(s.elapsed());
+    }
 }
 
 impl SteeringItem {
@@ -337,6 +352,7 @@ pub struct Session {
     tool_env_provider: Option<Arc<dyn ToolEnvProvider>>,
     subagent_manager: Option<Arc<AsyncMutex<SubAgentManager>>>,
     completion_coordinator: Option<Arc<dyn CompletionCoordinator>>,
+    last_input_timing: SessionInputTiming,
 }
 
 impl Session {
@@ -374,6 +390,7 @@ impl Session {
             tool_env_provider: None,
             subagent_manager,
             completion_coordinator: None,
+            last_input_timing: SessionInputTiming::default(),
         }
     }
 
@@ -1193,11 +1210,21 @@ impl Session {
             .await
     }
 
+    #[must_use]
+    pub const fn last_input_timing(&self) -> SessionInputTiming {
+        self.last_input_timing
+    }
+
+    /// Process an input. The inference/tool timing accumulated during the call
+    /// is available via [`Self::last_input_timing`] after this returns, even on
+    /// error.
     pub async fn process_input_with_runtime(
         &mut self,
         input: &str,
         agent_tool_runtime: AgentToolRuntime,
     ) -> Result<(), Error> {
+        let mut timing = SessionInputTiming::default();
+        self.last_input_timing = timing;
         if self.state == SessionState::Closed {
             return Err(Error::SessionClosed);
         }
@@ -1221,7 +1248,9 @@ impl Session {
         });
 
         // Process the initial input, then drain any followups
-        let mut result = self.run_single_input(input, &agent_tool_runtime).await;
+        let mut result = self
+            .run_single_input(input, &agent_tool_runtime, &mut timing)
+            .await;
 
         if result.is_ok() {
             loop {
@@ -1231,7 +1260,9 @@ impl Session {
                     .expect("followup queue lock poisoned")
                     .pop_front();
                 let Some(followup) = followup else { break };
-                result = self.run_single_input(&followup, &agent_tool_runtime).await;
+                result = self
+                    .run_single_input(&followup, &agent_tool_runtime, &mut timing)
+                    .await;
                 if result.is_err() {
                     break;
                 }
@@ -1248,6 +1279,7 @@ impl Session {
             self.transition(SessionState::Idle);
         }
 
+        self.last_input_timing = timing;
         result
     }
 
@@ -1255,6 +1287,7 @@ impl Session {
         &mut self,
         input: &str,
         agent_tool_runtime: &AgentToolRuntime,
+        timing: &mut SessionInputTiming,
     ) -> Result<(), Error> {
         const STREAM_CONSUME_RETRIES: usize = 3;
 
@@ -1388,6 +1421,7 @@ impl Session {
             };
             let client = self.llm_client.clone();
             let cancel_token_for_select = self.cancel_token.clone();
+            let mut inference_start = Some(Instant::now());
             let stream_outcome: Option<Result<StreamEventStream, Error>> = tokio::select! {
                 biased;
                 () = round_token.cancelled() => None,
@@ -1395,8 +1429,15 @@ impl Session {
                 stream = self.open_stream_with_retry(&client, &request, &retry_policy) => Some(stream),
             };
             let mut event_stream = if let Some(stream) = stream_outcome {
-                stream?
+                match stream {
+                    Ok(stream) => stream,
+                    Err(err) => {
+                        record_elapsed(&mut inference_start, &mut timing.inference);
+                        return Err(err);
+                    }
+                }
             } else {
+                record_elapsed(&mut inference_start, &mut timing.inference);
                 if self.cancel_token.is_cancelled() {
                     self.close();
                     return Err(self.interrupted_error());
@@ -1472,6 +1513,7 @@ impl Session {
                 // If terminal cancel fired, drop the stream and bail out.
                 if self.cancel_token.is_cancelled() {
                     drop(event_stream);
+                    record_elapsed(&mut inference_start, &mut timing.inference);
                     self.close();
                     return Err(self.interrupted_error());
                 }
@@ -1538,7 +1580,13 @@ impl Session {
                             stream = self.open_stream_with_retry(&client, &request, &retry_policy) => Some(stream),
                         };
                         event_stream = if let Some(stream) = retry_outcome {
-                            stream?
+                            match stream {
+                                Ok(stream) => stream,
+                                Err(err) => {
+                                    record_elapsed(&mut inference_start, &mut timing.inference);
+                                    return Err(err);
+                                }
+                            }
                         } else {
                             steer_interrupted =
                                 round_token.is_cancelled() && !self.cancel_token.is_cancelled();
@@ -1556,6 +1604,7 @@ impl Session {
                             },
                         );
                     }
+                    record_elapsed(&mut inference_start, &mut timing.inference);
                     return Err(self.emit_llm_error(err));
                 }
 
@@ -1584,7 +1633,13 @@ impl Session {
                         stream = self.open_stream_with_retry(&client, &request, &retry_policy) => Some(stream),
                     };
                     event_stream = if let Some(stream) = retry_outcome {
-                        stream?
+                        match stream {
+                            Ok(stream) => stream,
+                            Err(err) => {
+                                record_elapsed(&mut inference_start, &mut timing.inference);
+                                return Err(err);
+                            }
+                        }
                     } else {
                         steer_interrupted =
                             round_token.is_cancelled() && !self.cancel_token.is_cancelled();
@@ -1592,6 +1647,7 @@ impl Session {
                     };
                 }
             }
+            record_elapsed(&mut inference_start, &mut timing.inference);
 
             // Mid-LLM steer interrupt: drop the unrecorded turn, clear any
             // partial visible output, and re-iterate. The next turn's
@@ -1702,6 +1758,7 @@ impl Session {
 
             // Execute tool calls (parallel or sequential based on provider)
             self.transition(SessionState::Executing);
+            let tool_start = Instant::now();
             let results = execute_tool_calls(
                 &tool_calls,
                 true,
@@ -1717,6 +1774,7 @@ impl Session {
                 agent_tool_runtime,
             )
             .await;
+            timing.tool = timing.tool.saturating_add(tool_start.elapsed());
             composite_watcher.abort();
             if tool_calls
                 .iter()
@@ -2091,6 +2149,47 @@ mod tests {
         }
     }
 
+    struct DelayedStreamProvider {
+        responses:  Vec<Response>,
+        delay:      Duration,
+        call_index: AtomicUsize,
+    }
+
+    impl DelayedStreamProvider {
+        fn new(responses: Vec<Response>, delay: Duration) -> Self {
+            Self {
+                responses,
+                delay,
+                call_index: AtomicUsize::new(0),
+            }
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl ProviderAdapter for DelayedStreamProvider {
+        fn name(&self) -> &'static str {
+            "mock"
+        }
+
+        async fn complete(&self, _request: &Request) -> Result<Response, LlmError> {
+            Err(LlmError::Configuration {
+                message: "DelayedStreamProvider does not implement complete()".into(),
+                source:  None,
+            })
+        }
+
+        async fn stream(&self, _request: &Request) -> Result<StreamEventStream, LlmError> {
+            sleep(self.delay).await;
+            let idx = self.call_index.fetch_add(1, Ordering::SeqCst);
+            let response = if idx < self.responses.len() {
+                self.responses[idx].clone()
+            } else {
+                self.responses[self.responses.len() - 1].clone()
+            };
+            Ok(response_to_stream(response))
+        }
+    }
+
     async fn make_session_with_provider(provider: Arc<dyn ProviderAdapter>) -> Session {
         make_session_with_provider_and_manager(provider, None).await
     }
@@ -2163,6 +2262,62 @@ mod tests {
             assert_eq!(results[0].tool_call_id, "call_1");
             assert!(!results[0].is_error);
         }
+    }
+
+    #[tokio::test]
+    async fn last_input_timing_reports_inference_and_tool_per_call() {
+        let mut registry = ToolRegistry::new();
+        registry.register(RegisteredTool {
+            definition: ToolDefinition {
+                name:        "slow_tool".into(),
+                description: "Sleeps before returning".into(),
+                parameters:  serde_json::json!({"type": "object"}),
+            },
+            executor:   Arc::new(|_args, _ctx| {
+                Box::pin(async move {
+                    sleep(Duration::from_millis(30)).await;
+                    Ok("slept".to_string())
+                })
+            }),
+            source:     ToolSource::Native,
+        });
+        let provider = Arc::new(DelayedStreamProvider::new(
+            vec![
+                tool_call_response("slow_tool", "call_1", serde_json::json!({})),
+                text_response("Done!"),
+                text_response("Second response"),
+            ],
+            Duration::from_millis(20),
+        ));
+        let client = make_client(provider).await;
+        let profile = Arc::new(TestProfile::with_tools(registry));
+        let env = Arc::new(MockSandbox::default());
+        let mut session = Session::new(client, profile, env, SessionOptions::default(), None);
+
+        let result = session
+            .process_input_with_runtime("use the slow tool", AgentToolRuntime::default())
+            .await;
+        result.unwrap();
+        let first = session.last_input_timing();
+        assert!(
+            first.inference >= Duration::from_millis(35),
+            "expected non-zero inference timing for first input, got {first:?}"
+        );
+        assert!(
+            first.tool >= Duration::from_millis(20),
+            "expected non-zero tool timing for first input, got {first:?}"
+        );
+
+        let result = session
+            .process_input_with_runtime("no tools this time", AgentToolRuntime::default())
+            .await;
+        result.unwrap();
+        let second = session.last_input_timing();
+        assert!(
+            second.inference >= Duration::from_millis(15),
+            "expected per-input inference timing for second input, got {second:?}"
+        );
+        assert_eq!(second.tool, Duration::ZERO);
     }
 
     struct SequenceToolEnvProvider {
