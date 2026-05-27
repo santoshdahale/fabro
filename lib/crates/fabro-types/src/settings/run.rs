@@ -755,8 +755,7 @@ pub enum EnvironmentNetworkMode {
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct EnvironmentImageSettings {
-    #[serde(rename = "ref")]
-    pub reference:  Option<String>,
+    pub docker:     Option<String>,
     pub dockerfile: Option<DockerfileSource>,
 }
 
