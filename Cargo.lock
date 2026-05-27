@@ -2652,7 +2652,7 @@ dependencies = [
 
 [[package]]
 name = "fabro-variable"
-version = "0.245.0-nightly.1"
+version = "0.246.0-nightly.0"
 dependencies = [
  "chrono",
  "fabro-types",
