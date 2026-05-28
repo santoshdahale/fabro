@@ -31,7 +31,6 @@ use ulid::Ulid;
 use crate::auth;
 use crate::automation_materializer::AutomationRunMaterializer;
 pub use crate::automation_materializer::TestAutomationRunMaterializer;
-use crate::ip_allowlist::IpAllowlistConfig;
 use crate::jwt_auth::{AuthMode, ConfiguredAuth};
 #[cfg(test)]
 use crate::principal_middleware::{AuthContextSlot, RequestAuthContext};
@@ -533,15 +532,10 @@ pub fn build_test_router(state: Arc<AppState>) -> Router {
     with_test_user(server::build_router(state, test_auth_mode()))
 }
 
-pub fn build_test_router_with_options(
-    state: Arc<AppState>,
-    ip_allowlist_config: Arc<IpAllowlistConfig>,
-    options: RouterOptions,
-) -> Router {
+pub fn build_test_router_with_options(state: Arc<AppState>, options: RouterOptions) -> Router {
     with_test_user(server::build_router_with_options(
         state,
         &test_auth_mode(),
-        ip_allowlist_config,
         options,
     ))
 }
