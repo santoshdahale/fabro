@@ -161,7 +161,7 @@ export function AutomationFormFields({
             ) : (
               <>
                 Identifier used in the URL:{" "}
-                <span className="font-mono text-fg-2">/automation/{values.id || "<slug>"}</span>
+                <span className="font-mono text-fg-2">/automations/{values.id || "<slug>"}</span>
               </>
             )
           }

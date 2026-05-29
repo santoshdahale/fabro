@@ -119,7 +119,7 @@ function AutomationCard({
   const Icon = automation.icon;
   return (
     <div className="group flex items-center gap-4 rounded-md border border-line bg-panel/80 p-4 transition-all duration-200 hover:border-line-strong hover:bg-panel hover:shadow-lg hover:shadow-black/20">
-      <Link to={`/automation/${automation.id}`} className="flex min-w-0 flex-1 items-center gap-4">
+      <Link to={`/automations/${automation.id}`} className="flex min-w-0 flex-1 items-center gap-4">
         <div
           className="flex size-9 shrink-0 items-center justify-center rounded-md border bg-panel-alt/60"
           style={{ borderColor: `color-mix(in srgb, ${automation.color} 20%, transparent)`, color: automation.color }}

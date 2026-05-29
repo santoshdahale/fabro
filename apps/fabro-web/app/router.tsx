@@ -113,6 +113,8 @@ export const routes: RouteObject[] = [
           route("automations", Automations),
           route("automations/new", AutomationsNew),
           route("automations/:id/edit", AutomationsEdit),
+          route("automations/:id", AutomationDetail),
+          // Backwards-compatible singular automation route used by older links.
           route("automation/:id", AutomationDetail),
           route("runs", Runs),
           route("runs/:id", RunDetail, {

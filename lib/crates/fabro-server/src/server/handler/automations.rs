@@ -15,8 +15,7 @@ use super::super::{
     ApiError, AppState, IntoResponse, Json, PaginationParams, Path, RequiredUser, Response, Router,
     State, StatusCode, get, paginate_items,
 };
-use super::lifecycle;
-use super::runs;
+use super::{lifecycle, runs};
 use crate::automation_materializer::AutomationRunMaterializeInput;
 use crate::principal_middleware::RequiredRunToolActor;
 
@@ -186,9 +185,7 @@ async fn create_automation_run(
     // the run sits in `Submitted` forever because the scheduler only claims
     // `Runnable`. Mirror what the UI does for a manual create-then-start flow.
     if response.status().is_success() {
-        if let Err(err) =
-            lifecycle::queue_run_start(state.as_ref(), run_id, false, actor).await
-        {
+        if let Err(err) = lifecycle::queue_run_start(state.as_ref(), run_id, false, actor).await {
             tracing::warn!(
                 %run_id,
                 automation_id = %automation.id,
