@@ -174,7 +174,7 @@ export function RunsListView({
                   <SortHeader label="Elapsed" sortKey="elapsed" activeSort={sort} direction={direction} align="right" onClick={onSortClick} />
                 )}
                 {show("size") && (
-                  <SortHeader label="Size" sortKey="size" activeSort={sort} direction={direction} align="right" onClick={onSortClick} />
+                  <SortHeader label="Size" sortKey="size" activeSort={sort} direction={direction} align="center" onClick={onSortClick} />
                 )}
                 {show("changes") && (
                   <SortHeader label="Changes" sortKey="changes" activeSort={sort} direction={direction} align="right" onClick={onSortClick} />

@@ -14,7 +14,7 @@ export function SortHeader<TKey extends string>({
   sortKey:    TKey;
   activeSort: TKey;
   direction:  SortDirection;
-  align?:     "left" | "right";
+  align?:     "left" | "center" | "right";
   onClick:    (key: TKey) => void;
 }) {
   const isActive = activeSort === sortKey;
@@ -27,12 +27,12 @@ export function SortHeader<TKey extends string>({
     <th
       scope="col"
       aria-sort={ariaSort}
-      className={`whitespace-nowrap px-3 py-2.5 font-medium ${align === "right" ? "text-right" : "text-left"}`}
+      className={`whitespace-nowrap px-3 py-2.5 font-medium ${align === "right" ? "text-right" : align === "center" ? "text-center" : "text-left"}`}
     >
       <button
         type="button"
         onClick={() => onClick(sortKey)}
-        className={`inline-flex items-center gap-1 transition-colors hover:text-fg-2 ${isActive ? "text-fg-2" : "text-fg-3"} ${align === "right" ? "ml-auto" : ""}`}
+        className={`inline-flex items-center gap-1 transition-colors hover:text-fg-2 ${isActive ? "text-fg-2" : "text-fg-3"} ${align === "right" ? "ml-auto" : align === "center" ? "mx-auto" : ""}`}
       >
         <span>{label}</span>
         {isActive ? (
