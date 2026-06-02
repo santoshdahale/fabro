@@ -5965,7 +5965,7 @@ components:
           example: true
 
     InstallSandboxInput:
-      description: Sandbox provider selected during browser install. `api_key` is required for Daytona and ignored for Docker.
+      description: Sandbox provider selected during browser install. `api_key` is required for Daytona and ignored for Docker. `allow_local` enables the local sandbox provider alongside the selected runtime; it defaults to true when omitted.
       type: object
       required:
         - provider
@@ -5975,6 +5975,8 @@ components:
           enum: [docker, daytona]
         api_key:
           type: string
+        allow_local:
+          type: boolean
 
     InstallSandboxSummary:
       description: Redacted summary of the sandbox provider selected during browser install.
@@ -5986,6 +5988,8 @@ components:
           type: string
           enum: [docker, daytona]
         api_key_saved:
+          type: boolean
+        allow_local:
           type: boolean
 
     InstallGithubTokenTestInput:
