@@ -12,6 +12,7 @@
 
 pub(crate) mod anthropic_messages;
 pub(crate) mod openai_compatible;
+pub(crate) mod openai_responses;
 
 use fabro_model::Model;
 
@@ -42,7 +43,8 @@ pub(crate) struct CodecCtx<'a> {
 /// Per-route dialect knobs, expressed as data so one codec can serve several
 /// routes. The default is inert ("nothing special"); a route that needs a
 /// dialect quirk sets the relevant field. Grows as codecs need it — #459 adds
-/// `ModelPlacement` for Bedrock.
+/// `ModelPlacement` for Bedrock. Inert for codecs that don't read a given
+/// field.
 #[derive(Debug, Default, Clone)]
 pub(crate) struct CodecParams {
     /// Where/whether to place the Anthropic API version. Direct Anthropic uses
@@ -52,6 +54,12 @@ pub(crate) struct CodecParams {
     /// Whether to emit Anthropic beta headers (prompt-caching / fast-mode /
     /// 1M-context). True on the direct route, false for Kimi-over-anthropic.
     pub anthropic_beta:    bool,
+    /// Codex-endpoint dialect for the openai_responses codec: omit the
+    /// sampling params (`temperature`/`top_p`/`max_output_tokens`) the Codex
+    /// endpoint rejects and always send `instructions` (empty string when the
+    /// request has none). The transport-side half of codex mode (forced
+    /// streaming) is route config, not codec data.
+    pub openai_codex:      bool,
 }
 
 /// Placement of the Anthropic API version on the wire.
@@ -83,8 +91,9 @@ pub(crate) struct EncodedRequest {
 
 /// One framed item off the byte stream, handed to a [`StreamDecoder`].
 pub(crate) struct RawEvent<'a> {
-    /// SSE `event:` type — `Some` for anthropic; `None` for the data-only
-    /// framing openai/gemini use.
+    /// SSE `event:` type — `Some` when the framing carries one (anthropic,
+    /// openai responses); `None` for the data-only framing
+    /// openai_compatible/gemini use.
     pub event: Option<&'a str>,
     /// The `data:` payload, or a bare JSON line. The sentinel `[DONE]` is
     /// passed through verbatim for the decoder to recognize.
