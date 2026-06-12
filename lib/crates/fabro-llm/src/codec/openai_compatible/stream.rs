@@ -28,6 +28,9 @@ pub(super) struct StreamState {
     /// True after `finish_events()` has run (guards against duplicates).
     finished:              bool,
     rate_limit:            Option<RateLimitInfo>,
+    /// In-band USD cost from the usage chunk (OpenRouter), surfaced as
+    /// authoritative on the final response.
+    cost_usd:              Option<f64>,
 }
 
 impl StreamState {
@@ -46,6 +49,7 @@ impl StreamState {
             custom_tool_names: super::translate::custom_tool_names(ctx.request),
             finished: false,
             rate_limit,
+            cost_usd: None,
         }
     }
 
@@ -65,11 +69,9 @@ impl StreamState {
 
         // Capture usage if present (often in a dedicated chunk).
         if let Some(usage) = &chunk.usage {
-            self.usage = TokenCounts {
-                input_tokens: usage.prompt_tokens,
-                output_tokens: usage.completion_tokens,
-                ..TokenCounts::default()
-            };
+            self.usage = usage.token_counts();
+            // Keep a previously seen cost when a later usage chunk omits it.
+            self.cost_usd = usage.cost.or(self.cost_usd);
         }
 
         let choices = chunk.choices.as_ref()?;
@@ -222,8 +224,8 @@ impl StreamState {
             raw:           None,
             warnings:      vec![],
             rate_limit:    self.rate_limit.clone(),
-            cost_usd:      None,
-            cost_source:   None,
+            cost_usd:      self.cost_usd,
+            cost_source:   super::translate::authoritative_cost_source(self.cost_usd),
         };
 
         events.push(StreamEvent::finish(

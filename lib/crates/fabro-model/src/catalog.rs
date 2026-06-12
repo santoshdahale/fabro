@@ -79,6 +79,11 @@ pub struct ModelCatalogSettings {
     /// accepted today.
     #[serde(default)]
     pub codec:                Option<CodecKind>,
+    /// Billing family for this model, overriding the provider's policy
+    /// (e.g. Anthropic cache billing for a Claude model served through an
+    /// aggregator whose other models bill OpenAI-style).
+    #[serde(default)]
+    pub billing_policy:       Option<BillingPolicy>,
     #[serde(default)]
     pub agent_profile:        Option<AgentProfileKind>,
     #[serde(default)]
@@ -519,14 +524,17 @@ pub struct CatalogModelControls {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct CatalogModelSettings {
-    pub api_id:        String,
+    pub api_id:         String,
     /// Wire dialect for this model's route (the provider codec unless the
     /// model row overrides it).
-    pub codec:         CodecKind,
-    pub agent_profile: AgentProfileKind,
-    pub controls:      CatalogModelControls,
-    pub speed_costs:   HashMap<Speed, ModelCosts>,
-    probe:             bool,
+    pub codec:          CodecKind,
+    /// Billing family for this model (the provider policy unless the model
+    /// row overrides it).
+    pub billing_policy: BillingPolicy,
+    pub agent_profile:  AgentProfileKind,
+    pub controls:       CatalogModelControls,
+    pub speed_costs:    HashMap<Speed, ModelCosts>,
+    probe:              bool,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -933,6 +941,24 @@ impl Catalog {
         Some(model_codec.unwrap_or(provider.codec))
     }
 
+    /// The billing family for `model_id_or_alias` on `provider_id`: the model
+    /// row's policy when one is configured, otherwise the provider's (unknown
+    /// passthrough model ids keep the provider policy).
+    #[must_use]
+    pub fn effective_billing_policy(
+        &self,
+        provider_id: &ProviderId,
+        model_id_or_alias: Option<&str>,
+    ) -> Option<BillingPolicy> {
+        let provider = self.provider(provider_id)?;
+        let model_policy = model_id_or_alias
+            .and_then(|model_id| self.get(model_id))
+            .filter(|model| model.provider == provider.id)
+            .and_then(|model| self.model_settings.get(&model.id))
+            .map(|settings| settings.billing_policy);
+        Some(model_policy.unwrap_or(provider.billing_policy))
+    }
+
     /// List all models, optionally filtered by provider.
     #[must_use]
     pub fn list(&self, provider: Option<&ProviderId>) -> Vec<&Model> {
@@ -1185,6 +1211,7 @@ fn merge_model_settings(
         provider:             higher.provider.or(fallback.provider),
         api_id:               higher.api_id.or(fallback.api_id),
         codec:                higher.codec.or(fallback.codec),
+        billing_policy:       higher.billing_policy.or(fallback.billing_policy),
         agent_profile:        higher.agent_profile.or(fallback.agent_profile),
         display_name:         higher.display_name.or(fallback.display_name),
         family:               higher.family.or(fallback.family),
@@ -1485,6 +1512,7 @@ fn build_model(
             .clone()
             .unwrap_or_else(|| model_id.to_string()),
         codec: resolve_model_codec(model_id, provider, settings.codec)?,
+        billing_policy: settings.billing_policy.unwrap_or(provider.billing_policy),
         agent_profile: settings.agent_profile.unwrap_or(provider.agent_profile),
         controls,
         speed_costs,
@@ -1884,6 +1912,57 @@ reasoning = false
         let model = catalog.get("al").expect("model alias should resolve");
         assert_eq!(model.id, "acme-large");
         assert_eq!(model.provider, ProviderId::new("acme"));
+    }
+
+    #[test]
+    fn builtin_openrouter_provider_is_opt_in() {
+        let openrouter = ProviderId::new("openrouter");
+        let builtin = Catalog::builtin();
+
+        assert!(builtin.provider(&openrouter).is_none());
+        assert!(builtin.list(Some(&openrouter)).is_empty());
+
+        let catalog = Catalog::from_builtin_with_overrides(&minimal_settings(
+            r"
+[providers.openrouter]
+enabled = true
+",
+        ))
+        .expect("enabled OpenRouter override should build from the built-in provider settings");
+
+        let provider = catalog
+            .provider(&openrouter)
+            .expect("enabled OpenRouter provider should be present");
+        assert_eq!(provider.adapter, AdapterKind::OpenAiCompatible);
+        assert_eq!(provider.codec, CodecKind::OpenAiCompatible);
+        assert_eq!(
+            provider.base_url.as_deref(),
+            Some("https://openrouter.ai/api/v1")
+        );
+        assert_eq!(provider.billing_policy, BillingPolicy::OpenAi);
+
+        // Claude rows override the provider's OpenAI billing default;
+        // open-weights rows inherit it.
+        assert_eq!(
+            catalog
+                .model_settings("anthropic/claude-sonnet-4-6")
+                .unwrap()
+                .billing_policy,
+            BillingPolicy::Anthropic
+        );
+        assert_eq!(
+            catalog
+                .model_settings("deepseek/deepseek-v4-flash")
+                .unwrap()
+                .billing_policy,
+            BillingPolicy::OpenAi
+        );
+        assert_eq!(
+            catalog
+                .default_for_provider(&openrouter)
+                .map(|model| model.id.as_str()),
+            Some("anthropic/claude-sonnet-4-6")
+        );
     }
 
     #[test]
